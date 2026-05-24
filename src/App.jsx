@@ -156,17 +156,9 @@ function LoginScreen({onLogin}) {
   return (
     <div style={{minHeight:"100vh",background:"#F8FAFC",display:"flex",flexDirection:"column"}}>
       <div style={{background:"#3D2E14",padding:"16px 24px",display:"flex",alignItems:"center",gap:14}}>
-        <svg width="44" height="44" viewBox="0 0 48 48">
-          <circle cx="24" cy="24" r="22" fill="none" stroke="#E8A030" strokeWidth="2.5"/>
-          <circle cx="24" cy="24" r="3" fill="#E8A030"/>
-          <circle cx="24" cy="2" r="2.5" fill="#E8A030"/>
-          <circle cx="24" cy="46" r="2.5" fill="#E8A030"/>
-          <circle cx="2" cy="24" r="2.5" fill="#E8A030"/>
-          <circle cx="46" cy="24" r="2.5" fill="#E8A030"/>
-          <text x="24" y="29" textAnchor="middle" fontSize="15" fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" fill="#F5C060">DJC</text>
-        </svg>
+        <img src="/logo.jpg" alt="DJC Joiner Logo" style={{width:52,height:52,borderRadius:"50%",objectFit:"cover"}}/>
         <div>
-          <div style={{fontSize:20,fontWeight:700,color:"#FFF8EC"}}>DJC Joiner</div>
+          <div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>DJC Joiner</div>
           <div style={{fontSize:11,color:"#E8A030",letterSpacing:"2px",textTransform:"uppercase"}}>Consulting · Mentoring · Growth</div>
         </div>
       </div>
@@ -522,8 +514,8 @@ function MainApp({currentUser,onLogout}) {
   if(loading) return (
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
       <div style={{background:"#3D2E14",padding:"14px 24px",display:"flex",alignItems:"center",gap:14}}>
-        <svg width="44" height="44" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="none" stroke="#E8A030" strokeWidth="2.5"/><text x="24" y="29" textAnchor="middle" fontSize="15" fontWeight="700" fill="#F5C060">DJC</text></svg>
-        <div><div style={{fontSize:20,fontWeight:700,color:"#FFF8EC"}}>DJC Joiner</div><div style={{fontSize:11,color:"#E8A030",letterSpacing:"2px",textTransform:"uppercase"}}>Consulting · Mentoring · Growth</div></div>
+        <img src="/logo.jpg" alt="DJC Joiner Logo" style={{width:52,height:52,borderRadius:"50%",objectFit:"cover"}}/>
+        <div><div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>DJC Joiner</div><div style={{fontSize:11,color:"#E8A030",letterSpacing:"2px",textTransform:"uppercase"}}>Consulting · Mentoring · Growth</div></div>
       </div>
       <Spinner text="Loading schedule..."/>
     </div>
@@ -536,17 +528,9 @@ function MainApp({currentUser,onLogout}) {
       <div style={{background:"#3D2E14",padding:"0 24px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <svg width="48" height="48" viewBox="0 0 48 48">
-              <circle cx="24" cy="24" r="22" fill="none" stroke="#E8A030" strokeWidth="2.5"/>
-              <circle cx="24" cy="24" r="3" fill="#E8A030"/>
-              <circle cx="24" cy="2" r="2.5" fill="#E8A030"/>
-              <circle cx="24" cy="46" r="2.5" fill="#E8A030"/>
-              <circle cx="2" cy="24" r="2.5" fill="#E8A030"/>
-              <circle cx="46" cy="24" r="2.5" fill="#E8A030"/>
-              <text x="24" y="29" textAnchor="middle" fontSize="15" fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" fill="#F5C060" letterSpacing="0.5">DJC</text>
-            </svg>
+            <img src="/logo.jpg" alt="DJC Joiner Logo" style={{width:52,height:52,borderRadius:"50%",objectFit:"cover"}}/>
             <div>
-              <div style={{fontSize:20,fontWeight:700,color:"#FFF8EC",lineHeight:1.2}}>DJC Joiner</div>
+              <div style={{fontSize:20,fontWeight:700,color:"#E8A030",lineHeight:1.2}}>DJC Joiner</div>
               <div style={{fontSize:11,color:"#E8A030",letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>Consulting · Mentoring · Growth</div>
             </div>
             <div style={{width:1,height:36,background:"#E8A030",opacity:0.35,margin:"0 8px"}}/>
