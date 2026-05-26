@@ -46,6 +46,23 @@ function buildAutoFill(startDateStr, totalHours) {
   return days;
 }
 
+// Auto-fill using productive hours per day (slot shows 8h, deducts productiveHours)
+function buildAutoFillProductive(startDateStr, totalHours, productiveHoursPerDay) {
+  if (!totalHours||totalHours<=0) return [];
+  const ph = productiveHoursPerDay||8;
+  const days=[]; let remaining=totalHours; let cur=parseISO(startDateStr);
+  while (remaining>0) {
+    if (!isWeekend(cur)) {
+      // Always schedule 8h slot but only deduct ph from budget
+      days.push({dateStr:isoDate(cur),hours:8,deducted:Math.min(ph,remaining)});
+      remaining-=ph;
+    }
+    cur=addDays(cur,1);
+    if (days.length>365) break;
+  }
+  return days;
+}
+
 const JOB_COLOUR_PRESETS = [
   {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"},
   {bgColor:"#F0FDF4",borderColor:"#22C55E",textColor:"#15803D"},
@@ -282,7 +299,7 @@ function UserManagementModal({onClose}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,productiveHours}) {
   return (
     <div
       draggable={canEdit}
@@ -293,7 +310,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       <div style={{fontSize:11,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{job.jobNo} · {job.name}</div>
       <div style={{fontSize:11,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{subItem?subItem.name:"General"}</div>
-      <div style={{fontSize:10,color:conflict?"#EF4444":job.textColor,opacity:0.7}}>{hours}h</div>
+      <div style={{fontSize:10,color:conflict?"#EF4444":job.textColor,opacity:0.7}}>{hours}h {productiveHours&&productiveHours<8?<span style={{opacity:0.7}}>· {productiveHours}h eff</span>:""}</div>
     </div>
   );
 }
@@ -306,6 +323,22 @@ function EmptySlot({onClick,isDropTarget,isPastDate,canEdit}) {
       onMouseEnter={e=>{if(!isDropTarget){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
       onMouseLeave={e=>{if(!isDropTarget){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
       {isDropTarget?"↓":"+"}
+    </div>
+  );
+}
+
+
+function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit}) {
+  return (
+    <div
+      draggable={canEdit}
+      onDragStart={canEdit?e=>onDragStart(e,entry):undefined}
+      onDragEnd={canEdit?onDragEnd:undefined}
+      onClick={canEdit?onClick:undefined}
+      style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:6,padding:"3px 6px",cursor:canEdit?"grab":"default",minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
+      <div style={{fontSize:11,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📌 {note}</div>
+      <div style={{fontSize:10,color:conflict?"#EF4444":"#64748B",opacity:0.8}}>{hours}h</div>
     </div>
   );
 }
@@ -357,10 +390,10 @@ function MainApp({currentUser,onLogout}) {
         db("GET","sub_items","","?order=created_at"),
         db("GET","entries","","?order=created_at"),
       ]);
-      setStaff(staffData.map(s=>({id:s.id,name:s.name})));
+      setStaff(staffData.map(s=>({id:s.id,name:s.name,productiveHours:s.productive_hours||8})));
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:s.total_hours||0})));
-      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours})));
+      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null})));
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -399,9 +432,9 @@ function MainApp({currentUser,onLogout}) {
 
   function openNewEntry(staffId,dateStr,slot){
     if (!canEdit||isPast(dateStr)) return;
-    setEntryModal({mode:"new",staffId,dateStr,slot,jobId:"",subItemId:"",hours:8,autoFill:true});
+    setEntryModal({mode:"new",staffId,dateStr,slot,jobId:"",subItemId:"",hours:8,autoFill:true,miscNote:"",entryType:"job"});
   }
-  function openEditEntry(entry){if(!canEdit)return;setEntryModal({mode:"edit",...entry,autoFill:false});}
+  function openEditEntry(entry){if(!canEdit)return;setEntryModal({mode:"edit",...entry,autoFill:false,entryType:entry.miscNote?"misc":"job"});}
 
   async function saveEntry(data,extraEntries){
     setSaving(true);
@@ -416,20 +449,20 @@ function MainApp({currentUser,onLogout}) {
             message:`⚠ ${conflicts.length} date${conflicts.length>1?"s":""} already have an entry in that slot. They will be shown in red.`,
             onConfirm:async()=>{
               setSaving(true);
-              const rows=valid.map(({dateStr,hours})=>({staff_id:data.staffId,job_id:data.jobId,sub_item_id:data.subItemId||null,date_str:dateStr,slot:data.slot,hours}));
+              const rows=valid.map(({dateStr,hours})=>({staff_id:data.staffId,job_id:data.entryType==="misc"?null:data.jobId,sub_item_id:data.entryType==="misc"?null:data.subItemId||null,date_str:dateStr,slot:data.slot,hours,misc_note:data.entryType==="misc"?data.miscNote:null}));
               const inserted=await db("POST","entries",rows);
-              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours}))]);
+              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null}))]);
               setConflictAlert(null);setEntryModal(null);setTab("schedule");setSaving(false);
             },
             onCancel:()=>setConflictAlert(null),
           });
           return;
         }
-        const rows=valid.map(({dateStr,hours})=>({staff_id:data.staffId,job_id:data.jobId,sub_item_id:data.subItemId||null,date_str:dateStr,slot:data.slot,hours}));
+        const rows=valid.map(({dateStr,hours})=>({staff_id:data.staffId,job_id:data.entryType==="misc"?null:data.jobId,sub_item_id:data.entryType==="misc"?null:data.subItemId||null,date_str:dateStr,slot:data.slot,hours,misc_note:data.entryType==="misc"?data.miscNote:null}));
         const inserted=await db("POST","entries",rows);
-        setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours}))]);
+        setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null}))]);
       } else {
-        await db("PATCH","entries",{staff_id:data.staffId,job_id:data.jobId,sub_item_id:data.subItemId||null,date_str:data.dateStr,slot:data.slot,hours:data.hours},`?id=eq.${data.id}`);
+        await db("PATCH","entries",{staff_id:data.staffId,job_id:data.entryType==="misc"?null:data.jobId,sub_item_id:data.entryType==="misc"?null:data.subItemId||null,date_str:data.dateStr,slot:data.slot,hours:data.hours,misc_note:data.entryType==="misc"?data.miscNote:null},`?id=eq.${data.id}`);
         setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId,subItemId:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours}:e));
       }
       setEntryModal(null);setTab("schedule");
@@ -479,8 +512,8 @@ function MainApp({currentUser,onLogout}) {
   async function saveStaff(data){
     setSaving(true);
     try{
-      if(data.isNew){const [ns]=await db("POST","staff",[{name:data.name}]);setStaff(prev=>[...prev,{id:ns.id,name:ns.name}]);}
-      else{await db("PATCH","staff",{name:data.name},`?id=eq.${data.id}`);setStaff(prev=>prev.map(s=>s.id===data.id?{...s,name:data.name}:s));}
+      if(data.isNew){const [ns]=await db("POST","staff",[{name:data.name,productive_hours:data.productiveHours||8}]);setStaff(prev=>[...prev,{id:ns.id,name:ns.name,productiveHours:ns.productive_hours||8}]);}
+      else{await db("PATCH","staff",{name:data.name,productive_hours:data.productiveHours||8},`?id=eq.${data.id}`);setStaff(prev=>prev.map(s=>s.id===data.id?{...s,name:data.name,productiveHours:data.productiveHours||8}:s));}
       setStaffModal(null);
     }catch(e){setError("Failed to save staff.");}
     setSaving(false);
@@ -687,8 +720,10 @@ function MainApp({currentUser,onLogout}) {
                             onDragLeave={handleDragLeave}
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry&&job
-                              ?<JobBlock job={job} subItem={subItem} hours={entry.hours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit}/>
-                              :<EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit}/>
+                              entry.miscNote
+                                ?<MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit}/>
+                                :job?<JobBlock job={job} subItem={subItem} hours={entry.hours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} productiveHours={staff.find(s=>s.id===entry.staffId)?.productiveHours||8}/>
+                                :<EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit}/>
                             }
                           </td>
                         );
@@ -767,7 +802,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
               <thead>
                 <tr style={{background:"#F8FAFC",borderBottom:"1px solid #E2E8F0"}}>
-                  {["Joinery Item","Budget","Scheduled","Remaining","Dates","Staff",""].map((h,i)=>(
+                  {["Joinery Item","Budget","Deducted","Remaining","Dates","Staff",""].map((h,i)=>(
                     <th key={i} style={{padding:"7px 12px",textAlign:"left",fontWeight:600,color:"#64748B",fontSize:12}}>{h}</th>
                   ))}
                 </tr>
@@ -776,7 +811,13 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                 {jobSubs.map((si,rowi)=>{
                   const siEntries=jobEntries.filter(e=>e.subItemId===si.id);
                   const siDates=siEntries.map(e=>e.dateStr).sort();
-                  const scheduledHours=siEntries.reduce((a,e)=>a+e.hours,0);
+                  const scheduledHours=siEntries.reduce((a,e)=>{
+                  const st=staff.find(s=>s.id===e.staffId);
+                  const ph=st?.productiveHours||8;
+                  // hours shown is always 8 per slot day, but deduct productive hours
+                  const days=e.hours/8; // number of days this entry represents
+                  return a+(days*ph);
+                },0);
                   const remaining=(si.totalHours||0)-scheduledHours;
                   const assignedStaff=[...new Set(siEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ");
                   let dateDisplay;
@@ -821,7 +862,7 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
   const [form,setForm]=useState(()=>{
     const jobSubs=subItems.filter(s=>s.jobId===data.jobId);
     const defaultSub=data.subItemId||(jobSubs[0]?.id||"");
-    return {...data,subItemId:defaultSub,totalHours:data.totalHours||jobSubs[0]?.totalHours||0};
+    return {...data,subItemId:defaultSub,totalHours:data.totalHours||jobSubs[0]?.totalHours||0,entryType:data.entryType||"job",miscNote:data.miscNote||""};
   });
   const [autoFill,setAutoFill]=useState(data.autoFill!==false);
   function set(k,v){setForm(f=>({...f,[k]:v}));}
@@ -830,10 +871,29 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
   const totalHours=form.totalHours||selectedSub?.totalHours||0;
   function handleJobChange(jobId){const subs=subItems.filter(s=>s.jobId===jobId);const first=subs[0];setForm(f=>({...f,jobId,subItemId:first?.id||"",totalHours:first?.totalHours||0}));}
   function handleSubChange(subItemId){const sub=jobSubs.find(s=>s.id===subItemId);setForm(f=>({...f,subItemId,totalHours:sub?.totalHours||f.totalHours}));}
-  const preview=useMemo(()=>{if(!autoFill||!form.dateStr||!totalHours)return[];return buildAutoFill(form.dateStr,totalHours);},[autoFill,form.dateStr,totalHours]);
-  function handleSave(){if(!form.jobId)return;if(autoFill&&preview.length>0)onSave(form,preview.map(p=>({dateStr:p.dateStr,hours:p.hours})));else onSave(form,null);}
+  const selectedStaff=staff.find(s=>s.id===form.staffId);
+  const productiveHours=selectedStaff?.productiveHours||8;
+  const preview=useMemo(()=>{if(!autoFill||!form.dateStr||!totalHours)return[];return buildAutoFillProductive(form.dateStr,totalHours,productiveHours);},[autoFill,form.dateStr,totalHours,productiveHours]);
+  function handleSave(){
+    if(form.entryType==="misc"){if(!form.miscNote.trim())return;onSave(form,null);return;}
+    if(!form.jobId)return;
+    if(autoFill&&preview.length>0)onSave(form,preview.map(p=>({dateStr:p.dateStr,hours:p.hours})));
+    else onSave(form,null);
+  }
   return(
     <Modal title={form.mode==="new"?"New Schedule Entry":"Edit Schedule Entry"} onClose={onClose} small>
+      {/* Entry type switcher */}
+      <div style={{display:"flex",gap:6,marginBottom:12,background:"#F1F5F9",borderRadius:8,padding:3}}>
+        {[["job","📋 Job Entry"],["misc","📌 Misc Entry"]].map(([type,label])=>(
+          <button key={type} onClick={()=>set("entryType",type)}
+            style={{flex:1,padding:"6px",borderRadius:6,border:"none",fontSize:12,fontWeight:500,cursor:"pointer",
+              background:form.entryType===type?"#fff":"transparent",
+              color:form.entryType===type?"#1E293B":"#64748B",
+              boxShadow:form.entryType===type?"0 1px 3px rgba(0,0,0,0.1)":"none"}}>
+            {label}
+          </button>
+        ))}
+      </div>
       <Sel label="Staff Member" value={form.staffId} onChange={e=>set("staffId",e.target.value)}>
         <option value="">— Select staff —</option>
         {staff.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
@@ -842,17 +902,23 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
       <Sel label="Slot" value={form.slot} onChange={e=>set("slot",Number(e.target.value))}>
         <option value={0}>Slot 1</option><option value={1}>Slot 2</option>
       </Sel>
-      <Sel label="Job" value={form.jobId} onChange={e=>handleJobChange(e.target.value)}>
-        <option value="">— Select job —</option>
-        {jobs.map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}</option>)}
-      </Sel>
-      {form.jobId&&(
-        <Sel label="Joinery Item" value={form.subItemId||""} onChange={e=>handleSubChange(e.target.value)}>
-          {jobSubs.map(s=><option key={s.id} value={s.id}>{s.name}{s.totalHours?` (${s.totalHours}h budget)`:""}</option>)}
-          <option value="">General / no item</option>
-        </Sel>
+      {form.entryType==="misc"?(
+        <Inp label="Description (e.g. Wash Cars, Study Leave)" value={form.miscNote} onChange={e=>set("miscNote",e.target.value)} placeholder="Enter description..."/>
+      ):(
+        <>
+          <Sel label="Job" value={form.jobId} onChange={e=>handleJobChange(e.target.value)}>
+            <option value="">— Select job —</option>
+            {jobs.map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}</option>)}
+          </Sel>
+          {form.jobId&&(
+            <Sel label="Joinery Item" value={form.subItemId||""} onChange={e=>handleSubChange(e.target.value)}>
+              {jobSubs.map(s=><option key={s.id} value={s.id}>{s.name}{s.totalHours?` (${s.totalHours}h budget)`:""}</option>)}
+              <option value="">General / no item</option>
+            </Sel>
+          )}
+        </>
       )}
-      {form.mode==="new"&&(
+      {form.mode==="new"&&form.entryType!=="misc"&&(
         <div style={{marginBottom:10}}>
           <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155"}}>
             <input type="checkbox" checked={autoFill} onChange={e=>setAutoFill(e.target.checked)} style={{width:15,height:15}}/>
@@ -860,15 +926,15 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
           </label>
         </div>
       )}
-      {autoFill&&form.mode==="new"?(
+      {autoFill&&form.mode==="new"&&form.entryType!=="misc"?(
         <div style={{marginBottom:10}}>
           <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Schedule</div>
           <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours} (from budget)`:"Enter hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box",outline:"none"}}/>
           {preview.length>0&&(
             <div style={{marginTop:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px"}}>
-              <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+p.hours,0)}h total</div>
+              <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted from budget · {productiveHours}h/day productive rate</div>
               <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-                {preview.map((p,i)=><span key={i} style={{fontSize:11,background:"#DCFCE7",color:"#166534",borderRadius:4,padding:"2px 6px"}}>{formatDate(parseISO(p.dateStr))} · {p.hours}h</span>)}
+                {preview.map((p,i)=><span key={i} style={{fontSize:11,background:"#DCFCE7",color:"#166534",borderRadius:4,padding:"2px 6px"}}>{formatDate(parseISO(p.dateStr))} · 8h slot · {p.deducted||p.hours}h deducted</span>)}
               </div>
             </div>
           )}
@@ -941,10 +1007,20 @@ function JobModal({data,onSave,onDelete,onClose}) {
 // ── Staff Modal ───────────────────────────────────────────────
 
 function StaffModal({data,onSave,onRemove,onClose}) {
-  const [form,setForm]=useState({...data});
+  const [form,setForm]=useState({...data,productiveHours:data.productiveHours||8});
   return(
     <Modal title={form.isNew?"New Staff Member":"Edit Staff Member"} onClose={onClose} small>
       <Inp label="Name" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Productive hours per 8h day</div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <input type="range" min={1} max={8} step={0.5} value={form.productiveHours}
+            onChange={e=>setForm(f=>({...f,productiveHours:Number(e.target.value)}))}
+            style={{flex:1,accentColor:"#3B82F6"}}/>
+          <div style={{minWidth:40,textAlign:"center",fontWeight:700,fontSize:15,color:"#1E293B"}}>{form.productiveHours}h</div>
+        </div>
+        <div style={{fontSize:11,color:"#94A3B8",marginTop:3}}>Slot shows 8h but deducts {form.productiveHours}h from job budget</div>
+      </div>
       <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
         <div>{!form.isNew&&<Btn variant="danger" onClick={()=>onRemove(form.id)}>Remove Staff</Btn>}</div>
         <div style={{display:"flex",gap:8}}>
