@@ -1,7 +1,22 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 
-const SUPABASE_URL = "https://oixsdxhndezbymllkpqk.supabase.co";
-const SUPABASE_KEY = "sb_publishable_AgjgZclgWWtRM8VGLn1How_2NQjjeeP";
+// ╔══════════════════════════════════════════════════════════════╗
+// ║           CLIENT CONFIGURATION — EDIT THIS SECTION           ║
+// ╠══════════════════════════════════════════════════════════════╣
+
+const CLIENT_NAME     = "DJC Joiner";
+const CLIENT_TAGLINE  = "Consulting · Mentoring · Growth";
+const CLIENT_LOGO     = "/logo.jpg";
+const PAGE_TITLE      = "Production Schedule";
+
+const BRAND_HEADER_BG = "#3D2E14";
+const BRAND_GOLD      = "#E8A030";
+const BRAND_CREAM     = "#FFF8EC";
+
+const SUPABASE_URL    = "https://oixsdxhndezbymllkpqk.supabase.co";
+const SUPABASE_KEY    = "sb_publishable_AgjgZclgWWtRM8VGLn1How_2NQjjeeP";
+
+// ╚══════════════════════════════════════════════════════════════╝
 
 async function db(method, table, body, query="") {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
@@ -195,11 +210,11 @@ function LoginScreen({onLogin}) {
 
   return (
     <div style={{minHeight:"100vh",background:"#F8FAFC",display:"flex",flexDirection:"column"}}>
-      <div style={{background:"#3D2E14",padding:"16px 24px",display:"flex",alignItems:"center",gap:14}}>
-        <img src="/logo.jpg" alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
+      <div style={{background:BRAND_HEADER_BG,padding:"16px 24px",display:"flex",alignItems:"center",gap:14}}>
+        <img src={CLIENT_LOGO} alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
         <div>
-          <div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>DJC Joiner</div>
-          <div style={{fontSize:11,color:"#E8A030",letterSpacing:"2px",textTransform:"uppercase"}}>Consulting · Mentoring · Growth</div>
+          <div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{CLIENT_NAME}</div>
+          <div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{CLIENT_TAGLINE}</div>
         </div>
       </div>
       <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
@@ -213,7 +228,7 @@ function LoginScreen({onLogin}) {
             <Inp label="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password"/>
             {error&&<div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#DC2626",marginBottom:12}}>{error}</div>}
             <button type="submit" disabled={loading}
-              style={{width:"100%",padding:"10px",borderRadius:8,border:"none",background:"#3D2E14",color:"#E8A030",fontSize:15,fontWeight:600,cursor:loading?"not-allowed":"pointer",marginTop:4}}>
+              style={{width:"100%",padding:"10px",borderRadius:8,border:"none",background:BRAND_HEADER_BG,color:"#E8A030",fontSize:15,fontWeight:600,cursor:loading?"not-allowed":"pointer",marginTop:4}}>
               {loading?"Signing in...":"Sign In"}
             </button>
           </form>
@@ -536,9 +551,9 @@ function MainApp({currentUser,onLogout}) {
 
   if(loading) return (
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
-      <div style={{background:"#3D2E14",padding:"14px 24px",display:"flex",alignItems:"center",gap:14}}>
-        <img src="/logo.jpg" alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
-        <div><div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>DJC Joiner</div><div style={{fontSize:11,color:"#E8A030",letterSpacing:"2px",textTransform:"uppercase"}}>Consulting · Mentoring · Growth</div></div>
+      <div style={{background:BRAND_HEADER_BG,padding:"14px 24px",display:"flex",alignItems:"center",gap:14}}>
+        <img src={CLIENT_LOGO} alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
+        <div><div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{CLIENT_NAME}</div><div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{CLIENT_TAGLINE}</div></div>
       </div>
       <Spinner text="Loading schedule..."/>
     </div>
@@ -548,13 +563,13 @@ function MainApp({currentUser,onLogout}) {
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
 
       {/* Header */}
-      <div style={{background:"#3D2E14",padding:"0 24px"}}>
+      <div style={{background:BRAND_HEADER_BG,padding:"0 24px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <img src="/logo.jpg" alt="Logo" style={{height:48,maxWidth:130,objectFit:"contain"}}/>
+            <img src={CLIENT_LOGO} alt="Logo" style={{height:48,maxWidth:130,objectFit:"contain"}}/>
             <div>
-              <div style={{fontSize:20,fontWeight:700,color:"#E8A030",lineHeight:1.2}}>DJC Joiner</div>
-              <div style={{fontSize:11,color:"#E8A030",letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>Consulting · Mentoring · Growth</div>
+              <div style={{fontSize:20,fontWeight:700,color:BRAND_GOLD,lineHeight:1.2}}>{CLIENT_NAME}</div>
+              <div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{CLIENT_TAGLINE}</div>
             </div>
             <div style={{width:1,height:36,background:"#E8A030",opacity:0.35,margin:"0 8px"}}/>
             <div style={{fontSize:14,color:"#FFF8EC",opacity:0.7}}>Production Schedule</div>
