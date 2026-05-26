@@ -153,9 +153,7 @@ function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,o
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       <div style={{fontSize:11,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{job.jobNo} · {job.name}</div>
       <div style={{fontSize:11,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{subItem?subItem.name:"General"}</div>
-      <div style={{fontSize:10,color:conflict?"#EF4444":job.textColor,opacity:0.7}}>
-        {hours}h {productiveHours&&productiveHours<8?<span>· {productiveHours}h eff</span>:""}
-      </div>
+      <div style={{fontSize:10,color:conflict?"#EF4444":job.textColor,opacity:0.7}}>{hours}h</div>
     </div>
   );
 }
