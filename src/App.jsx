@@ -671,8 +671,9 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Schedule Tab */}
       {tab==="schedule"&&(
-        <div style={{padding:16,position:"relative",zIndex:1}}>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+        <div style={{padding:"0 16px 16px",position:"relative",zIndex:1}}>
+          <div style={{position:"sticky",top:115,zIndex:50,background:"#F8FAFC",paddingTop:12,paddingBottom:8,marginBottom:4}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
               {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],["month","Month"]].map(([v,label])=>(
                 <button key={v} onClick={()=>{if(v==="month"){setViewMode("month");}else{setViewMode("weeks");setViewWeeks(v);}}}
@@ -701,6 +702,7 @@ function MainApp({currentUser,onLogout}) {
             </div>
           )}
 
+          </div>{/* end sticky controls */}
           {canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <span>💡 Drag any block to reassign · Past slots locked · Click + for job or misc entry</span>
             {copyMode&&copiedEntry&&(
@@ -711,7 +713,7 @@ function MainApp({currentUser,onLogout}) {
           </div>}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
 
-          <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 220px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff"}}>
+          <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff"}}>
             <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"fixed"}}>
               <colgroup>
                 <col style={{width:110}}/>
@@ -722,7 +724,7 @@ function MainApp({currentUser,onLogout}) {
                   <tr>
                     <td style={{border:"1px solid #E2E8F0",background:"#F8FAFC"}}/>
                     {weekStarts.map((ws,wi)=>(
-                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,background:"#F1F5F9"position:"sticky",top:0,zIndex:9,background:"#F1F5F9"}}>Week of {formatDate(ws)}</td>
+                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,background:"#F1F5F9"position:"sticky",top:205,zIndex:9,background:"#F1F5F9"}}>Week of {formatDate(ws)}</td>
                     ))}
                   </tr>
                 )}
@@ -733,7 +735,7 @@ function MainApp({currentUser,onLogout}) {
                     const weekIdx=Math.floor(i/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
                     const isSat=d.getDay()===6;
                     return(
-                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9,background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC"}}>
+                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:205,zIndex:9,background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC"}}>
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
                       </th>
                     );
