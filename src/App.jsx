@@ -722,14 +722,14 @@ function MainApp({currentUser,onLogout}) {
               <thead>
                 {totalWeeks>1&&(
                   <tr>
-                    <td style={{border:"1px solid #E2E8F0",background:"#F8FAFC"}}/>
+                    <td style={{border:"1px solid #E2E8F0",background:"#F8FAFC",position:"sticky",top:0,zIndex:10}}/>
                     {weekStarts.map((ws,wi)=>(
-                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10}}>Week of {formatDate(ws)}</td>
+                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"3px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10}}>Week of {formatDate(ws)}</td>
                     ))}
                   </tr>
                 )}
                 <tr>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:33,zIndex:9,background:"#F8FAFC"}}>Staff</th>
+                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:33,zIndex:9,background:"#F8FAFC"}}></th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
