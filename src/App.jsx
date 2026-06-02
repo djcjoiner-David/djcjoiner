@@ -712,7 +712,7 @@ function MainApp({currentUser,onLogout}) {
           </div>}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
 
-          <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff"}}>
+          <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 200px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff"}}>
             <table style={{borderCollapse:"collapse",minWidth:"100%",tableLayout:"fixed"}}>
               <colgroup>
                 <col style={{width:110}}/><col style={{width:44}}/>
@@ -723,18 +723,18 @@ function MainApp({currentUser,onLogout}) {
                   <tr>
                     <td colSpan={2} style={{border:"1px solid #E2E8F0",background:"#F8FAFC"}}/>
                     {weekStarts.map((ws,wi)=>(
-                      <td key={wi} colSpan={5} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10}}>Week of {formatDate(ws)}</td>
+                      <td key={wi} colSpan={5} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,backdropFilter:"blur(0)"}}>Week of {formatDate(ws)}</td>
                     ))}
                   </tr>
                 )}
                 <tr>
                   <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,left:0,zIndex:20}}>Staff</th>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px",fontSize:11,color:"#94A3B8",textAlign:"center",position:"sticky",top:0,left:110,zIndex:20}}>Slot</th>
+                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px",fontSize:11,color:"#94A3B8",textAlign:"center",}}>Slot</th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
                     return(
-                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:10}}>
+                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:10,backdropFilter:"blur(0)"}}>
                         <div>{d.toLocaleDateString("en-AU",{weekday:"short"})}</div>
                         <div style={{fontSize:12,fontWeight:600}}>{d.getDate()}</div>
                         <div style={{fontSize:10,opacity:0.8}}>{d.toLocaleDateString("en-AU",{month:"short"})}</div>
@@ -755,7 +755,7 @@ function MainApp({currentUser,onLogout}) {
                           {canEdit&&<button onClick={()=>setStaffModal({isNew:false,...st})} style={{fontSize:11,color:"#94A3B8",background:"none",border:"1px solid #E2E8F0",borderRadius:4,padding:"1px 6px",cursor:"pointer"}}>Edit</button>}
                         </td>
                       )}
-                      <td style={{border:"1px solid #E2E8F0",padding:"2px 4px",fontSize:10,color:"#94A3B8",textAlign:"center",background:si%2===0?"#fff":"#FAFAFA",position:"sticky",left:110,zIndex:5}}>{slot===0?"S1":"S2"}</td>
+                      <td style={{border:"1px solid #E2E8F0",padding:"2px 4px",fontSize:10,color:"#94A3B8",textAlign:"center",background:si%2===0?"#fff":"#FAFAFA"}}>{slot===0?"S1":"S2"}</td>
                       {visibleDays.map((d,di)=>{
                         const ds=isoDate(d);const isToday=ds===todayStr;
                         const weekIdx=Math.floor(di/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
