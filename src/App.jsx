@@ -79,6 +79,16 @@ const JOB_COLOUR_PRESETS = [
   {bgColor:"#FEF9C3",borderColor:"#EAB308",textColor:"#854D0E"},
 ];
 
+
+const JOINERY_ITEM_PRESETS = [
+  "Kitchen W","Kitchen S","Pantry W","Pantry S",
+  "Butlers W","Butlers S","Laundry W","Laundry S",
+  "Vanity W","Vanity S","Robe W","Robe S",
+  "WIR W","WIR S","Mudroom W","Mudroom S",
+  "Living W","Living S","Office W","Office S",
+  "Delivery",
+];
+
 // ── UI Primitives ─────────────────────────────────────────────
 
 function ColorPicker({label,value,onChange}) {
@@ -146,11 +156,20 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit}) {
+function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode}) {
+  const [hovered,setHovered]=useState(false);
   return (
-    <div draggable={canEdit} onDragStart={canEdit?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined} onClick={canEdit?onClick:undefined}
-      style={{background:conflict?"#FEF2F2":job.bgColor,border:conflict?"2px solid #EF4444":`1.5px solid ${job.borderColor}`,borderRadius:6,padding:"3px 6px",cursor:canEdit?"grab":"default",minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+    <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
+      onClick={canEdit?onClick:undefined}
+      onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
+      style={{background:conflict?"#FEF2F2":job.bgColor,border:conflict?"2px solid #EF4444":`1.5px solid ${job.borderColor}`,borderRadius:6,padding:"3px 6px",cursor:canEdit?"pointer":"default",minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
+      {canEdit&&hovered&&!conflict&&(
+        <button onClick={e=>{e.stopPropagation();onCopy(entry);}}
+          style={{position:"absolute",top:2,right:conflict?50:4,fontSize:9,background:"rgba(0,0,0,0.15)",border:"none",borderRadius:3,padding:"1px 5px",cursor:"pointer",color:"#fff",fontWeight:600}}>
+          COPY
+        </button>
+      )}
       <div style={{fontSize:11,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{job.jobNo} · {job.name}</div>
       <div style={{fontSize:11,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{subItem?subItem.name:"General"}</div>
       <div style={{fontSize:10,color:conflict?"#EF4444":job.textColor,opacity:0.7}}>{hours}h</div>
@@ -160,12 +179,21 @@ function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,o
 
 // ── Misc Block ────────────────────────────────────────────────
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit}) {
+function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode}) {
+  const [hovered,setHovered]=useState(false);
   return (
-    <div draggable={canEdit} onDragStart={canEdit?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined} onClick={canEdit?onClick:undefined}
-      style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:6,padding:"3px 6px",cursor:canEdit?"grab":"default",minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+    <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
+      onClick={canEdit?onClick:undefined}
+      onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
+      style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:6,padding:"3px 6px",cursor:canEdit?"pointer":"default",minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      <div style={{fontSize:11,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📌 {note}</div>
+      {canEdit&&hovered&&!conflict&&(
+        <button onClick={e=>{e.stopPropagation();onCopy(entry);}}
+          style={{position:"absolute",top:2,right:4,fontSize:9,background:"rgba(0,0,0,0.15)",border:"none",borderRadius:3,padding:"1px 5px",cursor:"pointer",color:"#fff",fontWeight:600}}>
+          COPY
+        </button>
+      )}
+      <div style={{fontSize:11,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{note}</div>
       <div style={{fontSize:10,color:conflict?"#EF4444":"#64748B",opacity:0.8}}>{hours}h</div>
     </div>
   );
@@ -363,6 +391,8 @@ function MainApp({currentUser,onLogout}) {
   const [error,setError]=useState(null);
 
   const dragEntry=useRef(null);
+  const [copiedEntry,setCopiedEntry]=useState(null);
+  const [copyMode,setCopyMode]=useState(false);
   const [dropTarget,setDropTarget]=useState(null);
 
   const loadAll=useCallback(async()=>{
@@ -416,6 +446,21 @@ function MainApp({currentUser,onLogout}) {
 
   function openNewEntry(staffId,dateStr,slot){
     if(!canEdit||isPast(dateStr))return;
+    if(copyMode&&copiedEntry){
+      // Paste the copied entry into this slot
+      const pasteData={
+        mode:"new",staffId,dateStr,slot,
+        jobId:copiedEntry.jobId||"",
+        subItemId:copiedEntry.subItemId||"",
+        hours:copiedEntry.hours,
+        autoFill:false,
+        entryType:copiedEntry.miscNote?"misc":"job",
+        miscNote:copiedEntry.miscNote||"",
+        totalHours:0,
+      };
+      saveEntry(pasteData,null);
+      return;
+    }
     setEntryModal({mode:"new",staffId,dateStr,slot,jobId:"",subItemId:"",hours:8,autoFill:true,entryType:"job",miscNote:""});
   }
   function openEditEntry(entry){
@@ -542,6 +587,7 @@ function MainApp({currentUser,onLogout}) {
     dragEntry.current=null;
   }
   function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
+  function handleCopy(entry){setCopiedEntry(entry);setCopyMode(true);}
   function nextPreset(){return JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length];}
 
   const roleColors={admin:"#FEF3C7",manager:"#DBEAFE",staff:"#F0FDF4"};
@@ -656,7 +702,14 @@ function MainApp({currentUser,onLogout}) {
             </div>
           )}
 
-          {canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8}}>💡 Drag any block to reassign · Past slots locked · Click + for job or misc entry</div>}
+          {canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <span>💡 Drag any block to reassign · Past slots locked · Click + for job or misc entry</span>
+            {copyMode&&copiedEntry&&(
+              <span style={{background:"#DBEAFE",color:"#1D4ED8",borderRadius:6,padding:"3px 10px",fontWeight:600,fontSize:11}}>
+                📋 Copy mode — click any empty slot to paste · <button onClick={()=>{setCopyMode(false);setCopiedEntry(null);}} style={{background:"none",border:"none",color:"#1D4ED8",cursor:"pointer",fontWeight:600,fontSize:11}}>Cancel</button>
+              </span>
+            )}
+          </div>}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
 
           <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff"}}>
@@ -720,7 +773,7 @@ function MainApp({currentUser,onLogout}) {
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode}/>
                                 : job
                                   ? <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit}/>
                                   : <EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit}/>
@@ -897,7 +950,7 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
     <Modal title={form.mode==="new"?"New Schedule Entry":"Edit Schedule Entry"} onClose={onClose} small>
       {/* Entry type switcher */}
       <div style={{display:"flex",gap:6,marginBottom:12,background:"#F1F5F9",borderRadius:8,padding:3}}>
-        {[["job","📋 Job Entry"],["misc","📌 Misc Entry"]].map(([type,label])=>(
+        {[["job","📋 Job Entry"],["misc","Misc Entry"]].map(([type,label])=>(
           <button key={type} onClick={()=>set("entryType",type)}
             style={{flex:1,padding:"6px",borderRadius:6,border:"none",fontSize:12,fontWeight:500,cursor:"pointer",background:form.entryType===type?"#fff":"transparent",color:form.entryType===type?"#1E293B":"#64748B",boxShadow:form.entryType===type?"0 1px 3px rgba(0,0,0,0.1)":"none"}}>
             {label}
@@ -973,6 +1026,7 @@ function JobModal({data,onSave,onDelete,onClose}) {
   const [form,setForm]=useState({...data,subItems:data.subItems.map(s=>({...s}))});
   function set(k,v){setForm(f=>({...f,[k]:v}));}
   function addSubItem(){setForm(f=>({...f,subItems:[...f.subItems,{id:`new_${Date.now()}`,isNew:true,name:"",totalHours:0}]}));}
+  function addSubItemWithName(name){setForm(f=>({...f,subItems:[...f.subItems,{id:`new_${Date.now()}`,isNew:true,name:name==="__custom__"?"":name,totalHours:0}]}));}
   function setSubItem(idx,field,value){setForm(f=>{const s=[...f.subItems];s[idx]={...s[idx],[field]:value};return{...f,subItems:s};});}
   function removeSubItem(idx){setForm(f=>{const s=[...f.subItems];s.splice(idx,1);return{...f,subItems:s};});}
   return(
@@ -1003,7 +1057,20 @@ function JobModal({data,onSave,onDelete,onClose}) {
                 <button onClick={()=>removeSubItem(i)} style={{background:"none",border:"1px solid #FCA5A5",color:"#EF4444",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:13}}>×</button>
               </div>
             ))}
-            <Btn variant="ghost" onClick={addSubItem} style={{alignSelf:"flex-start",fontSize:12}}>+ Add Item</Btn>
+            {/* Preset dropdown + Add Item */}
+            <div style={{display:"flex",gap:6,alignItems:"center",marginTop:2}}>
+              <select
+                value=""
+                onChange={e=>{
+                  if(e.target.value) addSubItemWithName(e.target.value);
+                  e.target.value="";
+                }}
+                style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:13,background:"#fff",color:"#475569",outline:"none"}}>
+                <option value="">+ Add from preset list...</option>
+                {JOINERY_ITEM_PRESETS.map(p=><option key={p} value={p}>{p}</option>)}
+                <option value="__custom__">+ Custom item (blank)</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
