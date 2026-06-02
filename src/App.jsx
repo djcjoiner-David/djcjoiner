@@ -47,6 +47,7 @@ function mondayOf(d) { const day=d.getDay(); return addDays(d,day===0?-6:1-day);
 function formatDate(d) { return d.toLocaleDateString("en-AU",{day:"numeric",month:"short"}); }
 function formatDateLong(d) { return d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
 function isWeekend(d) { return d.getDay()===0||d.getDay()===6; }
+function isSaturday(d) { return d.getDay()===6; }
 function isPast(dateStr) { return dateStr < todayStr; }
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
 
@@ -428,7 +429,7 @@ function MainApp({currentUser,onLogout}) {
 
   const visibleDays=useMemo(()=>{
     const days=[];const weeks=viewMode==="month"?4:viewWeeks;
-    for(let w=0;w<weeks;w++)for(let d=0;d<5;d++)days.push(addDays(anchorDate,w*7+d));
+    for(let w=0;w<weeks;w++)for(let d=0;d<6;d++)days.push(addDays(anchorDate,w*7+d)); // Mon-Sat
     return days;
   },[anchorDate,viewWeeks,viewMode]);
 
@@ -575,7 +576,7 @@ function MainApp({currentUser,onLogout}) {
   }
 
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
-  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();setDropTarget({staffId,dateStr,slot});}
+  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
   async function handleDrop(e,staffId,dateStr,slot){
     e.preventDefault();setDropTarget(null);
@@ -687,7 +688,7 @@ function MainApp({currentUser,onLogout}) {
               <button onClick={goToday} style={{padding:"5px 14px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:13,color:"#475569"}}>Today</button>
               <button onClick={()=>navigate(1)} style={{padding:"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:16,color:"#475569"}}>›</button>
             </div>
-            <span style={{fontSize:13,color:"#64748B"}}>{formatDate(anchorDate)} – {formatDate(addDays(anchorDate,totalWeeks*7-3))}</span>
+            <span style={{fontSize:13,color:"#64748B"}}>{formatDate(anchorDate)} – {formatDate(addDays(anchorDate,totalWeeks*7-2))}</span>
             <button onClick={loadAll} style={{marginLeft:"auto",padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:12,color:"#64748B"}}>↻ Refresh</button>
           </div>
 
@@ -721,15 +722,14 @@ function MainApp({currentUser,onLogout}) {
               <thead>
                 {totalWeeks>1&&(
                   <tr>
-                    <td colSpan={2} style={{border:"1px solid #E2E8F0",background:"#F8FAFC"}}/>
+                    <td style={{border:"1px solid #E2E8F0",background:"#F8FAFC"}}/>
                     {weekStarts.map((ws,wi)=>(
-                      <td key={wi} colSpan={5} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,backdropFilter:"blur(0)"}}>Week of {formatDate(ws)}</td>
+                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,backdropFilter:"blur(0)"}}>Week of {formatDate(ws)}</td>
                     ))}
                   </tr>
                 )}
                 <tr>
                   <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",left:0,zIndex:5,boxShadow:"2px 0 4px rgba(0,0,0,0.04)"}}>Staff</th>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px",fontSize:11,color:"#94A3B8",textAlign:"center",}}>Slot</th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
@@ -738,7 +738,7 @@ function MainApp({currentUser,onLogout}) {
                         <div>{d.toLocaleDateString("en-AU",{weekday:"short"})}</div>
                         <div style={{fontSize:12,fontWeight:600}}>{d.getDate()}</div>
                         <div style={{fontSize:10,opacity:0.8}}>{d.toLocaleDateString("en-AU",{month:"short"})}</div>
-                      </th>
+                      </th>);})()}
                     );
                   })}
                 </tr>
