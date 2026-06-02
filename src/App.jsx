@@ -713,9 +713,9 @@ function MainApp({currentUser,onLogout}) {
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
 
           <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 200px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff"}}>
-            <table style={{borderCollapse:"collapse",minWidth:"100%",tableLayout:"fixed"}}>
+            <table style={{borderCollapse:"collapse",minWidth:"100%",tableLayout:"fixed"}}><style>{`thead tr th, thead tr td { position: sticky; top: 0; z-index: 10; } `}</style>
               <colgroup>
-                <col style={{width:110}}/><col style={{width:44}}/>
+                <col style={{width:110}}/>
                 {visibleDays.map((_,i)=><col key={i} style={{width:118}}/>)}
               </colgroup>
               <thead>
@@ -728,7 +728,7 @@ function MainApp({currentUser,onLogout}) {
                   </tr>
                 )}
                 <tr>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,left:0,zIndex:20}}>Staff</th>
+                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",left:0,zIndex:5,boxShadow:"2px 0 4px rgba(0,0,0,0.04)"}}>Staff</th>
                   <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px",fontSize:11,color:"#94A3B8",textAlign:"center",}}>Slot</th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
@@ -750,12 +750,11 @@ function MainApp({currentUser,onLogout}) {
                   [0,1].map(slot=>(
                     <tr key={`${st.id}-${slot}`} style={{borderBottom:slot===1?"2px solid #CBD5E1":"none"}}>
                       {slot===0&&(
-                        <td rowSpan={2} style={{border:"1px solid #E2E8F0",borderBottom:"2px solid #CBD5E1",padding:"6px 10px",verticalAlign:"middle",background:si%2===0?"#fff":"#FAFAFA",position:"sticky",left:0,zIndex:5}}>
+                        <td rowSpan={2} style={{border:"1px solid #E2E8F0",borderBottom:"2px solid #CBD5E1",padding:"6px 10px",verticalAlign:"middle",background:si%2===0?"#fff":"#FAFAFA",position:"sticky",left:0,zIndex:5,boxShadow:"2px 0 4px rgba(0,0,0,0.04)"}}>
                           <div style={{fontWeight:600,fontSize:13,color:"#1E293B",marginBottom:2}}>{st.name}</div>
                           {canEdit&&<button onClick={()=>setStaffModal({isNew:false,...st})} style={{fontSize:11,color:"#94A3B8",background:"none",border:"1px solid #E2E8F0",borderRadius:4,padding:"1px 6px",cursor:"pointer"}}>Edit</button>}
                         </td>
                       )}
-                      <td style={{border:"1px solid #E2E8F0",padding:"2px 4px",fontSize:10,color:"#94A3B8",textAlign:"center",background:si%2===0?"#fff":"#FAFAFA"}}>{slot===0?"S1":"S2"}</td>
                       {visibleDays.map((d,di)=>{
                         const ds=isoDate(d);const isToday=ds===todayStr;
                         const weekIdx=Math.floor(di/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
@@ -1026,7 +1025,10 @@ function JobModal({data,onSave,onDelete,onClose}) {
   const [form,setForm]=useState({...data,subItems:data.subItems.map(s=>({...s}))});
   function set(k,v){setForm(f=>({...f,[k]:v}));}
   function addSubItem(){setForm(f=>({...f,subItems:[...f.subItems,{id:`new_${Date.now()}`,isNew:true,name:"",totalHours:0}]}));}
-  function addSubItemWithName(name){setForm(f=>({...f,subItems:[...f.subItems,{id:`new_${Date.now()}`,isNew:true,name:name==="__custom__"?"":name,totalHours:0}]}));}
+  function addSubItemWithName(name){
+    const newId=`new_${Date.now()}`;
+    setForm(f=>({...f,subItems:[...f.subItems,{id:newId,isNew:true,name:name==="__custom__"?"":name,totalHours:0,autoFocus:name==="__custom__"}]}));
+  }
   function setSubItem(idx,field,value){setForm(f=>{const s=[...f.subItems];s[idx]={...s[idx],[field]:value};return{...f,subItems:s};});}
   function removeSubItem(idx){setForm(f=>{const s=[...f.subItems];s.splice(idx,1);return{...f,subItems:s};});}
   return(
@@ -1052,7 +1054,7 @@ function JobModal({data,onSave,onDelete,onClose}) {
           <div style={{display:"flex",flexDirection:"column",gap:7}}>
             {form.subItems.map((si,i)=>(
               <div key={si.id} style={{display:"flex",gap:6,alignItems:"center"}}>
-                <input value={si.name} onChange={e=>setSubItem(i,"name",e.target.value)} placeholder="Item name" style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:13,outline:"none"}}/>
+                <input value={si.name} onChange={e=>setSubItem(i,"name",e.target.value)} placeholder="Item name" autoFocus={!!si.autoFocus} style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:13,outline:"none"}}/>
                 <input type="number" value={si.totalHours||""} onChange={e=>setSubItem(i,"totalHours",Number(e.target.value))} placeholder="Hrs" min={0} step={1} style={{width:60,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:13,outline:"none"}}/>
                 <button onClick={()=>removeSubItem(i)} style={{background:"none",border:"1px solid #FCA5A5",color:"#EF4444",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:13}}>×</button>
               </div>
@@ -1066,9 +1068,9 @@ function JobModal({data,onSave,onDelete,onClose}) {
                   e.target.value="";
                 }}
                 style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:13,background:"#fff",color:"#475569",outline:"none"}}>
-                <option value="">+ Add from preset list...</option>
+                <option value="">+ Add new item...</option>
                 {JOINERY_ITEM_PRESETS.map(p=><option key={p} value={p}>{p}</option>)}
-                <option value="__custom__">+ Custom item (blank)</option>
+                <option value="__custom__">Custom (type below)</option>
               </select>
             </div>
           </div>
