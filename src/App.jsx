@@ -671,7 +671,7 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Schedule Tab */}
       {tab==="schedule"&&(
-        <div style={{padding:16}}>
+        <div style={{padding:16,position:"relative",zIndex:1}}>
           <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
               {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],["month","Month"]].map(([v,label])=>(
