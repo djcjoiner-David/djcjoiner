@@ -163,7 +163,7 @@ function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,o
     <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
       onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
-      style={{background:conflict?"#FEF2F2":job.bgColor,border:conflict?"2px solid #EF4444":`1.5px solid ${job.borderColor}`,borderRadius:6,padding:"3px 6px",cursor:canEdit?"pointer":"default",minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      style={{background:conflict?"#FEF2F2":job.bgColor,border:conflict?"2px solid #EF4444":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {canEdit&&hovered&&!conflict&&(
         <button onClick={e=>{e.stopPropagation();onCopy(entry);}}
@@ -171,9 +171,8 @@ function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,o
           COPY
         </button>
       )}
-      <div style={{fontSize:11,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{job.jobNo} · {job.name}</div>
-      <div style={{fontSize:11,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{subItem?subItem.name:"General"}</div>
-      <div style={{fontSize:10,color:conflict?"#EF4444":job.textColor,opacity:0.7}}>{hours}h</div>
+      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
+      <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{subItem?subItem.name:"General"} · {hours}h</div>
     </div>
   );
 }
@@ -186,7 +185,7 @@ function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canE
     <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
       onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
-      style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:6,padding:"3px 6px",cursor:canEdit?"pointer":"default",minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {canEdit&&hovered&&!conflict&&(
         <button onClick={e=>{e.stopPropagation();onCopy(entry);}}
@@ -194,17 +193,16 @@ function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canE
           COPY
         </button>
       )}
-      <div style={{fontSize:11,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{note}</div>
-      <div style={{fontSize:10,color:conflict?"#EF4444":"#64748B",opacity:0.8}}>{hours}h</div>
+      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{note} · {hours}h</div>
     </div>
   );
 }
 
 function EmptySlot({onClick,isDropTarget,isPastDate,canEdit}) {
-  if (isPastDate||!canEdit) return <div style={{minHeight:44,background:"#F8FAFC",borderRadius:6,border:"1px solid #F1F5F9"}}/>;
+  if (isPastDate||!canEdit) return <div style={{minHeight:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
   return (
     <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:6,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":"#CBD5E1",fontSize:16,background:isDropTarget?"rgba(59,130,246,0.06)":"transparent",transition:"all 0.12s"}}
+      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":"#CBD5E1",fontSize:16,background:isDropTarget?"rgba(59,130,246,0.06)":"transparent",transition:"all 0.12s"}}
       onMouseEnter={e=>{if(!isDropTarget){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
       onMouseLeave={e=>{if(!isDropTarget){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
       {isDropTarget?"↓":"+"}
@@ -736,9 +734,7 @@ function MainApp({currentUser,onLogout}) {
                     const isSat=d.getDay()===6;
                     return(
                       <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,}}>
-                        <div>{d.toLocaleDateString("en-AU",{weekday:"short"})}</div>
-                        <div style={{fontSize:12,fontWeight:600}}>{d.getDate()}</div>
-                        <div style={{fontSize:10,opacity:0.8}}>{d.toLocaleDateString("en-AU",{month:"short"})}</div>
+                        <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
                       </th>
                     );
                   })}
@@ -751,8 +747,8 @@ function MainApp({currentUser,onLogout}) {
                   [0,1].map(slot=>(
                     <tr key={`${st.id}-${slot}`} style={{borderBottom:slot===1?"2px solid #CBD5E1":"none"}}>
                       {slot===0&&(
-                        <td rowSpan={2} style={{border:"1px solid #E2E8F0",borderBottom:"2px solid #CBD5E1",padding:"6px 10px",verticalAlign:"middle",background:si%2===0?"#fff":"#FAFAFA",}}>
-                          <div style={{fontWeight:600,fontSize:13,color:"#1E293B",marginBottom:2}}>{st.name}</div>
+                        <td rowSpan={2} style={{border:"1px solid #E2E8F0",borderBottom:"2px solid #CBD5E1",padding:"4px 8px",verticalAlign:"middle",background:si%2===0?"#fff":"#FAFAFA",}}>
+                          <div style={{fontWeight:600,fontSize:12,color:"#1E293B",marginBottom:1}}>{st.name}</div>
                           {canEdit&&<button onClick={()=>setStaffModal({isNew:false,...st})} style={{fontSize:11,color:"#94A3B8",background:"none",border:"1px solid #E2E8F0",borderRadius:4,padding:"1px 6px",cursor:"pointer"}}>Edit</button>}
                         </td>
                       )}
@@ -768,7 +764,7 @@ function MainApp({currentUser,onLogout}) {
                         const isConflict=conflictKeys.has(k);
                         return(
                           <td key={di}
-                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",padding:3,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA"}}
+                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA"}}
                             onDragOver={e=>handleDragOver(e,st.id,ds,slot)}
                             onDragLeave={handleDragLeave}
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
