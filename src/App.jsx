@@ -729,13 +729,13 @@ function MainApp({currentUser,onLogout}) {
                   </tr>
                 )}
                 <tr>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,}}>Staff</th>
+                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:33,zIndex:9,background:"#F8FAFC"}}>Staff</th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
                     const isSat=d.getDay()===6;
                     return(
-                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9}}>
+                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:33,zIndex:9}}>
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
                       </th>
                     );
