@@ -733,12 +733,13 @@ function MainApp({currentUser,onLogout}) {
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
+                    const isSat=d.getDay()===6;
                     return(
-                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:10,backdropFilter:"blur(0)"}}>
+                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:10,backdropFilter:"blur(0)"}}>
                         <div>{d.toLocaleDateString("en-AU",{weekday:"short"})}</div>
                         <div style={{fontSize:12,fontWeight:600}}>{d.getDate()}</div>
                         <div style={{fontSize:10,opacity:0.8}}>{d.toLocaleDateString("en-AU",{month:"short"})}</div>
-                      </th>);})()}
+                      </th>
                     );
                   })}
                 </tr>
@@ -758,6 +759,7 @@ function MainApp({currentUser,onLogout}) {
                       {visibleDays.map((d,di)=>{
                         const ds=isoDate(d);const isToday=ds===todayStr;
                         const weekIdx=Math.floor(di/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
+                        const isSat=d.getDay()===6;
                         const k=`${st.id}|${ds}|${slot}`;
                         const entry=entryMap[k];
                         const job=entry&&!entry.miscNote?jobs.find(j=>j.id===entry.jobId):null;
@@ -766,7 +768,7 @@ function MainApp({currentUser,onLogout}) {
                         const isConflict=conflictKeys.has(k);
                         return(
                           <td key={di}
-                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",padding:3,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":si%2===0?"#fff":"#FAFAFA"}}
+                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",padding:3,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA"}}
                             onDragOver={e=>handleDragOver(e,st.id,ds,slot)}
                             onDragLeave={handleDragLeave}
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
@@ -776,7 +778,7 @@ function MainApp({currentUser,onLogout}) {
                                 : job
                                   ? <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit}/>
                                   : <EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit}/>
-                              : <EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit}/>
+                              : <EmptySlot onClick={isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit}/>
                             }
                           </td>
                         );
