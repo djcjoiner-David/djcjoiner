@@ -691,7 +691,7 @@ function MainApp({currentUser,onLogout}) {
           </div>
 
           {activeJobs.length>0&&(
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,position:"relative",zIndex:0}}> 
               {activeJobs.map(j=>(
                 <div key={j.id} onClick={canEdit?()=>setJobModal({isNew:false,...j,subItems:subItems.filter(s=>s.jobId===j.id)}):undefined}
                   style={{background:j.bgColor,border:`1.5px solid ${j.borderColor}`,color:j.textColor,borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:600,cursor:canEdit?"pointer":"default"}}>
@@ -722,7 +722,7 @@ function MainApp({currentUser,onLogout}) {
                   <tr>
                     <td style={{border:"1px solid #E2E8F0",background:"#F8FAFC"}}/>
                     {weekStarts.map((ws,wi)=>(
-                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,background:"#F1F5F9"}}>Week of {formatDate(ws)}</td>
+                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"5px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,background:"#F1F5F9"position:"sticky",top:0,zIndex:9,background:"#F1F5F9"}}>Week of {formatDate(ws)}</td>
                     ))}
                   </tr>
                 )}
