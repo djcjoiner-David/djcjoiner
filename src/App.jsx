@@ -1180,4 +1180,3 @@ function StaffModal({data,onSave,onRemove,onClose}) {
     </Modal>
   );
 }
-
