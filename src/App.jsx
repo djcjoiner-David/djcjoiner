@@ -390,6 +390,41 @@ function MainApp({currentUser,onLogout}) {
   const [error,setError]=useState(null);
 
   const dragEntry=useRef(null);
+  const [undoStack,setUndoStack]=useState([]); // each item: {type, data}
+
+  function pushUndo(type, data) {
+    setUndoStack(prev=>[...prev.slice(-19),{type,data}]);
+  }
+
+  async function handleUndo() {
+    if(undoStack.length===0) return;
+    const last=undoStack[undoStack.length-1];
+    setUndoStack(prev=>prev.slice(0,-1));
+    setSaving(true);
+    try {
+      if(last.type==="addEntries") {
+        // Remove entries that were added
+        for(const id of last.data.ids) await db("DELETE","entries",null,`?id=eq.${id}`);
+        setEntries(prev=>prev.filter(e=>!last.data.ids.includes(e.id)));
+      } else if(last.type==="editEntry") {
+        // Restore previous entry state
+        const e=last.data.prev;
+        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote},`?id=eq.${e.id}`);
+        setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
+      } else if(last.type==="deleteEntry") {
+        // Re-insert deleted entry
+        const e=last.data.entry;
+        const [inserted]=await db("POST","entries",[{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}]);
+        setEntries(prev=>[...prev,{id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}]);
+      } else if(last.type==="moveEntry") {
+        // Restore previous position
+        const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
+        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
+        setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
+      }
+    } catch(e){setError("Undo failed.");}
+    setSaving(false);
+  }
   const [copiedEntry,setCopiedEntry]=useState(null);
   const [copyMode,setCopyMode]=useState(false);
   const [dropTarget,setDropTarget]=useState(null);
@@ -496,8 +531,11 @@ function MainApp({currentUser,onLogout}) {
           return;
         }
         const inserted=await db("POST","entries",buildRows(valid));
-        setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null}))]);
+        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null}));
+        pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
+        setEntries(prev=>[...prev,...newMapped]);
       } else {
+        const prevEntry=entries.find(e=>e.id===data.id);
         await db("PATCH","entries",{
           staff_id:data.staffId,
           job_id:data.entryType==="misc"?null:data.jobId,
@@ -505,6 +543,7 @@ function MainApp({currentUser,onLogout}) {
           date_str:data.dateStr,slot:data.slot,hours:data.hours,
           misc_note:data.entryType==="misc"?data.miscNote:null
         },`?id=eq.${data.id}`);
+        if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
         setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null}:e));
       }
       setEntryModal(null);setTab("schedule");
@@ -514,7 +553,13 @@ function MainApp({currentUser,onLogout}) {
 
   async function removeEntry(id){
     setSaving(true);
-    try{await db("DELETE","entries",null,`?id=eq.${id}`);setEntries(prev=>prev.filter(e=>e.id!==id));setEntryModal(null);}
+    try{
+      const entry=entries.find(e=>e.id===id);
+      await db("DELETE","entries",null,`?id=eq.${id}`);
+      if(entry) pushUndo("deleteEntry",{entry});
+      setEntries(prev=>prev.filter(e=>e.id!==id));
+      setEntryModal(null);
+    }
     catch(e){setError("Failed to remove entry.");}
     setSaving(false);
   }
@@ -581,7 +626,11 @@ function MainApp({currentUser,onLogout}) {
     const entry=dragEntry.current;if(!entry||!canEdit)return;
     if(isPast(dateStr))return;
     if(entry.staffId===staffId&&entry.dateStr===dateStr&&entry.slot===slot)return;
-    try{await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${entry.id}`);setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId,dateStr,slot}:en));}
+    try{
+      pushUndo("moveEntry",{id:entry.id,prevStaffId:entry.staffId,prevDateStr:entry.dateStr,prevSlot:entry.slot});
+      await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${entry.id}`);
+      setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId,dateStr,slot}:en));
+    }
     catch(e){setError("Failed to move entry.");}
     dragEntry.current=null;
   }
@@ -688,7 +737,13 @@ function MainApp({currentUser,onLogout}) {
               <button onClick={()=>navigate(1)} style={{padding:"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:16,color:"#475569"}}>›</button>
             </div>
             <span style={{fontSize:13,color:"#64748B"}}>{formatDate(anchorDate)} – {formatDate(addDays(anchorDate,totalWeeks*7-2))}</span>
-            <button onClick={loadAll} style={{marginLeft:"auto",padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:12,color:"#64748B"}}>↻ Refresh</button>
+            <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+              <button onClick={handleUndo} disabled={undoStack.length===0}
+                style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:undoStack.length>0?"#fff":"#F8FAFC",cursor:undoStack.length>0?"pointer":"not-allowed",fontSize:12,color:undoStack.length>0?"#475569":"#CBD5E1"}}>
+                ↩ Undo
+              </button>
+              <button onClick={loadAll} style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:12,color:"#64748B"}}>↻ Refresh</button>
+            </div>
           </div>
 
           {activeJobs.length>0&&(
@@ -721,7 +776,7 @@ function MainApp({currentUser,onLogout}) {
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px 8px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,zIndex:10,verticalAlign:"bottom"}}></th>
+                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px 8px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,left:0,zIndex:20,verticalAlign:"bottom"}}></th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/6);const isWeekBound=d.getDay()===1&&weekIdx>0;
