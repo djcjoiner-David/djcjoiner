@@ -720,22 +720,23 @@ function MainApp({currentUser,onLogout}) {
                 {visibleDays.map((_,i)=><col key={i} style={{width:118}}/>)}
               </colgroup>
               <thead>
-                {totalWeeks>1&&(
-                  <tr>
-                    <td style={{border:"1px solid #E2E8F0",borderBottom:0,background:"#F8FAFC",position:"sticky",top:0,zIndex:10}}/>
-                    {weekStarts.map((ws,wi)=>(
-                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"2px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,border:"1px solid #E2E8F0",paddingBottom:0,marginBottom:0,lineHeight:"1"}}>Week of {formatDate(ws)}</td>
-                    ))}
-                  </tr>
-                )}
                 <tr>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"8px 10px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:25,zIndex:9,background:"#F8FAFC",border:"1px solid #E2E8F0",borderTop:0}}></th>
+                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px 8px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,zIndex:10,verticalAlign:"bottom"}}></th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
-                    const weekIdx=Math.floor(i/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
+                    const weekIdx=Math.floor(i/6);const isWeekBound=d.getDay()===1&&weekIdx>0;
                     const isSat=d.getDay()===6;
+                    const isFirstDayOfWeek=i%6===0;
                     return(
-                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"6px 4px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:33,zIndex:9}}>
+                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9}}>
+                        {totalWeeks>1&&isFirstDayOfWeek&&(
+                          <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
+                            Week of {formatDate(addDays(anchorDate,weekIdx*7))}
+                          </div>
+                        )}
+                        {totalWeeks>1&&!isFirstDayOfWeek&&(
+                          <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9"}}/>
+                        )}
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
                       </th>
                     );
