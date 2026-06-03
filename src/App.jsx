@@ -155,58 +155,118 @@ function Spinner({text="Loading..."}) {
   );
 }
 
+function ContextMenu({x,y,onClose,onCopy,onEdit}) {
+  useEffect(()=>{
+    const close=()=>onClose();
+    document.addEventListener("click",close);
+    document.addEventListener("contextmenu",close);
+    return()=>{document.removeEventListener("click",close);document.removeEventListener("contextmenu",close);};
+  },[]);
+  return (
+    <div style={{position:"fixed",top:y,left:x,background:"#fff",border:"1px solid #E2E8F0",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",zIndex:9999,minWidth:140,overflow:"hidden"}}>
+      <button onClick={e=>{e.stopPropagation();onEdit();}} style={{display:"block",width:"100%",padding:"8px 16px",textAlign:"left",fontSize:13,border:"none",background:"none",cursor:"pointer",color:"#1E293B",borderBottom:"1px solid #F1F5F9"}}
+        onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"}
+        onMouseLeave={e=>e.currentTarget.style.background="none"}>
+        ✏️ Edit entry
+      </button>
+      <button onClick={e=>{e.stopPropagation();onCopy();}} style={{display:"block",width:"100%",padding:"8px 16px",textAlign:"left",fontSize:13,border:"none",background:"none",cursor:"pointer",color:"#1E293B"}}
+        onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"}
+        onMouseLeave={e=>e.currentTarget.style.background="none"}>
+        📋 Copy entry
+      </button>
+    </div>
+  );
+}
+
 // ── Job Block ─────────────────────────────────────────────────
 
 function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode}) {
+  const [menu,setMenu]=useState(null);
+  function handleContextMenu(e){
+    if(!canEdit)return;
+    e.preventDefault();
+    setMenu({x:e.clientX,y:e.clientY});
+  }
+  function closeMenu(){setMenu(null);}
   return (
-    <div style={{position:"relative",display:"flex",flexDirection:"column",gap:0}}>
-      <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
+    <>
+      <div draggable={canEdit&&!copyMode}
+        onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined}
+        onDragEnd={canEdit?onDragEnd:undefined}
         onClick={canEdit?onClick:undefined}
+        onContextMenu={handleContextMenu}
         style={{background:conflict?"#FEF2F2":job.bgColor,border:conflict?"2px solid #EF4444":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
         {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
         <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
         <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{subItem?subItem.name:"General"} · {hours}h</div>
       </div>
-      {canEdit&&!conflict&&(
-        <button onMouseDown={e=>{e.preventDefault();e.stopPropagation();onCopy(entry);}}
-          style={{width:"100%",padding:"1px 0",fontSize:9,background:"rgba(0,0,0,0.08)",border:"none",borderTop:"1px solid rgba(0,0,0,0.08)",cursor:"pointer",color:"#666",fontWeight:600,textAlign:"center",letterSpacing:"0.5px"}}>
-          COPY
-        </button>
+      {menu&&(
+        <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu}
+          onCopy={()=>{onCopy(entry);closeMenu();}}
+          onEdit={()=>{onClick();closeMenu();}}
+        />
       )}
-    </div>
+    </>
   );
 }
 
 // ── Misc Block ────────────────────────────────────────────────
 
 function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode}) {
+  const [menu,setMenu]=useState(null);
+  function handleContextMenu(e){
+    if(!canEdit)return;
+    e.preventDefault();
+    setMenu({x:e.clientX,y:e.clientY});
+  }
+  function closeMenu(){setMenu(null);}
   return (
-    <div style={{position:"relative",display:"flex",flexDirection:"column",gap:0}}>
-      <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
+    <>
+      <div draggable={canEdit&&!copyMode}
+        onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined}
+        onDragEnd={canEdit?onDragEnd:undefined}
         onClick={canEdit?onClick:undefined}
+        onContextMenu={handleContextMenu}
         style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none"}}>
         {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
         <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{note} · {hours}h</div>
       </div>
-      {canEdit&&!conflict&&(
-        <button onMouseDown={e=>{e.preventDefault();e.stopPropagation();onCopy(entry);}}
-          style={{width:"100%",padding:"1px 0",fontSize:9,background:"rgba(0,0,0,0.08)",border:"none",borderTop:"1px solid rgba(0,0,0,0.08)",cursor:"pointer",color:"#666",fontWeight:600,textAlign:"center",letterSpacing:"0.5px"}}>
-          COPY
-        </button>
+      {menu&&(
+        <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu}
+          onCopy={()=>{onCopy(entry);closeMenu();}}
+          onEdit={()=>{onClick();closeMenu();}}
+        />
       )}
-    </div>
+    </>
   );
 }
 
-function EmptySlot({onClick,isDropTarget,isPastDate,canEdit}) {
+function EmptySlot({onClick,onPaste,isDropTarget,isPastDate,canEdit,copyMode}) {
+  const [menu,setMenu]=useState(null);
+  function handleContextMenu(e){
+    if(!canEdit||!copyMode)return;
+    e.preventDefault();
+    setMenu({x:e.clientX,y:e.clientY});
+  }
   if (isPastDate||!canEdit) return <div style={{minHeight:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
   return (
-    <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":"#CBD5E1",fontSize:16,background:isDropTarget?"rgba(59,130,246,0.06)":"transparent",transition:"all 0.12s"}}
-      onMouseEnter={e=>{if(!isDropTarget){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
-      onMouseLeave={e=>{if(!isDropTarget){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
-      {isDropTarget?"↓":"+"}
-    </div>
+    <>
+      <div onClick={onClick} onContextMenu={handleContextMenu}
+        style={{border:isDropTarget?"2px dashed #3B82F6":copyMode?"1.5px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget||copyMode?"#3B82F6":"#CBD5E1",fontSize:16,background:isDropTarget?"rgba(59,130,246,0.06)":copyMode?"rgba(59,130,246,0.04)":"transparent",transition:"all 0.12s"}}
+        onMouseEnter={e=>{if(!isDropTarget&&!copyMode){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
+        onMouseLeave={e=>{if(!isDropTarget&&!copyMode){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
+        {copyMode?"paste":isDropTarget?"↓":"+"}
+      </div>
+      {menu&&(
+        <div style={{position:"fixed",top:menu.y,left:menu.x,background:"#fff",border:"1px solid #E2E8F0",borderRadius:8,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",zIndex:9999,minWidth:140,overflow:"hidden"}}>
+          <button onClick={e=>{e.stopPropagation();onPaste&&onPaste();setMenu(null);}} style={{display:"block",width:"100%",padding:"8px 16px",textAlign:"left",fontSize:13,border:"none",background:"none",cursor:"pointer",color:"#1E293B"}}
+            onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"}
+            onMouseLeave={e=>e.currentTarget.style.background="none"}>
+            📋 Paste here
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -758,9 +818,9 @@ function MainApp({currentUser,onLogout}) {
           )}
 
           {copyMode&&copiedEntry&&(
-            <div style={{background:"#DBEAFE",border:"1px solid #93C5FD",borderRadius:8,padding:"8px 14px",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:13,color:"#1D4ED8",fontWeight:600}}>
-              📋 Copy mode active — click any empty slot to paste
-              <button onClick={()=>{setCopyMode(false);setCopiedEntry(null);}} style={{background:"#3B82F6",border:"none",borderRadius:6,padding:"4px 12px",cursor:"pointer",color:"#fff",fontWeight:600,fontSize:12}}>Cancel</button>
+            <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#1D4ED8",border:"none",borderRadius:10,padding:"12px 24px",display:"flex",alignItems:"center",gap:16,fontSize:14,color:"#fff",fontWeight:600,zIndex:9998,boxShadow:"0 4px 20px rgba(0,0,0,0.25)"}}>
+              📋 Copy mode — right-click any slot to paste
+              <button onClick={()=>{setCopyMode(false);setCopiedEntry(null);}} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:6,padding:"4px 14px",cursor:"pointer",color:"#fff",fontWeight:600,fontSize:13}}>Cancel</button>
             </div>
           )}
           </div>{/* end sticky controls */}
@@ -830,7 +890,7 @@ function MainApp({currentUser,onLogout}) {
                                 : job
                                   ? <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit}/>
                                   : <EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit}/>
-                              : <EmptySlot onClick={isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit}/>
+                              : <EmptySlot onClick={isSat?undefined:()=>openNewEntry(st.id,ds,slot)} onPaste={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit} copyMode={copyMode}/>
                             }
                           </td>
                         );
