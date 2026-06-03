@@ -158,21 +158,21 @@ function Spinner({text="Loading..."}) {
 // ── Job Block ─────────────────────────────────────────────────
 
 function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode}) {
-  const [hovered,setHovered]=useState(false);
   return (
-    <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
-      onClick={canEdit?onClick:undefined}
-      onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
-      style={{background:conflict?"#FEF2F2":job.bgColor,border:conflict?"2px solid #EF4444":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
-      {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      {canEdit&&hovered&&!conflict&&(
-        <button onClick={e=>{e.stopPropagation();onCopy(entry);}}
-          style={{position:"absolute",top:1,right:1,fontSize:9,background:"rgba(0,0,0,0.35)",border:"none",borderRadius:3,padding:"2px 6px",cursor:"pointer",color:"#fff",fontWeight:700,letterSpacing:"0.3px"}}>
+    <div style={{position:"relative",display:"flex",flexDirection:"column",gap:0}}>
+      <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
+        onClick={canEdit?onClick:undefined}
+        style={{background:conflict?"#FEF2F2":job.bgColor,border:conflict?"2px solid #EF4444":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+        {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
+        <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
+        <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{subItem?subItem.name:"General"} · {hours}h</div>
+      </div>
+      {canEdit&&!conflict&&(
+        <button onMouseDown={e=>{e.preventDefault();e.stopPropagation();onCopy(entry);}}
+          style={{width:"100%",padding:"1px 0",fontSize:9,background:"rgba(0,0,0,0.08)",border:"none",borderTop:"1px solid rgba(0,0,0,0.08)",cursor:"pointer",color:"#666",fontWeight:600,textAlign:"center",letterSpacing:"0.5px"}}>
           COPY
         </button>
       )}
-      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
-      <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{subItem?subItem.name:"General"} · {hours}h</div>
     </div>
   );
 }
@@ -180,20 +180,20 @@ function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,o
 // ── Misc Block ────────────────────────────────────────────────
 
 function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode}) {
-  const [hovered,setHovered]=useState(false);
   return (
-    <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
-      onClick={canEdit?onClick:undefined}
-      onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
-      style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
-      {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      {canEdit&&hovered&&!conflict&&(
-        <button onClick={e=>{e.stopPropagation();onCopy(entry);}}
-          style={{position:"absolute",top:1,right:1,fontSize:9,background:"rgba(0,0,0,0.35)",border:"none",borderRadius:3,padding:"2px 6px",cursor:"pointer",color:"#fff",fontWeight:700,letterSpacing:"0.3px"}}>
+    <div style={{position:"relative",display:"flex",flexDirection:"column",gap:0}}>
+      <div draggable={canEdit&&!copyMode} onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined} onDragEnd={canEdit?onDragEnd:undefined}
+        onClick={canEdit?onClick:undefined}
+        style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none"}}>
+        {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
+        <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{note} · {hours}h</div>
+      </div>
+      {canEdit&&!conflict&&(
+        <button onMouseDown={e=>{e.preventDefault();e.stopPropagation();onCopy(entry);}}
+          style={{width:"100%",padding:"1px 0",fontSize:9,background:"rgba(0,0,0,0.08)",border:"none",borderTop:"1px solid rgba(0,0,0,0.08)",cursor:"pointer",color:"#666",fontWeight:600,textAlign:"center",letterSpacing:"0.5px"}}>
           COPY
         </button>
       )}
-      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{note} · {hours}h</div>
     </div>
   );
 }
