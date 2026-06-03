@@ -167,7 +167,7 @@ function JobBlock({job,subItem,hours,productiveHours,entry,onClick,onDragStart,o
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {canEdit&&hovered&&!conflict&&(
         <button onClick={e=>{e.stopPropagation();onCopy(entry);}}
-          style={{position:"absolute",top:2,right:conflict?50:4,fontSize:9,background:"rgba(0,0,0,0.15)",border:"none",borderRadius:3,padding:"1px 5px",cursor:"pointer",color:"#fff",fontWeight:600}}>
+          style={{position:"absolute",top:1,right:1,fontSize:9,background:"rgba(0,0,0,0.35)",border:"none",borderRadius:3,padding:"2px 6px",cursor:"pointer",color:"#fff",fontWeight:700,letterSpacing:"0.3px"}}>
           COPY
         </button>
       )}
@@ -189,7 +189,7 @@ function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canE
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {canEdit&&hovered&&!conflict&&(
         <button onClick={e=>{e.stopPropagation();onCopy(entry);}}
-          style={{position:"absolute",top:2,right:4,fontSize:9,background:"rgba(0,0,0,0.15)",border:"none",borderRadius:3,padding:"1px 5px",cursor:"pointer",color:"#fff",fontWeight:600}}>
+          style={{position:"absolute",top:1,right:1,fontSize:9,background:"rgba(0,0,0,0.35)",border:"none",borderRadius:3,padding:"2px 6px",cursor:"pointer",color:"#fff",fontWeight:700,letterSpacing:"0.3px"}}>
           COPY
         </button>
       )}
@@ -757,15 +757,13 @@ function MainApp({currentUser,onLogout}) {
             </div>
           )}
 
+          {copyMode&&copiedEntry&&(
+            <div style={{background:"#DBEAFE",border:"1px solid #93C5FD",borderRadius:8,padding:"8px 14px",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:13,color:"#1D4ED8",fontWeight:600}}>
+              📋 Copy mode active — click any empty slot to paste
+              <button onClick={()=>{setCopyMode(false);setCopiedEntry(null);}} style={{background:"#3B82F6",border:"none",borderRadius:6,padding:"4px 12px",cursor:"pointer",color:"#fff",fontWeight:600,fontSize:12}}>Cancel</button>
+            </div>
+          )}
           </div>{/* end sticky controls */}
-          {canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-            <span>💡 Drag any block to reassign · Past slots locked · Click + for job or misc entry</span>
-            {copyMode&&copiedEntry&&(
-              <span style={{background:"#DBEAFE",color:"#1D4ED8",borderRadius:6,padding:"3px 10px",fontWeight:600,fontSize:11}}>
-                📋 Copy mode — click any empty slot to paste · <button onClick={()=>{setCopyMode(false);setCopiedEntry(null);}} style={{background:"none",border:"none",color:"#1D4ED8",cursor:"pointer",fontWeight:600,fontSize:11}}>Cancel</button>
-              </span>
-            )}
-          </div>}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
 
           <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 280px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff"}}>
