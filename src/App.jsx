@@ -724,7 +724,7 @@ function MainApp({currentUser,onLogout}) {
                   <tr>
                     <td style={{border:"1px solid #E2E8F0",background:"#F8FAFC",position:"sticky",top:0,zIndex:10}}/>
                     {weekStarts.map((ws,wi)=>(
-                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"3px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10}}>Week of {formatDate(ws)}</td>
+                      <td key={wi} colSpan={6} style={{border:"1px solid #E2E8F0",borderLeft:wi>0?"2px solid #94A3B8":"1px solid #E2E8F0",background:"#F1F5F9",padding:"3px 8px",fontSize:12,fontWeight:600,color:"#475569",textAlign:"center",position:"sticky",top:0,zIndex:10,borderBottom:"none"}}>Week of {formatDate(ws)}</td>
                     ))}
                   </tr>
                 )}
