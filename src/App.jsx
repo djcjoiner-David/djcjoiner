@@ -13,20 +13,22 @@ const BRAND_HEADER_BG = "#3D2E14";
 const BRAND_GOLD      = "#E8A030";
 const BRAND_CREAM     = "#FFF8EC";
 
-const SUPABASE_URL    = "https://oixsdxhndezbymllkpqk.supabase.co";
-const SUPABASE_KEY    = "sb_publishable_AgjgZclgWWtRM8VGLn1How_2NQjjeeP";
-
 // ╚══════════════════════════════════════════════════════════════╝
 
+function parseQuery(query) {
+  // Converts Supabase-style "?order=created_at" or "?id=eq.123" into an object
+  const params = new URLSearchParams(query.replace(/^\?/, ""));
+  const obj = {};
+  for (const [k, v] of params.entries()) obj[k] = v;
+  return obj;
+}
+
 async function db(method, table, body, query="") {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+  const extraParams = parseQuery(query);
+  const qs = new URLSearchParams({ table, ...extraParams }).toString();
+  const res = await fetch(`/api/db?${qs}`, {
     method,
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": method==="POST" ? "return=representation" : method==="PATCH"||method==="DELETE" ? "return=representation" : "",
-    },
+    headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) { const e = await res.text(); throw new Error(e); }
