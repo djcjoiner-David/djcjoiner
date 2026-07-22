@@ -28,7 +28,7 @@ export default async function handler(req, res) {
       let query = `select * from ${table}`;
       if (conditions.length) query += ' where ' + conditions.join(' and ');
       if (order) query += ` order by ${order}`;
-      const rows = await sql.query(query, params);
+      const rows = await sql(query, params);
       return res.status(200).json(rows);
     }
 
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
         const vals = Object.values(row);
         const placeholders = vals.map((_, i) => `$${i + 1}`).join(',');
         const q = `insert into ${table} (${cols.join(',')}) values (${placeholders}) returning *`;
-        const r = await sql.query(q, vals);
+        const r = await sql(q, vals);
         results.push(r[0]);
       }
       return res.status(200).json(results);
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
       const params = [...vals];
       const conditions = buildConditions(filters, params);
       const q = `update ${table} set ${setClause}${conditions.length ? ' where ' + conditions.join(' and ') : ''} returning *`;
-      const rows = await sql.query(q, params);
+      const rows = await sql(q, params);
       return res.status(200).json(rows);
     }
 
@@ -61,7 +61,7 @@ export default async function handler(req, res) {
       const params = [];
       const conditions = buildConditions(filters, params);
       const q = `delete from ${table}${conditions.length ? ' where ' + conditions.join(' and ') : ''} returning *`;
-      const rows = await sql.query(q, params);
+      const rows = await sql(q, params);
       return res.status(200).json(rows);
     }
 
