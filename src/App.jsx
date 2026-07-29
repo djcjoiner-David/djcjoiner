@@ -107,11 +107,28 @@ function ColorPicker({label,value,onChange}) {
 }
 
 function Modal({title,onClose,children,wide,small}) {
+  const [pos,setPos]=useState(null);
+  const dragRef=useRef(null);
+  const offsetRef=useRef({x:0,y:0});
+
+  function onMouseDown(e){
+    dragRef.current=true;
+    offsetRef.current={x:e.clientX-(pos?.x||0),y:e.clientY-(pos?.y||0)};
+    e.preventDefault();
+  }
+  useEffect(()=>{
+    function onMove(e){if(!dragRef.current)return;setPos({x:e.clientX-offsetRef.current.x,y:e.clientY-offsetRef.current.y});}
+    function onUp(){dragRef.current=false;}
+    window.addEventListener("mousemove",onMove);
+    window.addEventListener("mouseup",onUp);
+    return()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
+  },[]);
+
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
       onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:wide?820:small?420:460,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px 12px",borderBottom:"1px solid #E2E8F0"}}>
+      <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:wide?820:small?420:460,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)",position:pos?"fixed":"relative",left:pos?pos.x:undefined,top:pos?pos.y:undefined,transform:pos?"none":undefined}}>
+        <div onMouseDown={onMouseDown} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px 12px",borderBottom:"1px solid #E2E8F0",cursor:"grab",userSelect:"none"}}>
           <div style={{fontSize:16,fontWeight:600,color:"#1E293B"}}>{title}</div>
           <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#94A3B8"}}>×</button>
         </div>
@@ -159,7 +176,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode}) {
   const [hovered,setHovered]=useState(false);
   return (
     <div
@@ -169,7 +186,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       onClick={canEdit?onClick:undefined}
       onMouseEnter={()=>setHovered(true)}
       onMouseLeave={()=>setHovered(false)}
-      style={{background:conflict?"#FEF2F2":job.bgColor,border:conflict?"2px solid #EF4444":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {canEdit&&hovered&&!conflict&&(
         <div onClick={e=>{e.stopPropagation();onCopy(entry);}}
@@ -178,7 +195,9 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         </div>
       )}
       <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3,paddingRight:hovered&&canEdit?18:0}}>{job.jobNo} · {job.name}</div>
-      <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{subItem?subItem.name:"General"} · {hours}h</div>
+      <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
+        {subItem?subItem.name:"General"} · {isLastEntry&&budgetRemaining!==null?`${budgetRemaining}h`:totalBudget?`${totalBudget}h`:`${hours}h`}
+      </div>
     </div>
   );
 }
@@ -395,9 +414,50 @@ function MainApp({currentUser,onLogout}) {
   const [staffModal,setStaffModal]=useState(null);
   const [conflictAlert,setConflictAlert]=useState(null);
   const [userMgmtOpen,setUserMgmtOpen]=useState(false);
+  const [workHoursOpen,setWorkHoursOpen]=useState(false);
+  const [workStart,setWorkStart]=useState("07:00");
+  const [workEnd,setWorkEnd]=useState("15:30");
+
+  const workHoursPerDay=useMemo(()=>{
+    const [sh,sm]=workStart.split(":").map(Number);
+    const [eh,em]=workEnd.split(":").map(Number);
+    const total=(eh*60+em-sh*60-sm)/60;
+    return Math.max(1,Math.round(total*2)/2);
+  },[workStart,workEnd]);
   const [error,setError]=useState(null);
 
   const dragEntry=useRef(null);
+  const dragStaff=useRef(null);
+  const [staffOrder,setStaffOrder]=useState([]);
+
+  useEffect(()=>{
+    if(staff.length>0&&staffOrder.length===0) setStaffOrder(staff.map(s=>s.id));
+  },[staff]);
+
+  const orderedStaff=useMemo(()=>{
+    if(staffOrder.length===0) return staff;
+    const map=Object.fromEntries(staff.map(s=>[s.id,s]));
+    return staffOrder.filter(id=>map[id]).map(id=>map[id]).concat(staff.filter(s=>!staffOrder.includes(s.id)));
+  },[staff,staffOrder]);
+
+  function handleStaffDragStart(e,staffId){
+    dragStaff.current=staffId;
+    e.dataTransfer.effectAllowed="move";
+  }
+  function handleStaffDrop(e,targetStaffId){
+    e.preventDefault();
+    if(!dragStaff.current||dragStaff.current===targetStaffId)return;
+    setStaffOrder(prev=>{
+      const order=[...prev];
+      const fromIdx=order.indexOf(dragStaff.current);
+      const toIdx=order.indexOf(targetStaffId);
+      if(fromIdx===-1||toIdx===-1)return prev;
+      order.splice(fromIdx,1);
+      order.splice(toIdx,0,dragStaff.current);
+      return order;
+    });
+    dragStaff.current=null;
+  }
   const [undoStack,setUndoStack]=useState([]); // each item: {type, data}
 
   function pushUndo(type, data) {
@@ -435,6 +495,8 @@ function MainApp({currentUser,onLogout}) {
   }
   const [copiedEntry,setCopiedEntry]=useState(null);
   const [copyMode,setCopyMode]=useState(false);
+  const [selectedEntries,setSelectedEntries]=useState(new Set()); // for multi-select
+  const [selectionMode,setSelectionMode]=useState(false);
   const [dropTarget,setDropTarget]=useState(null);
 
   const loadAll=useCallback(async()=>{
@@ -645,6 +707,44 @@ function MainApp({currentUser,onLogout}) {
   }
   function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
   function handleCopy(entry){setCopiedEntry(entry);setCopyMode(true);}
+
+  function toggleSelectEntry(id){
+    setSelectedEntries(prev=>{
+      const next=new Set(prev);
+      if(next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function deleteSelectedEntries(){
+    if(selectedEntries.size===0)return;
+    if(!window.confirm(`Delete ${selectedEntries.size} selected entr${selectedEntries.size>1?"ies":"y"}?`))return;
+    setSaving(true);
+    try{
+      const ids=[...selectedEntries];
+      for(const id of ids) await db("DELETE","entries",null,`?id=eq.${id}`);
+      pushUndo("addEntries",{ids}); // reuse addEntries undo type (reversed: re-add)
+      setEntries(prev=>prev.filter(e=>!selectedEntries.has(e.id)));
+      setSelectedEntries(new Set());
+      setSelectionMode(false);
+    }catch(e){setError("Failed to delete entries.");}
+    setSaving(false);
+  }
+
+  async function moveSelectedEntries(toStaffId,toDateStr,toSlot){
+    if(selectedEntries.size===0)return;
+    setSaving(true);
+    try{
+      const ids=[...selectedEntries];
+      for(const id of ids){
+        await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot},`?id=eq.${id}`);
+      }
+      setEntries(prev=>prev.map(e=>selectedEntries.has(e.id)?{...e,staffId:toStaffId,dateStr:toDateStr,slot:toSlot}:e));
+      setSelectedEntries(new Set());
+      setSelectionMode(false);
+    }catch(e){setError("Failed to move entries.");}
+    setSaving(false);
+  }
   function nextPreset(){return JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length];}
 
   const roleColors={admin:"#FEF3C7",manager:"#DBEAFE",staff:"#F0FDF4"};
@@ -746,7 +846,21 @@ function MainApp({currentUser,onLogout}) {
               <button onClick={()=>navigate(1)} style={{padding:"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:16,color:"#475569"}}>›</button>
             </div>
             <span style={{fontSize:13,color:"#64748B"}}>{formatDate(anchorDate)} – {formatDate(addDays(anchorDate,totalWeeks*7-2))}</span>
-            <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+            <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
+              {canEdit&&(
+                <>
+                  <button onClick={()=>{setSelectionMode(s=>!s);setSelectedEntries(new Set());}}
+                    style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:selectionMode?"#3B82F6":"#fff",cursor:"pointer",fontSize:12,color:selectionMode?"#fff":"#64748B"}}>
+                    {selectionMode?"✓ Selecting":"Select"}
+                  </button>
+                  {selectionMode&&selectedEntries.size>0&&(
+                    <button onClick={deleteSelectedEntries}
+                      style={{padding:"5px 12px",border:"1px solid #FECACA",borderRadius:7,background:"#FEF2F2",cursor:"pointer",fontSize:12,color:"#EF4444",fontWeight:600}}>
+                      Delete {selectedEntries.size}
+                    </button>
+                  )}
+                </>
+              )}
               <button onClick={handleUndo} disabled={undoStack.length===0}
                 style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:undoStack.length>0?"#fff":"#F8FAFC",cursor:undoStack.length>0?"pointer":"not-allowed",fontSize:12,color:undoStack.length>0?"#475569":"#CBD5E1"}}>
                 ↩ Undo
@@ -808,11 +922,17 @@ function MainApp({currentUser,onLogout}) {
               <tbody>
                 {staff.length===0?(
                   <tr><td colSpan={visibleDays.length+2} style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:14}}>No staff yet{canEdit?" — click \"+ Add Staff\" to get started":""}</td></tr>
-                ):staff.map((st,si)=>(
+                ):orderedStaff.map((st,si)=>(
                   [0,1].map(slot=>(
-                    <tr key={`${st.id}-${slot}`} style={{borderBottom:slot===1?"2px solid #CBD5E1":"none"}}>
+                    <tr key={`${st.id}-${slot}`} style={{borderBottom:slot===1?`3px solid ${si%2===0?'#94A3B8':'#94A3B8'}`:'none'}}>
                       {slot===0&&(
-                        <td rowSpan={2} style={{border:"1px solid #E2E8F0",borderBottom:"2px solid #CBD5E1",padding:"4px 8px",verticalAlign:"middle",background:si%2===0?"#fff":"#FAFAFA",}}>
+                        <td rowSpan={2}
+                          draggable={canEdit}
+                          onDragStart={e=>handleStaffDragStart(e,st.id)}
+                          onDragOver={e=>{e.preventDefault();}}
+                          onDrop={e=>handleStaffDrop(e,st.id)}
+                          style={{border:"1px solid #E2E8F0",borderBottom:"3px solid #94A3B8",padding:"4px 8px",verticalAlign:"middle",background:si%2===0?"#fff":"#F8FAFC",position:"sticky",left:0,zIndex:5,boxShadow:"2px 0 3px rgba(0,0,0,0.06)",width:110,minWidth:110,cursor:canEdit?"grab":"default"}}>
+                          {canEdit&&<div style={{fontSize:9,color:"#CBD5E1",marginBottom:1}}>⠿</div>}
                           <div style={{fontWeight:600,fontSize:12,color:"#1E293B",marginBottom:1}}>{st.name}</div>
                           {canEdit&&<button onClick={()=>setStaffModal({isNew:false,...st})} style={{fontSize:11,color:"#94A3B8",background:"none",border:"1px solid #E2E8F0",borderRadius:4,padding:"1px 6px",cursor:"pointer"}}>Edit</button>}
                         </td>
@@ -837,7 +957,15 @@ function MainApp({currentUser,onLogout}) {
                               ? entry.miscNote
                                 ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode}/>
                                 : job
-                                  ? <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode}/>
+                                  ? (()=>{
+                                      const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
+                                      const siEntries=si?entries.filter(e=>e.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
+                                      const isLastEntry=si&&siEntries.length>0&&siEntries[siEntries.length-1].id===entry.id;
+                                      const deductedBefore=si?siEntries.slice(0,-1).reduce((a,e)=>{const stf=staff.find(s=>s.id===e.staffId);return a+((e.hours/8)*(stf?.productiveHours||8));},0):0;
+                                      const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
+                                      const totalBudget=si?.totalHours||null;
+                                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode}/>;
+                                    })()
                                   : <EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit} copyMode={copyMode}/>
                             }
@@ -856,7 +984,7 @@ function MainApp({currentUser,onLogout}) {
       {/* Summary Tab */}
       {tab==="summary"&&(
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
-          <SummarySection jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit}/>
+          <SummarySection jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);try{for(const id of ids)await db("DELETE","entries",null,`?id=eq.${id}`);setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
           {archivedJobs.length>0&&(
             <>
               <div style={{display:"flex",alignItems:"center",gap:12,marginTop:8}}>
@@ -864,7 +992,7 @@ function MainApp({currentUser,onLogout}) {
                 <span style={{fontSize:12,color:"#94A3B8",fontWeight:500,whiteSpace:"nowrap"}}>Archived Jobs (all entries &gt; 1 month ago)</span>
                 <div style={{flex:1,height:1,background:"#E2E8F0"}}/>
               </div>
-              <SummarySection jobs={archivedJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={true} canEdit={canEdit}/>
+              <SummarySection jobs={archivedJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={true} canEdit={canEdit} onUnschedule={null}/>
             </>
           )}
         </div>
@@ -874,6 +1002,24 @@ function MainApp({currentUser,onLogout}) {
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)}/>}
+      {workHoursOpen&&(
+        <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Work Day Start</div>
+            <input type="time" value={workStart} onChange={e=>setWorkStart(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box"}}/>
+          </div>
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Work Day End</div>
+            <input type="time" value={workEnd} onChange={e=>setWorkEnd(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box"}}/>
+          </div>
+          <div style={{padding:"10px 14px",background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,fontSize:13,color:"#15803D",fontWeight:500,marginBottom:12}}>
+            Work day: {workStart} – {workEnd} = {workHoursPerDay}h/day
+          </div>
+          <div style={{display:"flex",justifyContent:"flex-end"}}>
+            <Btn variant="primary" onClick={()=>setWorkHoursOpen(false)}>Save</Btn>
+          </div>
+        </Modal>
+      )}
       {conflictAlert&&(
         <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div style={{background:"#fff",borderRadius:14,maxWidth:420,width:"100%",padding:24,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
@@ -892,7 +1038,7 @@ function MainApp({currentUser,onLogout}) {
 
 // ── Summary Section ───────────────────────────────────────────
 
-function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,setTab,archived,canEdit}) {
+function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,setTab,archived,canEdit,onUnschedule}) {
   return (
     <>
       {jobs.map(job=>{
@@ -952,7 +1098,10 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                       <td style={{padding:"7px 12px"}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${Math.round(remaining*10)/10}h left`:remaining===0?"✓ Done":`${Math.round(Math.abs(remaining)*10)/10}h over`}</span>:"—"}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{dateDisplay}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{assignedStaff||<em style={{color:"#94A3B8"}}>—</em>}</td>
-                      <td style={{padding:"7px 12px"}}>{canEdit&&!archived&&setEntryModal&&<button style={{fontSize:11,color:"#3B82F6",background:"none",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{setEntryModal({mode:"new",staffId:"",dateStr:todayStr,slot:0,jobId:job.id,subItemId:si.id,hours:8,autoFill:remaining>0,totalHours:remaining>0?remaining:8,entryType:"job",miscNote:""});setTab("schedule");}}>+ Schedule</button>}</td>
+                      <td style={{padding:"7px 12px",display:"flex",gap:4}}>
+                        {canEdit&&!archived&&setEntryModal&&<button style={{fontSize:11,color:"#3B82F6",background:"none",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{setEntryModal({mode:"new",staffId:"",dateStr:todayStr,slot:0,jobId:job.id,subItemId:si.id,hours:8,autoFill:remaining>0,totalHours:remaining>0?remaining:8,entryType:"job",miscNote:""});setTab("schedule");}}>+ Schedule</button>}
+                        {canEdit&&!archived&&siEntries.length>0&&onUnschedule&&<button style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{if(window.confirm(`Remove all ${siEntries.length} scheduled entries for "${si.name}"?`))onUnschedule(siEntries.map(e=>e.id));}}>Unschedule</button>}
+                      </td>
                     </tr>
                   );
                 })}
@@ -982,13 +1131,13 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
   const [form,setForm]=useState(()=>{
     const jobSubs=subItems.filter(s=>s.jobId===data.jobId);
     const defaultSub=data.subItemId||(jobSubs[0]?.id||"");
-    return{...data,subItemId:defaultSub,totalHours:data.totalHours||jobSubs[0]?.totalHours||0,entryType:data.entryType||"job",miscNote:data.miscNote||""};
+    return{...data,subItemId:defaultSub,totalHours:data.totalHours||jobSubs[0]?.totalHours||0,entryType:data.entryType||"job",miscNote:data.miscNote||"",staffIds:data.staffId?[data.staffId]:[]};
   });
   const [autoFill,setAutoFill]=useState(data.autoFill!==false);
 
   function set(k,v){setForm(f=>({...f,[k]:v}));}
   const jobSubs=subItems.filter(s=>s.jobId===form.jobId);
-  const selectedStaff=staff.find(s=>s.id===form.staffId);
+  const selectedStaff=staff.find(s=>s.id===(form.staffIds[0]||form.staffId));
   const productiveHours=selectedStaff?.productiveHours||8;
   const selectedSub=jobSubs.find(s=>s.id===form.subItemId);
   const totalHours=form.totalHours||selectedSub?.totalHours||0;
@@ -1002,11 +1151,29 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
   },[autoFill,form.dateStr,totalHours,productiveHours,form.entryType]);
 
   function handleSave(){
-    if(form.entryType==="misc"){if(!form.miscNote.trim())return;onSave(form,null);return;}
-    if(!form.jobId)return;
-    if(autoFill&&preview.length>0)onSave(form,preview.map(p=>({dateStr:p.dateStr,hours:p.hours})));
-    else onSave(form,null);
+    const staffToSchedule=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
+    if(staffToSchedule.length===0)return;
+    if(form.entryType==="misc"){if(!form.miscNote.trim())return;}
+    else if(!form.jobId)return;
+    // Schedule for each staff member
+    staffToSchedule.forEach(sid=>{
+      const sData={...form,staffId:sid};
+      const sf=staff.find(s=>s.id===sid);
+      const ph=sf?.productiveHours||8;
+      if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
+        const fills=buildAutoFill(form.dateStr,form.totalHours,ph);
+        onSave(sData,fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
+      } else {
+        onSave(sData,null);
+      }
+    });
   }
+
+  useEffect(()=>{
+    function onKey(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSave();}}
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[form,autoFill,preview]);
 
   return(
     <Modal title={form.mode==="new"?"New Schedule Entry":"Edit Schedule Entry"} onClose={onClose} small>
@@ -1019,10 +1186,21 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
           </button>
         ))}
       </div>
-      <Sel label="Staff Member" value={form.staffId} onChange={e=>set("staffId",e.target.value)}>
-        <option value="">— Select staff —</option>
-        {staff.map(s=><option key={s.id} value={s.id}>{s.name} ({s.productiveHours}h/day)</option>)}
-      </Sel>
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Staff Member(s)</div>
+        <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:120,overflowY:"auto",border:"1px solid #CBD5E1",borderRadius:8,padding:"6px 10px"}}>
+          {staff.map(s=>(
+            <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155"}}>
+              <input type="checkbox" checked={form.staffIds.includes(s.id)}
+                onChange={e=>{
+                  setForm(f=>({...f,staffIds:e.target.checked?[...f.staffIds,s.id]:f.staffIds.filter(id=>id!==s.id),staffId:e.target.checked?s.id:f.staffIds.find(id=>id!==s.id)||""}));
+                }}
+                style={{width:14,height:14}}/>
+              {s.name} <span style={{fontSize:11,color:"#94A3B8"}}>({s.productiveHours}h/day)</span>
+            </label>
+          ))}
+        </div>
+      </div>
       <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>set("dateStr",e.target.value)}/>
       <Sel label="Slot" value={form.slot} onChange={e=>set("slot",Number(e.target.value))}>
         <option value={0}>Slot 1</option><option value={1}>Slot 2</option>
