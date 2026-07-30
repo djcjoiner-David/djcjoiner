@@ -721,23 +721,30 @@ function MainApp({currentUser,onLogout}) {
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
     if(isPast(dateStr))return;
-    // If in selection mode and entry is selected, move all selected
-    const idsToMove=(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id))
-      ?[...selectedEntries]
-      :[entry.id];
-    if(idsToMove.length===1&&entry.staffId===staffId&&entry.dateStr===dateStr&&entry.slot===slot){dragEntry.current=null;return;}
-    try{
-      // Save undo for all moved entries
-      const prevStates=idsToMove.map(id=>{const en=entries.find(x=>x.id===id);return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};});
-      pushUndo("moveMultiple",{prevStates});
-      for(const id of idsToMove){
-        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
-      }
-      setEntries(prev=>prev.map(en=>idsToMove.includes(en.id)?{...en,staffId,dateStr,slot}:en));
-      setSelectedEntries(new Set());
-      setSelectionMode(false);
+    // Multi-select: keep original dates, only change staffId
+    if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
+      const idsToMove=[...selectedEntries];
+      try{
+        const prevStates=idsToMove.map(id=>{const en=entries.find(x=>x.id===id);return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};});
+        pushUndo("moveMultiple",{prevStates});
+        for(const id of idsToMove){
+          // Keep original dateStr and slot, only change staffId
+          await db("PATCH","entries",{staff_id:staffId},`?id=eq.${id}`);
+        }
+        setEntries(prev=>prev.map(en=>idsToMove.includes(en.id)?{...en,staffId}:en));
+        setSelectedEntries(new Set());
+        setSelectionMode(false);
+      }catch(err){setError("Failed to move entries.");}
+      dragEntry.current=null;
+      return;
     }
-    catch(e){setError("Failed to move entries.");}
+    // Single entry drag - move to exact target date/slot/staff
+    if(entry.staffId===staffId&&entry.dateStr===dateStr&&entry.slot===slot){dragEntry.current=null;return;}
+    try{
+      pushUndo("moveEntry",{id:entry.id,prevStaffId:entry.staffId,prevDateStr:entry.dateStr,prevSlot:entry.slot});
+      await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${entry.id}`);
+      setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId,dateStr,slot}:en));
+    }catch(err){setError("Failed to move entry.");}
     dragEntry.current=null;
   }
   function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
@@ -758,7 +765,7 @@ function MainApp({currentUser,onLogout}) {
     try{
       const ids=[...selectedEntries];
       const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);
-      for(const id of ids) await db("DELETE","entries",null,`?id=eq.${id}`);
+      await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
       pushUndo("deleteMultiple",{deletedEntries});
       setEntries(prev=>prev.filter(e=>!selectedEntries.has(e.id)));
       setSelectedEntries(new Set());
@@ -846,7 +853,11 @@ function MainApp({currentUser,onLogout}) {
                 </button>
               </>
             )}
-            <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,248,236,0.6)"}}>Sign Out</button>
+            <button onClick={()=>setWorkHoursOpen(true)}
+                  style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1.5px solid rgba(232,160,48,0.5)",background:"rgba(232,160,48,0.1)",color:"#E8A030",fontWeight:500}}>
+                  🕐 {workStart}–{workEnd}
+                </button>
+                <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,248,236,0.6)"}}>Sign Out</button>
           </div>
         </div>
         <div style={{display:"flex"}}>
@@ -1020,7 +1031,7 @@ function MainApp({currentUser,onLogout}) {
       {/* Summary Tab */}
       {tab==="summary"&&(
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
-          <SummarySection jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);try{const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);for(const id of ids)await db("DELETE","entries",null,`?id=eq.${id}`);pushUndo("unscheduleItem",{deletedEntries});setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
+          <SummarySection jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);try{const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);pushUndo("unscheduleItem",{deletedEntries});setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
           {archivedJobs.length>0&&(
             <>
               <div style={{display:"flex",alignItems:"center",gap:12,marginTop:8}}>
@@ -1196,19 +1207,33 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
     if(staffToSchedule.length===0)return;
     if(form.entryType==="misc"){if(!form.miscNote.trim())return;}
     else if(!form.jobId)return;
-    // Schedule for each staff member using THEIR productive hours
-    staffToSchedule.forEach(sid=>{
-      const sData={...form,staffId:sid};
-      const sf=staff.find(s=>s.id===sid);
-      const ph=sf?.productiveHours||8;
-      if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
-        // Each staff member gets their own auto-fill based on their productive rate
-        const fills=buildAutoFill(form.dateStr,form.totalHours,ph);
-        onSave(sData,fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
-      } else {
-        onSave(sData,null);
-      }
-    });
+
+    if(autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length>1){
+      // Split total hours proportionally based on each staff member productive rate
+      const totalPh=staffToSchedule.reduce((a,sid)=>{const sf=staff.find(s=>s.id===sid);return a+(sf?.productiveHours||8);},0);
+      const totalHours=form.totalHours;
+      staffToSchedule.forEach(sid=>{
+        const sf=staff.find(s=>s.id===sid);
+        const ph=sf?.productiveHours||8;
+        // Proportional share based on productive rate
+        const share=Math.round((ph/totalPh)*totalHours*10)/10;
+        const fills=buildAutoFill(form.dateStr,share,ph);
+        onSave({...form,staffId:sid},fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
+      });
+    } else {
+      // Single staff or misc - schedule normally
+      staffToSchedule.forEach(sid=>{
+        const sData={...form,staffId:sid};
+        const sf=staff.find(s=>s.id===sid);
+        const ph=sf?.productiveHours||8;
+        if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
+          const fills=buildAutoFill(form.dateStr,form.totalHours,ph);
+          onSave(sData,fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
+        } else {
+          onSave(sData,null);
+        }
+      });
+    }
   }
 
   useEffect(()=>{
@@ -1276,7 +1301,13 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
             <div style={{marginBottom:10}}>
               <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Deduct from Budget</div>
               <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours} (from budget)`:"Enter hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box",outline:"none"}}/>
-              {form.staffIds.length>1&&<div style={{fontSize:11,color:"#3B82F6",marginTop:3}}>📋 Each staff member will be scheduled independently based on their own productive rate</div>}
+              {form.staffIds.length>1&&(()=>{
+                const totalPh=form.staffIds.reduce((a,sid)=>{const sf=staff.find(s=>s.id===sid);return a+(sf?.productiveHours||8);},0);
+                return <div style={{fontSize:11,color:"#3B82F6",marginTop:3,lineHeight:1.5}}>
+                  📋 {form.totalHours}h split proportionally:<br/>
+                  {form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);const ph=sf?.productiveHours||8;const share=Math.round((ph/totalPh)*(form.totalHours||0)*10)/10;return <span key={sid} style={{display:"block",paddingLeft:8}}>• {sf?.name}: {share}h ({ph}h/day productive)</span>;})}
+                </div>;
+              })()}
               {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:3}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
               {preview.length>0&&(
                 <div style={{marginTop:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px"}}>
