@@ -108,28 +108,38 @@ function ColorPicker({label,value,onChange}) {
 
 function Modal({title,onClose,children,wide,small}) {
   const [pos,setPos]=useState(null);
-  const dragRef=useRef(null);
-  const offsetRef=useRef({x:0,y:0});
+  const isDragging=useRef(false);
+  const offset=useRef({x:0,y:0});
+  const modalRef=useRef(null);
 
   function onMouseDown(e){
-    dragRef.current=true;
-    offsetRef.current={x:e.clientX-(pos?.x||0),y:e.clientY-(pos?.y||0)};
+    if(e.target.tagName==="BUTTON")return;
+    isDragging.current=true;
+    const rect=modalRef.current?.getBoundingClientRect();
+    offset.current={x:e.clientX-(rect?.left||0),y:e.clientY-(rect?.top||0)};
     e.preventDefault();
   }
   useEffect(()=>{
-    function onMove(e){if(!dragRef.current)return;setPos({x:e.clientX-offsetRef.current.x,y:e.clientY-offsetRef.current.y});}
-    function onUp(){dragRef.current=false;}
+    function onMove(e){
+      if(!isDragging.current)return;
+      setPos({x:e.clientX-offset.current.x,y:e.clientY-offset.current.y});
+    }
+    function onUp(){isDragging.current=false;}
     window.addEventListener("mousemove",onMove);
     window.addEventListener("mouseup",onUp);
     return()=>{window.removeEventListener("mousemove",onMove);window.removeEventListener("mouseup",onUp);};
   },[]);
 
+  const style=pos
+    ?{position:"fixed",left:pos.x,top:pos.y,margin:0,transform:"none"}
+    :{};
+
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-      onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:wide?820:small?420:460,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)",position:pos?"fixed":"relative",left:pos?pos.x:undefined,top:pos?pos.y:undefined,transform:pos?"none":undefined}}>
+    <div style={{position:"fixed",inset:0,background:pos?"transparent":"rgba(15,23,42,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,pointerEvents:pos?"none":"auto"}}
+      onClick={e=>{if(!pos&&e.target===e.currentTarget)onClose();}}>
+      <div ref={modalRef} style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:wide?820:small?420:460,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)",pointerEvents:"auto",...style}}>
         <div onMouseDown={onMouseDown} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px 12px",borderBottom:"1px solid #E2E8F0",cursor:"grab",userSelect:"none"}}>
-          <div style={{fontSize:16,fontWeight:600,color:"#1E293B"}}>{title}</div>
+          <div style={{fontSize:16,fontWeight:600,color:"#1E293B"}}>{title} <span style={{fontSize:11,color:"#94A3B8",fontWeight:400}}>drag to move</span></div>
           <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#94A3B8"}}>×</button>
         </div>
         <div style={{padding:"16px 20px 20px"}}>{children}</div>
@@ -485,10 +495,25 @@ function MainApp({currentUser,onLogout}) {
         const [inserted]=await db("POST","entries",[{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}]);
         setEntries(prev=>[...prev,{id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}]);
       } else if(last.type==="moveEntry") {
-        // Restore previous position
         const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
         await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
         setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
+      } else if(last.type==="moveMultiple") {
+        for(const {id,prevStaffId,prevDateStr,prevSlot} of last.data.prevStates){
+          await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
+        }
+        setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+      } else if(last.type==="deleteMultiple") {
+        // Re-insert all deleted entries
+        for(const en of last.data.deletedEntries){
+          const [inserted]=await db("POST","entries",[{staff_id:en.staffId,job_id:en.jobId,sub_item_id:en.subItemId,date_str:en.dateStr,slot:en.slot,hours:en.hours,misc_note:en.miscNote}]);
+          setEntries(prev=>[...prev,{id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}]);
+        }
+      } else if(last.type==="unscheduleItem") {
+        for(const en of last.data.deletedEntries){
+          const [inserted]=await db("POST","entries",[{staff_id:en.staffId,job_id:en.jobId,sub_item_id:en.subItemId,date_str:en.dateStr,slot:en.slot,hours:en.hours,misc_note:en.miscNote}]);
+          setEntries(prev=>[...prev,{id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}]);
+        }
       }
     } catch(e){setError("Undo failed.");}
     setSaving(false);
@@ -696,13 +721,23 @@ function MainApp({currentUser,onLogout}) {
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
     if(isPast(dateStr))return;
-    if(entry.staffId===staffId&&entry.dateStr===dateStr&&entry.slot===slot)return;
+    // If in selection mode and entry is selected, move all selected
+    const idsToMove=(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id))
+      ?[...selectedEntries]
+      :[entry.id];
+    if(idsToMove.length===1&&entry.staffId===staffId&&entry.dateStr===dateStr&&entry.slot===slot){dragEntry.current=null;return;}
     try{
-      pushUndo("moveEntry",{id:entry.id,prevStaffId:entry.staffId,prevDateStr:entry.dateStr,prevSlot:entry.slot});
-      await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${entry.id}`);
-      setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId,dateStr,slot}:en));
+      // Save undo for all moved entries
+      const prevStates=idsToMove.map(id=>{const en=entries.find(x=>x.id===id);return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};});
+      pushUndo("moveMultiple",{prevStates});
+      for(const id of idsToMove){
+        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
+      }
+      setEntries(prev=>prev.map(en=>idsToMove.includes(en.id)?{...en,staffId,dateStr,slot}:en));
+      setSelectedEntries(new Set());
+      setSelectionMode(false);
     }
-    catch(e){setError("Failed to move entry.");}
+    catch(e){setError("Failed to move entries.");}
     dragEntry.current=null;
   }
   function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
@@ -722,8 +757,9 @@ function MainApp({currentUser,onLogout}) {
     setSaving(true);
     try{
       const ids=[...selectedEntries];
+      const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);
       for(const id of ids) await db("DELETE","entries",null,`?id=eq.${id}`);
-      pushUndo("addEntries",{ids}); // reuse addEntries undo type (reversed: re-add)
+      pushUndo("deleteMultiple",{deletedEntries});
       setEntries(prev=>prev.filter(e=>!selectedEntries.has(e.id)));
       setSelectedEntries(new Set());
       setSelectionMode(false);
@@ -924,7 +960,7 @@ function MainApp({currentUser,onLogout}) {
                   <tr><td colSpan={visibleDays.length+2} style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:14}}>No staff yet{canEdit?" — click \"+ Add Staff\" to get started":""}</td></tr>
                 ):orderedStaff.map((st,si)=>(
                   [0,1].map(slot=>(
-                    <tr key={`${st.id}-${slot}`} style={{borderBottom:slot===1?`3px solid ${si%2===0?'#94A3B8':'#94A3B8'}`:'none'}}>
+                    <tr key={`${st.id}-${slot}`} style={{borderBottom:slot===1?'3px solid #94A3B8':'none',boxShadow:slot===1?'0 2px 0 0 #94A3B8':undefined}}>
                       {slot===0&&(
                         <td rowSpan={2}
                           draggable={canEdit}
@@ -949,7 +985,7 @@ function MainApp({currentUser,onLogout}) {
                         const isConflict=conflictKeys.has(k);
                         return(
                           <td key={di}
-                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA"}}
+                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA"}}
                             onDragOver={e=>handleDragOver(e,st.id,ds,slot)}
                             onDragLeave={handleDragLeave}
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
@@ -984,7 +1020,7 @@ function MainApp({currentUser,onLogout}) {
       {/* Summary Tab */}
       {tab==="summary"&&(
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
-          <SummarySection jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);try{for(const id of ids)await db("DELETE","entries",null,`?id=eq.${id}`);setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
+          <SummarySection jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);try{const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);for(const id of ids)await db("DELETE","entries",null,`?id=eq.${id}`);pushUndo("unscheduleItem",{deletedEntries});setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
           {archivedJobs.length>0&&(
             <>
               <div style={{display:"flex",alignItems:"center",gap:12,marginTop:8}}>
@@ -1043,7 +1079,12 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
     <>
       {jobs.map(job=>{
         const jobEntries=entries.filter(e=>e.jobId===job.id&&!e.miscNote);
-        const jobSubs=subItems.filter(s=>s.jobId===job.id);
+        const jobSubs=subItems.filter(s=>s.jobId===job.id).sort((a,b)=>{
+          const aS=a.name.trim().endsWith(" S")?0:a.name.trim().endsWith(" W")?1:2;
+          const bS=b.name.trim().endsWith(" S")?0:b.name.trim().endsWith(" W")?1:2;
+          if(aS!==bS)return aS-bS;
+          return a.name.localeCompare(b.name);
+        });
         const dates=jobEntries.map(e=>e.dateStr).sort();
         const totalDeducted=jobEntries.reduce((a,e)=>{
           const st=staff.find(s=>s.id===e.staffId);
@@ -1155,12 +1196,13 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
     if(staffToSchedule.length===0)return;
     if(form.entryType==="misc"){if(!form.miscNote.trim())return;}
     else if(!form.jobId)return;
-    // Schedule for each staff member
+    // Schedule for each staff member using THEIR productive hours
     staffToSchedule.forEach(sid=>{
       const sData={...form,staffId:sid};
       const sf=staff.find(s=>s.id===sid);
       const ph=sf?.productiveHours||8;
       if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
+        // Each staff member gets their own auto-fill based on their productive rate
         const fills=buildAutoFill(form.dateStr,form.totalHours,ph);
         onSave(sData,fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
       } else {
@@ -1234,7 +1276,8 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
             <div style={{marginBottom:10}}>
               <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Deduct from Budget</div>
               <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours} (from budget)`:"Enter hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box",outline:"none"}}/>
-              {productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:3}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
+              {form.staffIds.length>1&&<div style={{fontSize:11,color:"#3B82F6",marginTop:3}}>📋 Each staff member will be scheduled independently based on their own productive rate</div>}
+              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:3}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
               {preview.length>0&&(
                 <div style={{marginTop:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px"}}>
                   <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted · {productiveHours}h/day rate</div>
