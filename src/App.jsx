@@ -499,10 +499,10 @@ function MainApp({currentUser,onLogout}) {
         await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
         setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
       } else if(last.type==="moveMultiple") {
-        for(const {id,prevStaffId,prevDateStr,prevSlot} of last.data.prevStates){
-          await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
+        for(const {id,prevStaffId} of last.data.prevStates){
+          await db("PATCH","entries",{staff_id:prevStaffId},`?id=eq.${id}`);
         }
-        setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+        setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId}:e;}));
       } else if(last.type==="deleteMultiple") {
         // Re-insert all deleted entries
         for(const en of last.data.deletedEntries){
@@ -717,33 +717,38 @@ function MainApp({currentUser,onLogout}) {
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
   function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
-  async function handleDrop(e,staffId,dateStr,slot){
+  async function handleDrop(e,toStaffId,toDateStr,toSlot){
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
-    if(isPast(dateStr))return;
-    // Multi-select: keep original dates, only change staffId
+    if(isPast(toDateStr))return;
+    // Multi-select: only reassign staffId, keep ALL original dates and slots
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
       const idsToMove=[...selectedEntries];
       try{
-        const prevStates=idsToMove.map(id=>{const en=entries.find(x=>x.id===id);return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};});
+        const prevStates=idsToMove.map(id=>{
+          const en=entries.find(x=>x.id===id);
+          return{id,prevStaffId:en.staffId};
+        });
         pushUndo("moveMultiple",{prevStates});
+        // Batch update - only change staff_id, nothing else
         for(const id of idsToMove){
-          // Keep original dateStr and slot, only change staffId
-          await db("PATCH","entries",{staff_id:staffId},`?id=eq.${id}`);
+          await db("PATCH","entries",{staff_id:toStaffId},`?id=eq.${id}`);
         }
-        setEntries(prev=>prev.map(en=>idsToMove.includes(en.id)?{...en,staffId}:en));
+        setEntries(prev=>prev.map(en=>
+          idsToMove.includes(en.id)?{...en,staffId:toStaffId}:en
+        ));
         setSelectedEntries(new Set());
         setSelectionMode(false);
       }catch(err){setError("Failed to move entries.");}
       dragEntry.current=null;
       return;
     }
-    // Single entry drag - move to exact target date/slot/staff
-    if(entry.staffId===staffId&&entry.dateStr===dateStr&&entry.slot===slot){dragEntry.current=null;return;}
+    // Single entry drag
+    if(entry.staffId===toStaffId&&entry.dateStr===toDateStr&&entry.slot===toSlot){dragEntry.current=null;return;}
     try{
       pushUndo("moveEntry",{id:entry.id,prevStaffId:entry.staffId,prevDateStr:entry.dateStr,prevSlot:entry.slot});
-      await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${entry.id}`);
-      setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId,dateStr,slot}:en));
+      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot},`?id=eq.${entry.id}`);
+      setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot}:en));
     }catch(err){setError("Failed to move entry.");}
     dragEntry.current=null;
   }
@@ -1210,18 +1215,25 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
 
     if(autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length>1){
       // Split total hours proportionally based on each staff member productive rate
-      const totalPh=staffToSchedule.reduce((a,sid)=>{const sf=staff.find(s=>s.id===sid);return a+(sf?.productiveHours||8);},0);
-      const totalHours=form.totalHours;
-      staffToSchedule.forEach(sid=>{
+      const staffWithPh=staffToSchedule.map(sid=>{
         const sf=staff.find(s=>s.id===sid);
-        const ph=sf?.productiveHours||8;
-        // Proportional share based on productive rate
-        const share=Math.round((ph/totalPh)*totalHours*10)/10;
+        return{sid,ph:sf?.productiveHours||8};
+      });
+      const totalPh=staffWithPh.reduce((a,x)=>a+x.ph,0);
+      const totalHours=form.totalHours;
+      let allocated=0;
+      staffWithPh.forEach(({sid,ph},idx)=>{
+        // Last staff member gets the remainder to avoid rounding loss
+        const isLast=idx===staffWithPh.length-1;
+        const share=isLast
+          ?Math.round((totalHours-allocated)*10)/10
+          :Math.round((ph/totalPh)*totalHours*10)/10;
+        allocated+=share;
         const fills=buildAutoFill(form.dateStr,share,ph);
         onSave({...form,staffId:sid},fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
       });
     } else {
-      // Single staff or misc - schedule normally
+      // Single staff or misc
       staffToSchedule.forEach(sid=>{
         const sData={...form,staffId:sid};
         const sf=staff.find(s=>s.id===sid);
