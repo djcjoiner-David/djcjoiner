@@ -49,6 +49,33 @@ function mondayOf(d) { const day=d.getDay(); return addDays(d,day===0?-6:1-day);
 function formatDate(d) { return d.toLocaleDateString("en-AU",{day:"numeric",month:"short"}); }
 function formatDateLong(d) { return d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
 function isWeekend(d) { return d.getDay()===0||d.getDay()===6; }
+function isSunday(d) { return d.getDay()===0; }
+
+// Count working days (Mon-Sat) between two dates
+function workingDaysBetween(d1,d2) {
+  let count=0;
+  const step=d2>d1?1:-1;
+  let cur=new Date(d1);
+  cur.setDate(cur.getDate()+step);
+  while(isoDate(cur)!==isoDate(d2)) {
+    if(!isSunday(cur)) count+=step;
+    cur.setDate(cur.getDate()+step);
+  }
+  if(!isSunday(d2)) count+=step;
+  return count;
+}
+
+// Shift a date by N working days (Mon-Sat, skip Sundays only)
+function addWorkingDays(d, n) {
+  let cur=new Date(d);
+  const step=n>0?1:-1;
+  let remaining=Math.abs(n);
+  while(remaining>0) {
+    cur.setDate(cur.getDate()+step);
+    if(!isSunday(cur)) remaining--;
+  }
+  return cur;
+}
 function isSaturday(d) { return d.getDay()===6; }
 function isPast(dateStr) { return dateStr < todayStr; }
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
@@ -186,7 +213,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver}) {
   const [hovered,setHovered]=useState(false);
   return (
     <div
@@ -206,7 +233,11 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       )}
       <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3,paddingRight:hovered&&canEdit?18:0}}>{job.jobNo} · {job.name}</div>
       <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
-        {subItem?subItem.name:"General"} · {isLastEntry&&budgetRemaining!==null?`${budgetRemaining}h`:totalBudget?`${totalBudget}h`:`${hours}h`}
+        {subItem?subItem.name:"General"} · {isLastEntry&&budgetRemaining!==null
+          ?<span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>
+            {isOver?`${Math.abs(budgetRemaining)}h OVER`:`${budgetRemaining}h`}
+          </span>
+          :totalBudget?`${totalBudget}h`:`${hours}h`}
       </div>
     </div>
   );
@@ -499,10 +530,10 @@ function MainApp({currentUser,onLogout}) {
         await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
         setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
       } else if(last.type==="moveMultiple") {
-        for(const {id,prevStaffId} of last.data.prevStates){
-          await db("PATCH","entries",{staff_id:prevStaffId},`?id=eq.${id}`);
+        for(const {id,prevStaffId,prevDateStr,prevSlot} of last.data.prevStates){
+          await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
         }
-        setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId}:e;}));
+        setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
       } else if(last.type==="deleteMultiple") {
         // Re-insert all deleted entries
         for(const en of last.data.deletedEntries){
@@ -721,22 +752,45 @@ function MainApp({currentUser,onLogout}) {
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
     if(isPast(toDateStr))return;
-    // Multi-select: only reassign staffId, keep ALL original dates and slots
+    // Multi-select: shift all entries by same date offset, reassign staff
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
       const idsToMove=[...selectedEntries];
       try{
+        // Place entries on consecutive working days ending at drop target
+        // The dragged entry lands on drop target, others fill backwards
+        const tgtDate=parseISO(toDateStr);
+        // Sort selected entries by date ascending
+        const sortedIds=[...idsToMove].sort((a,b)=>{
+          const ea=entries.find(x=>x.id===a);
+          const eb=entries.find(x=>x.id===b);
+          return ea.dateStr.localeCompare(eb.dateStr);
+        });
+        // Generate working days ending at toDateStr (going backwards)
+        const nEntries=sortedIds.length;
+        const workingDates=[];
+        let cur=new Date(tgtDate);
+        while(workingDates.length<nEntries){
+          if(!isSunday(cur)) workingDates.unshift(isoDate(cur));
+          cur.setDate(cur.getDate()-1);
+        }
+        // Map sorted entries to working dates in order
+        const idToDate=Object.fromEntries(sortedIds.map((id,i)=>[id,workingDates[i]]));
         const prevStates=idsToMove.map(id=>{
           const en=entries.find(x=>x.id===id);
-          return{id,prevStaffId:en.staffId};
+          return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
         });
         pushUndo("moveMultiple",{prevStates});
-        // Batch update - only change staff_id, nothing else
-        for(const id of idsToMove){
-          await db("PATCH","entries",{staff_id:toStaffId},`?id=eq.${id}`);
-        }
-        setEntries(prev=>prev.map(en=>
-          idsToMove.includes(en.id)?{...en,staffId:toStaffId}:en
+        // Calculate new dates for all entries first
+        const updates=idsToMove.map(id=>({id,newDate:idToDate[id]}));
+        // Patch all in parallel
+        await Promise.all(updates.map(({id,newDate})=>
+          db("PATCH","entries",{staff_id:toStaffId,date_str:newDate,slot:toSlot},`?id=eq.${id}`)
         ));
+        // Single state update
+        setEntries(prev=>prev.map(x=>{
+          const u=updates.find(u=>u.id===x.id);
+          return u?{...x,staffId:toStaffId,dateStr:u.newDate,slot:toSlot}:x;
+        }));
         setSelectedEntries(new Set());
         setSelectionMode(false);
       }catch(err){setError("Failed to move entries.");}
@@ -1016,7 +1070,8 @@ function MainApp({currentUser,onLogout}) {
                                       const deductedBefore=si?siEntries.slice(0,-1).reduce((a,e)=>{const stf=staff.find(s=>s.id===e.staffId);return a+((e.hours/8)*(stf?.productiveHours||8));},0):0;
                                       const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
                                       const totalBudget=si?.totalHours||null;
-                                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode}/>;
+                                      const isOver=si&&isLastEntry&&budgetRemaining!==null&&budgetRemaining<0;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver}/>;
                                     })()
                                   : <EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit} copyMode={copyMode}/>
@@ -1214,22 +1269,27 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
     else if(!form.jobId)return;
 
     if(autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length>1){
-      // Split total hours proportionally based on each staff member productive rate
+      // Equal split weighted by productive rate
+      // Each person gets roughly equal DAYS, but hours reflect their productive rate
       const staffWithPh=staffToSchedule.map(sid=>{
         const sf=staff.find(s=>s.id===sid);
         return{sid,ph:sf?.productiveHours||8};
       });
-      const totalPh=staffWithPh.reduce((a,x)=>a+x.ph,0);
+      const n=staffWithPh.length;
       const totalHours=form.totalHours;
+      // Base equal share in days (not hours) so each person works same number of days
+      const avgPh=staffWithPh.reduce((a,x)=>a+x.ph,0)/n;
+      const totalDays=totalHours/avgPh; // total days if worked at average rate
+      const daysEach=totalDays/n; // equal days each
       let allocated=0;
       staffWithPh.forEach(({sid,ph},idx)=>{
-        // Last staff member gets the remainder to avoid rounding loss
         const isLast=idx===staffWithPh.length-1;
-        const share=isLast
+        // Convert equal days to hours for this person based on their productive rate
+        const shareHours=isLast
           ?Math.round((totalHours-allocated)*10)/10
-          :Math.round((ph/totalPh)*totalHours*10)/10;
-        allocated+=share;
-        const fills=buildAutoFill(form.dateStr,share,ph);
+          :Math.round(daysEach*ph*10)/10;
+        allocated+=shareHours;
+        const fills=buildAutoFill(form.dateStr,shareHours,ph);
         onSave({...form,staffId:sid},fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
       });
     } else {
@@ -1317,7 +1377,18 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
                 const totalPh=form.staffIds.reduce((a,sid)=>{const sf=staff.find(s=>s.id===sid);return a+(sf?.productiveHours||8);},0);
                 return <div style={{fontSize:11,color:"#3B82F6",marginTop:3,lineHeight:1.5}}>
                   📋 {form.totalHours}h split proportionally:<br/>
-                  {form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);const ph=sf?.productiveHours||8;const share=Math.round((ph/totalPh)*(form.totalHours||0)*10)/10;return <span key={sid} style={{display:"block",paddingLeft:8}}>• {sf?.name}: {share}h ({ph}h/day productive)</span>;})}
+                  {(()=>{
+                    const swp=form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,name:sf?.name,ph:sf?.productiveHours||8};});
+                    const n=swp.length;const avgPh=swp.reduce((a,x)=>a+x.ph,0)/n;
+                    const totalDays=(form.totalHours||0)/avgPh;const daysEach=totalDays/n;
+                    let alloc=0;
+                    return swp.map(({sid,name,ph},idx)=>{
+                      const isLast=idx===swp.length-1;
+                      const share=isLast?Math.round(((form.totalHours||0)-alloc)*10)/10:Math.round(daysEach*ph*10)/10;
+                      alloc+=share;
+                      return <span key={sid} style={{display:"block",paddingLeft:8}}>• {name}: {share}h ({ph}h/day = ~{Math.ceil(share/ph)} days)</span>;
+                    });
+                  })()}
                 </div>;
               })()}
               {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:3}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
