@@ -756,25 +756,28 @@ function MainApp({currentUser,onLogout}) {
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
       const idsToMove=[...selectedEntries];
       try{
-        // Place entries on consecutive working days ending at drop target
-        // The dragged entry lands on drop target, others fill backwards
-        const tgtDate=parseISO(toDateStr);
-        // Sort selected entries by date ascending
-        const sortedIds=[...idsToMove].sort((a,b)=>{
+        // Sort all selected entries by date
+        const sortedSelected=[...idsToMove].sort((a,b)=>{
           const ea=entries.find(x=>x.id===a);
           const eb=entries.find(x=>x.id===b);
           return ea.dateStr.localeCompare(eb.dateStr);
         });
-        // Generate working days ending at toDateStr (going backwards)
-        const nEntries=sortedIds.length;
-        const workingDates=[];
-        let cur=new Date(tgtDate);
-        while(workingDates.length<nEntries){
-          if(!isSunday(cur)) workingDates.unshift(isoDate(cur));
-          cur.setDate(cur.getDate()-1);
+
+        // Find position of dragged entry in the sorted list
+        const draggedIdx=sortedSelected.indexOf(entry.id);
+
+        // Build list of working days relative to drop target
+        // draggedIdx entries go backward from toDateStr, rest go forward
+        function getWorkingDay(baseDate, offset){
+          // offset can be negative (backward) or positive (forward)
+          return isoDate(addWorkingDays(baseDate, offset));
         }
-        // Map sorted entries to working dates in order
-        const idToDate=Object.fromEntries(sortedIds.map((id,i)=>[id,workingDates[i]]));
+
+        const tgtDate=parseISO(toDateStr);
+        const idToDate=Object.fromEntries(sortedSelected.map((id,i)=>{
+          const offset=i-draggedIdx; // negative=before drop, 0=drop, positive=after drop
+          return[id,getWorkingDay(tgtDate,offset)];
+        }));
         const prevStates=idsToMove.map(id=>{
           const en=entries.find(x=>x.id===id);
           return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
@@ -1269,28 +1272,40 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
     else if(!form.jobId)return;
 
     if(autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length>1){
-      // Equal split weighted by productive rate
-      // Each person gets roughly equal DAYS, but hours reflect their productive rate
+      // Build ALL days needed for the full job first
+      // Then distribute days as equally as possible across staff
       const staffWithPh=staffToSchedule.map(sid=>{
         const sf=staff.find(s=>s.id===sid);
         return{sid,ph:sf?.productiveHours||8};
       });
-      const n=staffWithPh.length;
       const totalHours=form.totalHours;
-      // Base equal share in days (not hours) so each person works same number of days
-      const avgPh=staffWithPh.reduce((a,x)=>a+x.ph,0)/n;
-      const totalDays=totalHours/avgPh; // total days if worked at average rate
-      const daysEach=totalDays/n; // equal days each
-      let allocated=0;
+
+      // Generate all working days needed at average productive rate
+      const avgPh=staffWithPh.reduce((a,x)=>a+x.ph,0)/staffWithPh.length;
+      const allDays=buildAutoFill(form.dateStr,totalHours,avgPh);
+      const totalDays=allDays.length;
+      const n=staffWithPh.length;
+
+      // Distribute days equally - base days each + give remainder to first staff
+      const baseDays=Math.floor(totalDays/n);
+      const extraDays=totalDays%n;
+
+      let dayIdx=0;
       staffWithPh.forEach(({sid,ph},idx)=>{
-        const isLast=idx===staffWithPh.length-1;
-        // Convert equal days to hours for this person based on their productive rate
-        const shareHours=isLast
-          ?Math.round((totalHours-allocated)*10)/10
-          :Math.round(daysEach*ph*10)/10;
-        allocated+=shareHours;
-        const fills=buildAutoFill(form.dateStr,shareHours,ph);
+        const myDays=baseDays+(idx<extraDays?1:0);
+        // Calculate hours for this person's days at their productive rate
+        let myHours=myDays*ph;
+        // Last person gets exact remainder to avoid rounding
+        if(idx===staffWithPh.length-1){
+          const prevAllocated=staffWithPh.slice(0,idx).reduce((a,_,i)=>{
+            const d=baseDays+(i<extraDays?1:0);
+            return a+d*staffWithPh[i].ph;
+          },0);
+          myHours=Math.round((totalHours-prevAllocated)*10)/10;
+        }
+        const fills=buildAutoFill(form.dateStr,Math.max(0,myHours),ph);
         onSave({...form,staffId:sid},fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
+        dayIdx+=myDays;
       });
     } else {
       // Single staff or misc
