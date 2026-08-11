@@ -97,15 +97,6 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   return days;
 }
 
-function addBusinessDays(startDateStr, n) {
-  if (n<=0) return startDateStr;
-  let cur=parseISO(startDateStr); let count=0;
-  while (count<n) {
-    cur=addDays(cur,1);
-    if (!isWeekend(cur)) count++;
-  }
-  return isoDate(cur);
-}
 
 const JOB_COLOUR_PRESETS = [
   {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"},
@@ -1210,7 +1201,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                     const days=e.hours/8;
                     return a+(days*ph);
                   },0);
-                  const remaining=(si.totalHours||0)-deductedHours;
+                  const remaining=Math.round(((si.totalHours||0)-deductedHours)*10)/10;
                   const assignedStaff=[...new Set(siEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ");
                   let dateDisplay;
                   if(!siDates.length)dateDisplay=<em style={{color:"#94A3B8"}}>Not yet scheduled</em>;
@@ -1314,8 +1305,7 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
           },0);
           myHours=Math.round((totalHours-prevAllocated)*10)/10;
         }
-        const myStartDate=addBusinessDays(form.dateStr,dayIdx);
-        const fills=buildAutoFill(myStartDate,Math.max(0,myHours),ph);
+        const fills=buildAutoFill(form.dateStr,Math.max(0,myHours),ph);
         onSave({...form,staffId:sid},fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
         dayIdx+=myDays;
       });
