@@ -84,12 +84,11 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   if (!totalHours||totalHours<=0) return [];
   const ph = productiveHoursPerDay||8;
   const days=[]; let remaining=totalHours; let cur=parseISO(startDateStr);
-  while (remaining>0.001) { // avoid floating point near-zero
+  while (remaining>0) {
     if (!isWeekend(cur)) {
       const deducted=Math.min(ph,remaining);
-      const slotHours=deducted>=ph?8:Math.round((deducted/ph)*8*10)/10;
-      if(deducted>0.001) days.push({dateStr:isoDate(cur),hours:slotHours,deducted});
-      remaining=Math.round((remaining-deducted)*1000)/1000;
+      days.push({dateStr:isoDate(cur),hours:8,deducted});
+      remaining-=ph;
     }
     cur=addDays(cur,1);
     if (days.length>365) break;
@@ -1273,37 +1272,40 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
     else if(!form.jobId)return;
 
     if(autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length>1){
-      // Split total hours equally across staff, weighted by productive rate
-      // Step 1: calculate each person's share in productive hours
+      // Build ALL days needed for the full job first
+      // Then distribute days as equally as possible across staff
       const staffWithPh=staffToSchedule.map(sid=>{
         const sf=staff.find(s=>s.id===sid);
         return{sid,ph:sf?.productiveHours||8};
       });
-      const n=staffWithPh.length;
       const totalHours=form.totalHours;
-      // Each person gets equal number of days
-      // Total days = totalHours / avgPh
-      const avgPh=staffWithPh.reduce((a,x)=>a+x.ph,0)/n;
-      const totalDays=Math.ceil(totalHours/avgPh);
+
+      // Generate all working days needed at average productive rate
+      const avgPh=staffWithPh.reduce((a,x)=>a+x.ph,0)/staffWithPh.length;
+      const allDays=buildAutoFill(form.dateStr,totalHours,avgPh);
+      const totalDays=allDays.length;
+      const n=staffWithPh.length;
+
+      // Distribute days equally - base days each + give remainder to first staff
       const baseDays=Math.floor(totalDays/n);
       const extraDays=totalDays%n;
 
-      let hoursRemaining=totalHours;
+      let dayIdx=0;
       staffWithPh.forEach(({sid,ph},idx)=>{
-        const isLast=idx===n-1;
         const myDays=baseDays+(idx<extraDays?1:0);
-        // Hours this person contributes = their days * their productive rate
-        // but capped so total never exceeds totalHours
-        let myHours=isLast
-          ?Math.round(hoursRemaining*10)/10
-          :Math.min(Math.round(myDays*ph*10)/10, hoursRemaining);
-        myHours=Math.max(0,myHours);
-        hoursRemaining=Math.round((hoursRemaining-myHours)*10)/10;
-        if(myHours<=0)return; // skip if nothing to schedule
-        const fills=buildAutoFill(form.dateStr,myHours,ph);
-        // Filter out any 0h entries
-        const validFills=fills.filter(p=>p.hours>0);
-        if(validFills.length>0) onSave({...form,staffId:sid},validFills);
+        // Calculate hours for this person's days at their productive rate
+        let myHours=myDays*ph;
+        // Last person gets exact remainder to avoid rounding
+        if(idx===staffWithPh.length-1){
+          const prevAllocated=staffWithPh.slice(0,idx).reduce((a,_,i)=>{
+            const d=baseDays+(i<extraDays?1:0);
+            return a+d*staffWithPh[i].ph;
+          },0);
+          myHours=Math.round((totalHours-prevAllocated)*10)/10;
+        }
+        const fills=buildAutoFill(form.dateStr,Math.max(0,myHours),ph);
+        onSave({...form,staffId:sid},fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
+        dayIdx+=myDays;
       });
     } else {
       // Single staff or misc
@@ -1312,8 +1314,8 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
         const sf=staff.find(s=>s.id===sid);
         const ph=sf?.productiveHours||8;
         if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
-          const fills=buildAutoFill(form.dateStr,form.totalHours,ph).filter(p=>p.hours>0);
-          onSave(sData,fills);
+          const fills=buildAutoFill(form.dateStr,form.totalHours,ph);
+          onSave(sData,fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
         } else {
           onSave(sData,null);
         }
