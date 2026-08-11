@@ -87,13 +87,24 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   while (remaining>0) {
     if (!isWeekend(cur)) {
       const deducted=Math.min(ph,remaining);
-      days.push({dateStr:isoDate(cur),hours:8,deducted});
+      const hours=Math.round((8*(deducted/ph))*10)/10;
+      days.push({dateStr:isoDate(cur),hours,deducted});
       remaining-=ph;
     }
     cur=addDays(cur,1);
     if (days.length>365) break;
   }
   return days;
+}
+
+function addBusinessDays(startDateStr, n) {
+  if (n<=0) return startDateStr;
+  let cur=parseISO(startDateStr); let count=0;
+  while (count<n) {
+    cur=addDays(cur,1);
+    if (!isWeekend(cur)) count++;
+  }
+  return isoDate(cur);
 }
 
 const JOB_COLOUR_PRESETS = [
@@ -1303,7 +1314,8 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
           },0);
           myHours=Math.round((totalHours-prevAllocated)*10)/10;
         }
-        const fills=buildAutoFill(form.dateStr,Math.max(0,myHours),ph);
+        const myStartDate=addBusinessDays(form.dateStr,dayIdx);
+        const fills=buildAutoFill(myStartDate,Math.max(0,myHours),ph);
         onSave({...form,staffId:sid},fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
         dayIdx+=myDays;
       });
