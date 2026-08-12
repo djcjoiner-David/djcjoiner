@@ -798,17 +798,29 @@ function MainApp({currentUser,onLogout}) {
         // Find position of dragged entry in the sorted list
         const draggedIdx=sortedSelected.indexOf(entry.id);
 
-        // Build list of working days relative to drop target
-        // draggedIdx entries go backward from toDateStr, rest go forward
+        // Build list of working days relative to drop target, based on UNIQUE dates
+        // (multiple entries can share a date, e.g. Slot 1 + Slot 2 on the same day -
+        // indexing by raw entry position would spread those across extra days)
         function getWorkingDay(baseDate, offset){
           // offset can be negative (backward) or positive (forward)
           return isoDate(addWorkingDays(baseDate, offset));
         }
 
+        const uniqueDates=[...new Set(sortedSelected.map(id=>entries.find(x=>x.id===id).dateStr))].sort();
+        const draggedDateIdx=uniqueDates.indexOf(entry.dateStr);
         const tgtDate=parseISO(toDateStr);
-        const idToDate=Object.fromEntries(sortedSelected.map((id,i)=>{
-          const offset=i-draggedIdx; // negative=before drop, 0=drop, positive=after drop
-          return[id,getWorkingDay(tgtDate,offset)];
+        const dateOffsetByDate=Object.fromEntries(uniqueDates.map((ds,i)=>[ds,i-draggedDateIdx]));
+        const idToDate=Object.fromEntries(sortedSelected.map(id=>{
+          const en=entries.find(x=>x.id===id);
+          return[id,getWorkingDay(tgtDate,dateOffsetByDate[en.dateStr])];
+        }));
+
+        // Preserve each entry's slot relative to the dragged entry's slot, so a
+        // Slot1+Slot2 pair stays a Slot1+Slot2 pair instead of collapsing onto one slot
+        const slotOffset=toSlot-entry.slot;
+        const idToSlot=Object.fromEntries(idsToMove.map(id=>{
+          const en=entries.find(x=>x.id===id);
+          return[id,Math.min(1,Math.max(0,en.slot+slotOffset))];
         }));
 
         // Preserve each entry's staff row relative to the dragged entry's staff row,
@@ -829,16 +841,16 @@ function MainApp({currentUser,onLogout}) {
           return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
         });
         pushUndo("moveMultiple",{prevStates});
-        // Calculate new dates/staff for all entries first
-        const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id]}));
+        // Calculate new dates/staff/slot for all entries first
+        const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id]}));
         // Patch all in parallel
-        await Promise.all(updates.map(({id,newDate,newStaffId})=>
-          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:toSlot},`?id=eq.${id}`)
+        await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
+          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot},`?id=eq.${id}`)
         ));
         // Single state update
         setEntries(prev=>prev.map(x=>{
           const u=updates.find(u=>u.id===x.id);
-          return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:toSlot}:x;
+          return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot}:x;
         }));
         setSelectedEntries(new Set());
         setSelectionMode(false);
