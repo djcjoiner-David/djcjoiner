@@ -760,12 +760,12 @@ function MainApp({currentUser,onLogout}) {
   }
 
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
-  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
+  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr)||isSaturday(parseISO(dateStr)))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
   async function handleDrop(e,toStaffId,toDateStr,toSlot){
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
-    if(isPast(toDateStr))return;
+    if(isPast(toDateStr)||isSaturday(parseISO(toDateStr)))return;
     // Multi-select: shift all entries by same date offset, preserve relative staff rows
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
       const idsToMove=[...selectedEntries];
@@ -795,15 +795,15 @@ function MainApp({currentUser,onLogout}) {
 
         // Preserve each entry's staff row relative to the dragged entry's staff row,
         // so dropping copies the exact layout across staff instead of collapsing onto one person
-        const staffOrder=staff.map(s=>s.id);
-        const origStaffIdx=staffOrder.indexOf(entry.staffId);
-        const targetStaffIdx=staffOrder.indexOf(toStaffId);
+        const staffOrderIds=orderedStaff.map(s=>s.id);
+        const origStaffIdx=staffOrderIds.indexOf(entry.staffId);
+        const targetStaffIdx=staffOrderIds.indexOf(toStaffId);
         const rowOffset=targetStaffIdx-origStaffIdx;
         const idToStaff=Object.fromEntries(idsToMove.map(id=>{
           const en=entries.find(x=>x.id===id);
-          const idx=staffOrder.indexOf(en.staffId);
-          const newIdx=Math.min(staffOrder.length-1,Math.max(0,idx+rowOffset));
-          return[id,staffOrder[newIdx]];
+          const idx=staffOrderIds.indexOf(en.staffId);
+          const newIdx=Math.min(staffOrderIds.length-1,Math.max(0,idx+rowOffset));
+          return[id,staffOrderIds[newIdx]];
         }));
 
         const prevStates=idsToMove.map(id=>{
