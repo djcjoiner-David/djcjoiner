@@ -72,7 +72,7 @@ function addWorkingDays(d, n) {
   let remaining=Math.abs(n);
   while(remaining>0) {
     cur.setDate(cur.getDate()+step);
-    if(!isSunday(cur)) remaining--;
+    if(!isWeekend(cur)) remaining--;
   }
   return cur;
 }
@@ -98,7 +98,19 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
 }
 
 
-const JOB_COLOUR_PRESETS = [
+function nextAvailableDate(staffIds, slot, entries, fromDateStr) {
+  const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
+  let cur=parseISO(startStr);
+  for(let i=0;i<730;i++){
+    if(!isWeekend(cur)){
+      const ds=isoDate(cur);
+      const conflict=staffIds.some(sid=>entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===slot));
+      if(!conflict)return ds;
+    }
+    cur=addDays(cur,1);
+  }
+  return startStr;
+}
   {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"},
   {bgColor:"#F0FDF4",borderColor:"#22C55E",textColor:"#15803D"},
   {bgColor:"#FFFBEB",borderColor:"#F59E0B",textColor:"#B45309"},
@@ -754,7 +766,7 @@ function MainApp({currentUser,onLogout}) {
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
     if(isPast(toDateStr))return;
-    // Multi-select: shift all entries by same date offset, reassign staff
+    // Multi-select: shift all entries by same date offset, preserve relative staff rows
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
       const idsToMove=[...selectedEntries];
       try{
@@ -780,21 +792,35 @@ function MainApp({currentUser,onLogout}) {
           const offset=i-draggedIdx; // negative=before drop, 0=drop, positive=after drop
           return[id,getWorkingDay(tgtDate,offset)];
         }));
+
+        // Preserve each entry's staff row relative to the dragged entry's staff row,
+        // so dropping copies the exact layout across staff instead of collapsing onto one person
+        const staffOrder=staff.map(s=>s.id);
+        const origStaffIdx=staffOrder.indexOf(entry.staffId);
+        const targetStaffIdx=staffOrder.indexOf(toStaffId);
+        const rowOffset=targetStaffIdx-origStaffIdx;
+        const idToStaff=Object.fromEntries(idsToMove.map(id=>{
+          const en=entries.find(x=>x.id===id);
+          const idx=staffOrder.indexOf(en.staffId);
+          const newIdx=Math.min(staffOrder.length-1,Math.max(0,idx+rowOffset));
+          return[id,staffOrder[newIdx]];
+        }));
+
         const prevStates=idsToMove.map(id=>{
           const en=entries.find(x=>x.id===id);
           return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
         });
         pushUndo("moveMultiple",{prevStates});
-        // Calculate new dates for all entries first
-        const updates=idsToMove.map(id=>({id,newDate:idToDate[id]}));
+        // Calculate new dates/staff for all entries first
+        const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id]}));
         // Patch all in parallel
-        await Promise.all(updates.map(({id,newDate})=>
-          db("PATCH","entries",{staff_id:toStaffId,date_str:newDate,slot:toSlot},`?id=eq.${id}`)
+        await Promise.all(updates.map(({id,newDate,newStaffId})=>
+          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:toSlot},`?id=eq.${id}`)
         ));
         // Single state update
         setEntries(prev=>prev.map(x=>{
           const u=updates.find(u=>u.id===x.id);
-          return u?{...x,staffId:toStaffId,dateStr:u.newDate,slot:toSlot}:x;
+          return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:toSlot}:x;
         }));
         setSelectedEntries(new Set());
         setSelectionMode(false);
@@ -1110,7 +1136,7 @@ function MainApp({currentUser,onLogout}) {
         </div>
       )}
 
-      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)}/>}
+      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)}/>}
@@ -1244,7 +1270,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
 
 // ── Entry Modal ───────────────────────────────────────────────
 
-function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
+function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) {
   const [form,setForm]=useState(()=>{
     const jobSubs=subItems.filter(s=>s.jobId===data.jobId);
     const defaultSub=data.subItemId||(jobSubs[0]?.id||"");
@@ -1349,7 +1375,14 @@ function EntryModal({data,staff,jobs,subItems,onSave,onRemove,onClose}) {
             <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155"}}>
               <input type="checkbox" checked={form.staffIds.includes(s.id)}
                 onChange={e=>{
-                  setForm(f=>({...f,staffIds:e.target.checked?[...f.staffIds,s.id]:f.staffIds.filter(id=>id!==s.id),staffId:e.target.checked?s.id:f.staffIds.find(id=>id!==s.id)||""}));
+                  const newStaffIds=e.target.checked?[...form.staffIds,s.id]:form.staffIds.filter(id=>id!==s.id);
+                  const newStaffId=e.target.checked?s.id:(form.staffIds.find(id=>id!==s.id)||"");
+                  setForm(f=>{
+                    const nextDate=data.mode==="new"&&newStaffIds.length>0&&entries
+                      ?nextAvailableDate(newStaffIds,f.slot,entries,f.dateStr)
+                      :f.dateStr;
+                    return{...f,staffIds:newStaffIds,staffId:newStaffId,dateStr:nextDate};
+                  });
                 }}
                 style={{width:14,height:14}}/>
               {s.name} <span style={{fontSize:11,color:"#94A3B8"}}>({s.productiveHours}h/day)</span>
