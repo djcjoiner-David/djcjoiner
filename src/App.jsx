@@ -578,9 +578,9 @@ function MainApp({currentUser,onLogout}) {
         db("GET","sub_items","","?order=created_at"),
         db("GET","entries","","?order=created_at"),
       ]);
-      setStaff(staffData.map(s=>({id:s.id,name:s.name,productiveHours:s.productive_hours||8})));
+      setStaff(staffData.map(s=>({id:s.id,name:s.name,productiveHours:Number(s.productive_hours)||8})));
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color})));
-      setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:s.total_hours||0})));
+      setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
       setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null})));
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
@@ -647,11 +647,11 @@ function MainApp({currentUser,onLogout}) {
     setSaving(true);
     try{
       if(data.mode==="new"){
-        const all=extraEntries&&extraEntries.length>0?extraEntries:[{dateStr:data.dateStr,hours:data.hours}];
+        const all=extraEntries&&extraEntries.length>0?extraEntries:[{dateStr:data.dateStr,hours:data.hours,staffId:data.staffId}];
         const valid=all.filter(p=>!isPast(p.dateStr));
-        const conflicts=valid.filter(p=>!!entryMap[`${data.staffId}|${p.dateStr}|${data.slot}`]);
-        const buildRows=(items)=>items.map(({dateStr,hours})=>({
-          staff_id:data.staffId,
+        const conflicts=valid.filter(p=>!!entryMap[`${p.staffId||data.staffId}|${p.dateStr}|${data.slot}`]);
+        const buildRows=(items)=>items.map(({dateStr,hours,staffId})=>({
+          staff_id:staffId||data.staffId,
           job_id:data.entryType==="misc"?null:data.jobId,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:dateStr,slot:data.slot,hours,
@@ -712,7 +712,7 @@ function MainApp({currentUser,onLogout}) {
         const [newJob]=await db("POST","jobs",[{job_no:data.jobNo,name:data.name,bg_color:data.bgColor,border_color:data.borderColor,text_color:data.textColor}]);
         setJobs(prev=>[...prev,{id:newJob.id,jobNo:newJob.job_no,name:newJob.name,bgColor:newJob.bg_color,borderColor:newJob.border_color,textColor:newJob.text_color}]);
         const validSubs=data.subItems.filter(s=>s.name.trim());
-        if(validSubs.length>0){const inserted=await db("POST","sub_items",validSubs.map(s=>({job_id:newJob.id,name:s.name,total_hours:s.totalHours||0})));setSubItems(prev=>[...prev,...inserted.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:s.total_hours||0}))]);}
+        if(validSubs.length>0){const inserted=await db("POST","sub_items",validSubs.map(s=>({job_id:newJob.id,name:s.name,total_hours:s.totalHours||0})));setSubItems(prev=>[...prev,...inserted.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0}))]);}
       }else{
         await db("PATCH","jobs",{job_no:data.jobNo,name:data.name,bg_color:data.bgColor,border_color:data.borderColor,text_color:data.textColor},`?id=eq.${data.id}`);
         setJobs(prev=>prev.map(j=>j.id===data.id?{...j,jobNo:data.jobNo,name:data.name,bgColor:data.bgColor,borderColor:data.borderColor,textColor:data.textColor}:j));
@@ -721,7 +721,7 @@ function MainApp({currentUser,onLogout}) {
         for(const s of toDelete)await db("DELETE","sub_items",null,`?id=eq.${s.id}`);
         setSubItems(prev=>prev.filter(s=>!toDelete.find(d=>d.id===s.id)));
         const toAdd=data.subItems.filter(s=>s.isNew&&s.name.trim());
-        if(toAdd.length>0){const inserted=await db("POST","sub_items",toAdd.map(s=>({job_id:data.id,name:s.name,total_hours:s.totalHours||0})));setSubItems(prev=>[...prev,...inserted.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:s.total_hours||0}))]);}
+        if(toAdd.length>0){const inserted=await db("POST","sub_items",toAdd.map(s=>({job_id:data.id,name:s.name,total_hours:s.totalHours||0})));setSubItems(prev=>[...prev,...inserted.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0}))]);}
         const toUpdate=data.subItems.filter(s=>!s.isNew&&s.name.trim());
         for(const s of toUpdate){await db("PATCH","sub_items",{name:s.name,total_hours:s.totalHours||0},`?id=eq.${s.id}`);setSubItems(prev=>prev.map(si=>si.id===s.id?{...si,name:s.name,totalHours:s.totalHours||0}:si));}
       }
@@ -742,7 +742,7 @@ function MainApp({currentUser,onLogout}) {
     try{
       if(data.isNew){
         const [ns]=await db("POST","staff",[{name:data.name,productive_hours:data.productiveHours||8}]);
-        setStaff(prev=>[...prev,{id:ns.id,name:ns.name,productiveHours:ns.productive_hours||8}]);
+        setStaff(prev=>[...prev,{id:ns.id,name:ns.name,productiveHours:Number(ns.productive_hours)||8}]);
       }else{
         await db("PATCH","staff",{name:data.name,productive_hours:data.productiveHours||8},`?id=eq.${data.id}`);
         setStaff(prev=>prev.map(s=>s.id===data.id?{...s,name:data.name,productiveHours:data.productiveHours||8}:s));
@@ -1304,7 +1304,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
       // Then distribute days as equally as possible across staff
       const staffWithPh=staffToSchedule.map(sid=>{
         const sf=staff.find(s=>s.id===sid);
-        return{sid,ph:sf?.productiveHours||8};
+        return{sid,ph:Number(sf?.productiveHours)||8};
       });
       const totalHours=form.totalHours;
 
@@ -1318,7 +1318,9 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
       const baseDays=Math.floor(totalDays/n);
       const extraDays=totalDays%n;
 
-      let dayIdx=0;
+      // Build one combined batch across ALL staff and save it in a single call,
+      // so a conflict on one person can't clobber another person's confirmation/save
+      const combined=[];
       staffWithPh.forEach(({sid,ph},idx)=>{
         const myDays=baseDays+(idx<extraDays?1:0);
         // Calculate hours for this person's days at their productive rate
@@ -1332,22 +1334,23 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
           myHours=Math.round((totalHours-prevAllocated)*10)/10;
         }
         const fills=buildAutoFill(form.dateStr,Math.max(0,myHours),ph);
-        onSave({...form,staffId:sid},fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
-        dayIdx+=myDays;
+        fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
       });
+      onSave({...form,staffId:staffToSchedule[0]},combined);
     } else {
-      // Single staff or misc
+      // Single staff, misc, or manual multi-staff (no autofill) - still one batch, one call
+      const combined=[];
       staffToSchedule.forEach(sid=>{
-        const sData={...form,staffId:sid};
         const sf=staff.find(s=>s.id===sid);
-        const ph=sf?.productiveHours||8;
+        const ph=Number(sf?.productiveHours)||8;
         if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
           const fills=buildAutoFill(form.dateStr,form.totalHours,ph);
-          onSave(sData,fills.map(p=>({dateStr:p.dateStr,hours:p.hours})));
+          fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
         } else {
-          onSave(sData,null);
+          combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid});
         }
       });
+      onSave({...form,staffId:staffToSchedule[0]},combined);
     }
   }
 
@@ -1390,7 +1393,16 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
           ))}
         </div>
       </div>
-      <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>set("dateStr",e.target.value)}/>
+      <div style={{display:"flex",alignItems:"flex-end",gap:8,marginBottom:14}}>
+        <div style={{flex:1}}>
+          <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>set("dateStr",e.target.value)}/>
+        </div>
+        {form.mode==="new"&&<button type="button" onClick={()=>{
+            const ids=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
+            if(ids.length===0)return;
+            set("dateStr",nextAvailableDate(ids,form.slot,entries,todayStr));
+          }} style={{padding:"7px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",height:34}}>First Available</button>}
+      </div>
       <Sel label="Slot" value={form.slot} onChange={e=>set("slot",Number(e.target.value))}>
         <option value={0}>Slot 1</option><option value={1}>Slot 2</option>
       </Sel>
