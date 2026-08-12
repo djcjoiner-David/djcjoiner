@@ -111,6 +111,24 @@ function nextAvailableDate(staffIds, slot, entries, fromDateStr) {
   }
   return startStr;
 }
+
+// Splits totalHours across staff proportional to each person's productive rate.
+// Always sums to exactly totalHours (last person absorbs the rounding remainder).
+// Used by both the modal preview and the actual save so they can never disagree.
+function splitHoursByStaff(staffWithPh, totalHours) {
+  const totalPh=staffWithPh.reduce((a,x)=>a+x.ph,0)||1;
+  let alloc=0;
+  return staffWithPh.map(({sid,name,ph},idx)=>{
+    const isLast=idx===staffWithPh.length-1;
+    const hours=isLast
+      ?Math.round((totalHours-alloc)*10)/10
+      :Math.round((totalHours*ph/totalPh)*10)/10;
+    alloc+=hours;
+    return{sid,name,ph,hours};
+  });
+}
+
+const JOB_COLOUR_PRESETS = [
   {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"},
   {bgColor:"#F0FDF4",borderColor:"#22C55E",textColor:"#15803D"},
   {bgColor:"#FFFBEB",borderColor:"#F59E0B",textColor:"#B45309"},
@@ -1300,40 +1318,20 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
     else if(!form.jobId)return;
 
     if(autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length>1){
-      // Build ALL days needed for the full job first
-      // Then distribute days as equally as possible across staff
+      // Split the budget hours directly, proportional to each person's productive rate.
+      // (Splitting by whole days first and multiplying by rate can overshoot the budget
+      // when the job's last day is partial - hours must be split, not days.)
       const staffWithPh=staffToSchedule.map(sid=>{
         const sf=staff.find(s=>s.id===sid);
         return{sid,ph:Number(sf?.productiveHours)||8};
       });
-      const totalHours=form.totalHours;
-
-      // Generate all working days needed at average productive rate
-      const avgPh=staffWithPh.reduce((a,x)=>a+x.ph,0)/staffWithPh.length;
-      const allDays=buildAutoFill(form.dateStr,totalHours,avgPh);
-      const totalDays=allDays.length;
-      const n=staffWithPh.length;
-
-      // Distribute days equally - base days each + give remainder to first staff
-      const baseDays=Math.floor(totalDays/n);
-      const extraDays=totalDays%n;
+      const shares=splitHoursByStaff(staffWithPh,form.totalHours);
 
       // Build one combined batch across ALL staff and save it in a single call,
       // so a conflict on one person can't clobber another person's confirmation/save
       const combined=[];
-      staffWithPh.forEach(({sid,ph},idx)=>{
-        const myDays=baseDays+(idx<extraDays?1:0);
-        // Calculate hours for this person's days at their productive rate
-        let myHours=myDays*ph;
-        // Last person gets exact remainder to avoid rounding
-        if(idx===staffWithPh.length-1){
-          const prevAllocated=staffWithPh.slice(0,idx).reduce((a,_,i)=>{
-            const d=baseDays+(i<extraDays?1:0);
-            return a+d*staffWithPh[i].ph;
-          },0);
-          myHours=Math.round((totalHours-prevAllocated)*10)/10;
-        }
-        const fills=buildAutoFill(form.dateStr,Math.max(0,myHours),ph);
+      shares.forEach(({sid,ph,hours})=>{
+        const fills=buildAutoFill(form.dateStr,Math.max(0,hours),ph);
         fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
       });
       onSave({...form,staffId:staffToSchedule[0]},combined);
@@ -1436,25 +1434,17 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
               <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Deduct from Budget</div>
               <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours} (from budget)`:"Enter hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box",outline:"none"}}/>
               {form.staffIds.length>1&&(()=>{
-                const totalPh=form.staffIds.reduce((a,sid)=>{const sf=staff.find(s=>s.id===sid);return a+(sf?.productiveHours||8);},0);
+                const staffWithPh=form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,name:sf?.name,ph:Number(sf?.productiveHours)||8};});
+                const shares=splitHoursByStaff(staffWithPh,form.totalHours||0);
                 return <div style={{fontSize:11,color:"#3B82F6",marginTop:3,lineHeight:1.5}}>
                   📋 {form.totalHours}h split proportionally:<br/>
-                  {(()=>{
-                    const swp=form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,name:sf?.name,ph:sf?.productiveHours||8};});
-                    const n=swp.length;const avgPh=swp.reduce((a,x)=>a+x.ph,0)/n;
-                    const totalDays=(form.totalHours||0)/avgPh;const daysEach=totalDays/n;
-                    let alloc=0;
-                    return swp.map(({sid,name,ph},idx)=>{
-                      const isLast=idx===swp.length-1;
-                      const share=isLast?Math.round(((form.totalHours||0)-alloc)*10)/10:Math.round(daysEach*ph*10)/10;
-                      alloc+=share;
-                      return <span key={sid} style={{display:"block",paddingLeft:8}}>• {name}: {share}h ({ph}h/day = ~{Math.ceil(share/ph)} days)</span>;
-                    });
-                  })()}
+                  {shares.map(({sid,name,ph,hours})=>(
+                    <span key={sid} style={{display:"block",paddingLeft:8}}>• {name}: {hours}h ({ph}h/day = ~{ph>0?Math.ceil(hours/ph):0} days)</span>
+                  ))}
                 </div>;
               })()}
               {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:3}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
-              {preview.length>0&&(
+              {form.staffIds.length<=1&&preview.length>0&&(
                 <div style={{marginTop:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px"}}>
                   <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted · {productiveHours}h/day rate</div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
@@ -1472,7 +1462,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
         <div>{form.mode==="edit"&&<Btn variant="danger" onClick={()=>onRemove(form.id)}>Remove</Btn>}</div>
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={handleSave}>{autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save"}</Btn>
+          <Btn variant="primary" onClick={handleSave}>{autoFill&&form.entryType!=="misc"&&form.staffIds.length>1?`Schedule ${form.staffIds.length} staff`:autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save"}</Btn>
         </div>
       </div>
     </Modal>
