@@ -28,7 +28,7 @@ async function db(method, table, body, query="") {
   const qs = new URLSearchParams({ table, ...extraParams }).toString();
   const res = await fetch(`/api/db?${qs}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_API_SECRET },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) { const e = await res.text(); throw new Error(e); }
