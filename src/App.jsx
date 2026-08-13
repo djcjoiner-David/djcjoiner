@@ -113,16 +113,24 @@ function nextAvailableDate(staffIds, slot, entries, fromDateStr) {
 }
 
 // Splits totalHours across staff proportional to each person's productive rate.
-// Always sums to exactly totalHours (last person absorbs the rounding remainder).
-// Used by both the modal preview and the actual save so they can never disagree.
+// Everyone except the last person gets only WHOLE days at their own rate -
+// the last person absorbs whatever's left over, so only one person ever ends
+// up with a partial day instead of every person getting their own partial day.
+// Always sums to exactly totalHours. Used by both the modal preview and the
+// actual save so they can never disagree.
 function splitHoursByStaff(staffWithPh, totalHours) {
   const totalPh=staffWithPh.reduce((a,x)=>a+x.ph,0)||1;
   let alloc=0;
   return staffWithPh.map(({sid,name,ph},idx)=>{
     const isLast=idx===staffWithPh.length-1;
-    const hours=isLast
-      ?Math.round((totalHours-alloc)*10)/10
-      :Math.round((totalHours*ph/totalPh)*10)/10;
+    let hours;
+    if(isLast){
+      hours=Math.round((totalHours-alloc)*10)/10;
+    }else{
+      const rawDays=totalHours/totalPh;
+      const wholeDays=Math.floor(rawDays+1e-9);
+      hours=Math.round(wholeDays*ph*10)/10;
+    }
     alloc+=hours;
     return{sid,name,ph,hours};
   });
@@ -245,25 +253,16 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver}) {
-  const [hovered,setHovered]=useState(false);
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver}) {
   return (
     <div
-      draggable={canEdit&&!copyMode}
-      onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined}
+      draggable={canEdit&&!copyMode&&!moveMode}
+      onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
-      onMouseEnter={()=>setHovered(true)}
-      onMouseLeave={()=>setHovered(false)}
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      {canEdit&&hovered&&!conflict&&(
-        <div onClick={e=>{e.stopPropagation();onCopy(entry);}}
-          style={{position:"absolute",top:0,right:0,bottom:0,width:20,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",background:"rgba(0,0,0,0.12)",borderLeft:"1px solid rgba(0,0,0,0.1)",borderRadius:"0 5px 5px 0",fontSize:10,color:"#fff",fontWeight:700,userSelect:"none"}}>
-          ⧉
-        </div>
-      )}
-      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3,paddingRight:hovered&&canEdit?18:0}}>{job.jobNo} · {job.name}</div>
+      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
       <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
         {subItem?subItem.name:"General"} · {isLastEntry&&budgetRemaining!==null
           ?<span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>
@@ -275,24 +274,15 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,onCopy,copyMode}) {
-  const [hovered,setHovered]=useState(false);
+function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode}) {
   return (
     <div
-      draggable={canEdit&&!copyMode}
-      onDragStart={canEdit&&!copyMode?e=>onDragStart(e,entry):undefined}
+      draggable={canEdit&&!copyMode&&!moveMode}
+      onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
-      onMouseEnter={()=>setHovered(true)}
-      onMouseLeave={()=>setHovered(false)}
       style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      {canEdit&&hovered&&!conflict&&(
-        <div onClick={e=>{e.stopPropagation();onCopy(entry);}}
-          style={{position:"absolute",top:0,right:0,bottom:0,width:20,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",background:"rgba(0,0,0,0.12)",borderLeft:"1px solid rgba(0,0,0,0.1)",borderRadius:"0 5px 5px 0",fontSize:10,color:"#fff",fontWeight:700,userSelect:"none"}}>
-          ⧉
-        </div>
-      )}
       <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{note} · {hours}h</div>
     </div>
   );
@@ -594,12 +584,24 @@ function MainApp({currentUser,onLogout}) {
     } catch(e){setError("Undo failed.");}
     setSaving(false);
   }
-  const [copiedEntry,setCopiedEntry]=useState(null);
-  const [copyMode,setCopyMode]=useState(false);
+  const [copyMode,setCopyMode]=useState(false); // tap-to-copy, arms via Select toolbar's Copy button
   const [selectedEntries,setSelectedEntries]=useState(new Set()); // for multi-select
   const [selectionMode,setSelectionMode]=useState(false);
   const [moveMode,setMoveMode]=useState(false); // tap-to-move, for touch devices where drag-and-drop can't fire
   const [dropTarget,setDropTarget]=useState(null);
+
+  useEffect(()=>{
+    function onKeyDown(e){
+      if(e.key==="Escape"){
+        setSelectedEntries(new Set());
+        setSelectionMode(false);
+        setMoveMode(false);
+        setCopyMode(false);
+      }
+    }
+    window.addEventListener("keydown",onKeyDown);
+    return ()=>window.removeEventListener("keydown",onKeyDown);
+  },[]);
 
   const loadAll=useCallback(async()=>{
     try {
@@ -652,22 +654,6 @@ function MainApp({currentUser,onLogout}) {
 
   function openNewEntry(staffId,dateStr,slot){
     if(!canEdit||isPast(dateStr))return;
-    if(copyMode&&copiedEntry){
-      // Paste directly without opening modal
-      const pasteData={
-        mode:"new",staffId,dateStr,slot,
-        jobId:copiedEntry.jobId||null,
-        subItemId:copiedEntry.subItemId||null,
-        hours:copiedEntry.hours,
-        autoFill:false,
-        entryType:copiedEntry.miscNote?"misc":"job",
-        miscNote:copiedEntry.miscNote||null,
-        totalHours:0,
-      };
-      saveEntry(pasteData,null);
-      // Keep copy mode active so user can paste multiple times
-      return;
-    }
     setEntryModal({mode:"new",staffId,dateStr,slot,jobId:"",subItemId:"",hours:8,autoFill:true,entryType:"job",miscNote:""});
   }
   function openEditEntry(entry){
@@ -879,6 +865,66 @@ function MainApp({currentUser,onLogout}) {
       setMoveMode(false);
     }catch(err){setError("Failed to move entries.");}
   }
+  async function performGroupCopy(anchorEntry,toStaffId,toDateStr,toSlot){
+    if(!canEdit)return;
+    if(isPast(toDateStr)||isSaturday(parseISO(toDateStr)))return;
+    const idsToCopy=[...selectedEntries];
+    try{
+      const sortedSelected=[...idsToCopy].sort((a,b)=>{
+        const ea=entries.find(x=>x.id===a);
+        const eb=entries.find(x=>x.id===b);
+        return ea.dateStr.localeCompare(eb.dateStr);
+      });
+
+      // Same offset math as performGroupMove: unique-date based (so same-day
+      // Slot1+Slot2 pairs copy together), slot relative to anchor, staff row
+      // relative to anchor - reproducing the exact selected layout at the target.
+      function getWorkingDay(baseDate, offset){
+        return isoDate(addWorkingDays(baseDate, offset));
+      }
+      const uniqueDates=[...new Set(sortedSelected.map(id=>entries.find(x=>x.id===id).dateStr))].sort();
+      const anchorDateIdx=uniqueDates.indexOf(anchorEntry.dateStr);
+      const tgtDate=parseISO(toDateStr);
+      const dateOffsetByDate=Object.fromEntries(uniqueDates.map((ds,i)=>[ds,i-anchorDateIdx]));
+      const slotOffset=toSlot-anchorEntry.slot;
+      const staffOrderIds=orderedStaff.map(s=>s.id);
+      const origStaffIdx=staffOrderIds.indexOf(anchorEntry.staffId);
+      const targetStaffIdx=staffOrderIds.indexOf(toStaffId);
+      const rowOffset=targetStaffIdx-origStaffIdx;
+
+      const planned=idsToCopy.map(id=>{
+        const en=entries.find(x=>x.id===id);
+        const newDate=getWorkingDay(tgtDate,dateOffsetByDate[en.dateStr]);
+        const newSlot=Math.min(1,Math.max(0,en.slot+slotOffset));
+        const idx=staffOrderIds.indexOf(en.staffId);
+        const newStaffIdx=Math.min(staffOrderIds.length-1,Math.max(0,idx+rowOffset));
+        const newStaffId=staffOrderIds[newStaffIdx];
+        return{en,newDate,newSlot,newStaffId};
+      });
+
+      // Don't silently overwrite an existing entry - skip any target that's
+      // already occupied and tell the user how many were skipped.
+      const skipped=planned.filter(p=>!!entryMap[`${p.newStaffId}|${p.newDate}|${p.newSlot}`]);
+      const toInsert=planned.filter(p=>!entryMap[`${p.newStaffId}|${p.newDate}|${p.newSlot}`]);
+      if(toInsert.length===0){
+        setError("Couldn't paste - every target slot is already occupied.");
+        return;
+      }
+
+      const rows=toInsert.map(({en,newDate,newSlot,newStaffId})=>({
+        staff_id:newStaffId,job_id:en.jobId||null,sub_item_id:en.subItemId||null,
+        date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null
+      }));
+      const inserted=await db("POST","entries",rows);
+      const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:i.hours,miscNote:i.misc_note||null}));
+      setEntries(prev=>[...prev,...newEntries]);
+      pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
+      if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
+      setSelectedEntries(new Set());
+      setSelectionMode(false);
+      setCopyMode(false);
+    }catch(err){setError("Failed to copy entries.");}
+  }
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
   function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr)||isSaturday(parseISO(dateStr)))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
@@ -902,7 +948,6 @@ function MainApp({currentUser,onLogout}) {
     dragEntry.current=null;
   }
   function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
-  function handleCopy(entry){setCopiedEntry(entry);setCopyMode(true);}
 
   function toggleSelectEntry(id){
     setSelectedEntries(prev=>{
@@ -925,6 +970,7 @@ function MainApp({currentUser,onLogout}) {
       setSelectedEntries(new Set());
       setSelectionMode(false);
       setMoveMode(false);
+      setCopyMode(false);
     }catch(e){setError("Failed to delete entries.");}
     setSaving(false);
   }
@@ -1043,7 +1089,7 @@ function MainApp({currentUser,onLogout}) {
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
               {canEdit&&(
                 <>
-                  <button onClick={()=>{setSelectionMode(s=>!s);setSelectedEntries(new Set());setMoveMode(false);}}
+                  <button onClick={()=>{setSelectionMode(s=>!s);setSelectedEntries(new Set());setMoveMode(false);setCopyMode(false);}}
                     style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:selectionMode?"#3B82F6":"#fff",cursor:"pointer",fontSize:12,color:selectionMode?"#fff":"#64748B"}}>
                     {selectionMode?"✓ Selecting":"Select"}
                   </button>
@@ -1053,9 +1099,13 @@ function MainApp({currentUser,onLogout}) {
                         style={{padding:"5px 12px",border:"1px solid #FECACA",borderRadius:7,background:"#FEF2F2",cursor:"pointer",fontSize:12,color:"#EF4444",fontWeight:600}}>
                         Delete {selectedEntries.size}
                       </button>
-                      <button onClick={()=>setMoveMode(m=>!m)}
+                      <button onClick={()=>{setMoveMode(m=>!m);setCopyMode(false);}}
                         style={{padding:"5px 12px",border:"1px solid #93C5FD",borderRadius:7,background:moveMode?"#3B82F6":"#EFF6FF",cursor:"pointer",fontSize:12,color:moveMode?"#fff":"#1D4ED8",fontWeight:600}}>
                         {moveMode?"Tap destination…":`Move ${selectedEntries.size}`}
+                      </button>
+                      <button onClick={()=>{setCopyMode(c=>!c);setMoveMode(false);}}
+                        style={{padding:"5px 12px",border:"1px solid #BBF7D0",borderRadius:7,background:copyMode?"#15803D":"#F0FDF4",cursor:"pointer",fontSize:12,color:copyMode?"#fff":"#15803D",fontWeight:600}}>
+                        {copyMode?"Tap destination…":`Copy ${selectedEntries.size}`}
                       </button>
                     </>
                   )}
@@ -1080,12 +1130,6 @@ function MainApp({currentUser,onLogout}) {
             </div>
           )}
 
-                    {copyMode&&copiedEntry&&(
-            <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#1D4ED8",borderRadius:10,padding:"10px 20px",display:"flex",alignItems:"center",gap:16,fontSize:13,color:"#fff",fontWeight:600,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,0.25)"}}>
-              📋 Copy mode — click any empty slot to paste
-              <button onClick={()=>{setCopyMode(false);setCopiedEntry(null);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:6,padding:"4px 12px",cursor:"pointer",color:"#fff",fontWeight:600,fontSize:12}}>Cancel</button>
-            </div>
-          )}
           </div>{/* end sticky controls */}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
 
@@ -1155,7 +1199,7 @@ function MainApp({currentUser,onLogout}) {
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode}/>
                                 : job
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
@@ -1165,10 +1209,10 @@ function MainApp({currentUser,onLogout}) {
                                       const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
                                       const totalBudget=si?.totalHours||null;
                                       const isOver=si&&isLastEntry&&budgetRemaining!==null&&budgetRemaining<0;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver}/>;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver}/>;
                                     })()
-                                  : <EmptySlot onClick={moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
-                              : <EmptySlot onClick={isSat?undefined:moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit} copyMode={copyMode}/>
+                                  : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
+                              : <EmptySlot onClick={isSat?undefined:copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit} copyMode={copyMode}/>
                             }
                           </td>
                         );
