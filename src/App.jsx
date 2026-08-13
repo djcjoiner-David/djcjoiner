@@ -800,7 +800,7 @@ function MainApp({currentUser,onLogout}) {
 
   async function performGroupMove(anchorEntry,toStaffId,toDateStr,toSlot){
     if(!canEdit)return;
-    if(isPast(toDateStr)||isSaturday(parseISO(toDateStr)))return;
+    if(isPast(toDateStr))return;
     const idsToMove=[...selectedEntries];
     try{
       // Sort all selected entries by date
@@ -867,7 +867,7 @@ function MainApp({currentUser,onLogout}) {
   }
   async function performGroupCopy(anchorEntry,toStaffId,toDateStr,toSlot){
     if(!canEdit)return;
-    if(isPast(toDateStr)||isSaturday(parseISO(toDateStr)))return;
+    if(isPast(toDateStr))return;
     const idsToCopy=[...selectedEntries];
     try{
       const sortedSelected=[...idsToCopy].sort((a,b)=>{
@@ -926,12 +926,12 @@ function MainApp({currentUser,onLogout}) {
     }catch(err){setError("Failed to copy entries.");}
   }
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
-  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr)||isSaturday(parseISO(dateStr)))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
+  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
   async function handleDrop(e,toStaffId,toDateStr,toSlot){
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
-    if(isPast(toDateStr)||isSaturday(parseISO(toDateStr)))return;
+    if(isPast(toDateStr))return;
     // Multi-select: shift all entries by same date offset, preserve relative staff rows
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
       await performGroupMove(entry,toStaffId,toDateStr,toSlot);
@@ -1212,7 +1212,7 @@ function MainApp({currentUser,onLogout}) {
                       return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
-                              : <EmptySlot onClick={isSat?undefined:copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit} copyMode={copyMode}/>
+                              : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                             }
                           </td>
                         );
