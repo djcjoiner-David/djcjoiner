@@ -15,10 +15,6 @@ const ALLOWED_COLUMNS = {
 const ALLOWED_TABLES = Object.keys(ALLOWED_COLUMNS);
 
 export default async function handler(req, res) {
-  // --- Authentication ---
-  // Requires a matching secret on every request. Set API_SECRET in Vercel's
-  // Environment Variables, and send the same value as the x-api-key header
-  // from the frontend (see the App.jsx db() function).
   const provided = req.headers['x-api-key'];
   if (!process.env.API_SECRET || provided !== process.env.API_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -31,10 +27,6 @@ export default async function handler(req, res) {
   const validColumns = ALLOWED_COLUMNS[table];
   const sql = neon(process.env.DATABASE_URL);
 
-  // Builds parameterized WHERE conditions. Any filter key that isn't a real
-  // column for this table is rejected outright instead of silently dropped -
-  // silently dropping a bad filter is exactly what let a DELETE/PATCH end up
-  // with zero conditions and hit every row in the table.
   function buildConditions(filterObj, paramsArr) {
     const conditions = [];
     for (const [key, val] of Object.entries(filterObj)) {
@@ -55,8 +47,6 @@ export default async function handler(req, res) {
     return conditions;
   }
 
-  // Validates `order=column` or `order=column.asc` / `order=column.desc`
-  // against the real column list, instead of pasting it into the query raw.
   function buildOrderClause(orderParam) {
     if (!orderParam) return '';
     const [col, dir] = orderParam.split('.');
@@ -102,9 +92,6 @@ export default async function handler(req, res) {
       const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(',');
       const params = [...vals];
       const conditions = buildConditions(filters, params);
-      // Hard safety backstop: never allow an update with no WHERE clause.
-      // This is what stops a missing/blank id from silently becoming
-      // "update every row in the table".
       if (conditions.length === 0) {
         return res.status(400).json({ error: 'Refusing to run an unconditioned update - at least one filter is required.' });
       }
@@ -116,86 +103,10 @@ export default async function handler(req, res) {
     if (req.method === 'DELETE') {
       const params = [];
       const conditions = buildConditions(filters, params);
-      // Hard safety backstop: never allow a delete with no WHERE clause.
-      // This is the single most important line in this file - it's what
-      // stops a missing/undefined id from silently becoming "delete
-      // everything in the table" with zero warning.
       if (conditions.length === 0) {
         return res.status(400).json({ error: 'Refusing to run an unconditioned delete - at least one filter is required.' });
       }
       const q = `delete from ${table} where ${conditions.join(' and ')} returning *`;
-      const rows = await sql(q, params);
-      return res.status(200).json(rows);
-    }
-
-    return res.status(405).json({ error: 'Method not allowed' });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
-}
-import { neon } from '@neondatabase/serverless';
-
-const ALLOWED_TABLES = ['staff', 'jobs', 'sub_items', 'entries', 'user_roles'];
-
-export default async function handler(req, res) {
-  const { table, order, ...filters } = req.query;
-  if (!ALLOWED_TABLES.includes(table)) {
-    return res.status(400).json({ error: 'Invalid table' });
-  }
-
-  const sql = neon(process.env.DATABASE_URL);
-
-  function buildConditions(filterObj, paramsArr) {
-    const conditions = [];
-    for (const [key, val] of Object.entries(filterObj)) {
-      if (typeof val === 'string' && val.startsWith('eq.')) {
-        paramsArr.push(val.slice(3));
-        conditions.push(`${key} = $${paramsArr.length}`);
-      }
-    }
-    return conditions;
-  }
-
-  try {
-    if (req.method === 'GET') {
-      const params = [];
-      const conditions = buildConditions(filters, params);
-      let query = `select * from ${table}`;
-      if (conditions.length) query += ' where ' + conditions.join(' and ');
-      if (order) query += ` order by ${order}`;
-      const rows = await sql(query, params);
-      return res.status(200).json(rows);
-    }
-
-    if (req.method === 'POST') {
-      const rowsIn = Array.isArray(req.body) ? req.body : [req.body];
-      const results = [];
-      for (const row of rowsIn) {
-        const cols = Object.keys(row);
-        const vals = Object.values(row);
-        const placeholders = vals.map((_, i) => `$${i + 1}`).join(',');
-        const q = `insert into ${table} (${cols.join(',')}) values (${placeholders}) returning *`;
-        const r = await sql(q, vals);
-        results.push(r[0]);
-      }
-      return res.status(200).json(results);
-    }
-
-    if (req.method === 'PATCH') {
-      const cols = Object.keys(req.body);
-      const vals = Object.values(req.body);
-      const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(',');
-      const params = [...vals];
-      const conditions = buildConditions(filters, params);
-      const q = `update ${table} set ${setClause}${conditions.length ? ' where ' + conditions.join(' and ') : ''} returning *`;
-      const rows = await sql(q, params);
-      return res.status(200).json(rows);
-    }
-
-    if (req.method === 'DELETE') {
-      const params = [];
-      const conditions = buildConditions(filters, params);
-      const q = `delete from ${table}${conditions.length ? ' where ' + conditions.join(' and ') : ''} returning *`;
       const rows = await sql(q, params);
       return res.status(200).json(rows);
     }
