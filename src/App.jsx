@@ -159,7 +159,7 @@ function ColorPicker({label,value,onChange}) {
       <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>{label}</div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
         <input type="color" value={value} onChange={e=>onChange(e.target.value)} style={{width:32,height:32,padding:2,border:"1px solid #CBD5E1",borderRadius:6,cursor:"pointer"}}/>
-        <input type="text" value={value} onChange={e=>onChange(e.target.value)} style={{flex:1,padding:"5px 8px",border:"1px solid #CBD5E1",borderRadius:6,fontSize:12,fontFamily:"monospace"}}/>
+        <input type="text" value={value} onChange={e=>onChange(e.target.value)} style={{flex:1,padding:"5px 8px",border:"1px solid #CBD5E1",borderRadius:6,fontSize:16,fontFamily:"monospace"}}/>
       </div>
     </div>
   );
@@ -211,7 +211,7 @@ function Inp({label,...props}) {
   return (
     <div style={{marginBottom:10}}>
       {label&&<div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>{label}</div>}
-      <input style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box",outline:"none"}} {...props}/>
+      <input style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}} {...props}/>
     </div>
   );
 }
@@ -220,7 +220,7 @@ function Sel({label,children,...props}) {
   return (
     <div style={{marginBottom:10}}>
       {label&&<div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>{label}</div>}
-      <select style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,background:"#fff",outline:"none"}} {...props}>
+      <select style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,background:"#fff",outline:"none"}} {...props}>
         {children}
       </select>
     </div>
@@ -418,7 +418,7 @@ function UserManagementModal({onClose}) {
                   <td style={{padding:"8px 12px",color:"#475569"}}>{u.email}</td>
                   <td style={{padding:"8px 12px"}}>
                     <select value={u.role} onChange={e=>changeRole(u.id,e.target.value)}
-                      style={{padding:"3px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,background:roleColors[u.role]?.bg,color:roleColors[u.role]?.color,fontWeight:600}}>
+                      style={{padding:"3px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:16,background:roleColors[u.role]?.bg,color:roleColors[u.role]?.color,fontWeight:600}}>
                       <option value="admin">Admin</option>
                       <option value="manager">Manager</option>
                       <option value="staff">Staff</option>
@@ -458,6 +458,19 @@ function UserManagementModal({onClose}) {
 // ── Main App ──────────────────────────────────────────────────
 
 export default function DJCJoiner() {
+  useEffect(()=>{
+    // Lock the viewport so iOS Safari stops auto-zooming on rotation/focus and
+    // renders at native device width instead of a shrunk desktop-style layout.
+    let meta=document.querySelector('meta[name="viewport"]');
+    if(!meta){
+      meta=document.createElement("meta");
+      meta.name="viewport";
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute("content","width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover");
+    document.body.style.overscrollBehavior="none";
+    document.body.style.webkitTextSizeAdjust="100%";
+  },[]);
   const [currentUser,setCurrentUser]=useState(()=>{
     try{const u=sessionStorage.getItem("djc_user");return u?JSON.parse(u):null;}catch{return null;}
   });
@@ -585,6 +598,7 @@ function MainApp({currentUser,onLogout}) {
   const [copyMode,setCopyMode]=useState(false);
   const [selectedEntries,setSelectedEntries]=useState(new Set()); // for multi-select
   const [selectionMode,setSelectionMode]=useState(false);
+  const [moveMode,setMoveMode]=useState(false); // tap-to-move, for touch devices where drag-and-drop can't fire
   const [dropTarget,setDropTarget]=useState(null);
 
   const loadAll=useCallback(async()=>{
@@ -711,6 +725,7 @@ function MainApp({currentUser,onLogout}) {
   }
 
   async function removeEntry(id){
+    if(!window.confirm("Remove this entry?"))return;
     setSaving(true);
     try{
       const entry=entries.find(e=>e.id===id);
@@ -736,6 +751,14 @@ function MainApp({currentUser,onLogout}) {
         setJobs(prev=>prev.map(j=>j.id===data.id?{...j,jobNo:data.jobNo,name:data.name,bgColor:data.bgColor,borderColor:data.borderColor,textColor:data.textColor}:j));
         const existing=subItems.filter(s=>s.jobId===data.id);
         const toDelete=existing.filter(s=>!data.subItems.find(ds=>ds.id===s.id));
+        // Safety check: never silently delete a joinery item that still has entries
+        // scheduled against it - block and tell the user to unschedule it first.
+        const blocked=toDelete.filter(s=>entries.some(e=>e.subItemId===s.id));
+        if(blocked.length>0){
+          setSaving(false);
+          setError(`Can't remove "${blocked.map(s=>s.name).join(", ")}" - it still has scheduled entries. Unschedule it from Job Summary first.`);
+          return;
+        }
         for(const s of toDelete)await db("DELETE","sub_items",null,`?id=eq.${s.id}`);
         setSubItems(prev=>prev.filter(s=>!toDelete.find(d=>d.id===s.id)));
         const toAdd=data.subItems.filter(s=>s.isNew&&s.name.trim());
@@ -749,6 +772,12 @@ function MainApp({currentUser,onLogout}) {
   }
 
   async function deleteJob(id){
+    const job=jobs.find(j=>j.id===id);
+    const entryCount=entries.filter(e=>e.jobId===id).length;
+    const msg=entryCount>0
+      ?`Delete "${job?.jobNo} ${job?.name}"? This will permanently delete it and all ${entryCount} scheduled entries against it. This cannot be undone.`
+      :`Delete "${job?.jobNo} ${job?.name}"? This cannot be undone.`;
+    if(!window.confirm(msg))return;
     setSaving(true);
     try{await db("DELETE","jobs",null,`?id=eq.${id}`);setJobs(prev=>prev.filter(j=>j.id!==id));setSubItems(prev=>prev.filter(s=>s.jobId!==id));setEntries(prev=>prev.filter(e=>e.jobId!==id));setJobModal(null);}
     catch(e){setError("Failed to delete job.");}
@@ -771,12 +800,85 @@ function MainApp({currentUser,onLogout}) {
   }
 
   async function removeStaff(id){
+    const s=staff.find(x=>x.id===id);
+    const entryCount=entries.filter(e=>e.staffId===id).length;
+    const msg=entryCount>0
+      ?`Remove ${s?.name}? This will permanently delete them and all ${entryCount} of their scheduled entries. This cannot be undone.`
+      :`Remove ${s?.name}? This cannot be undone.`;
+    if(!window.confirm(msg))return;
     setSaving(true);
     try{await db("DELETE","staff",null,`?id=eq.${id}`);setStaff(prev=>prev.filter(s=>s.id!==id));setEntries(prev=>prev.filter(e=>e.staffId!==id));setStaffModal(null);}
     catch(e){setError("Failed to remove staff.");}
     setSaving(false);
   }
 
+  async function performGroupMove(anchorEntry,toStaffId,toDateStr,toSlot){
+    if(!canEdit)return;
+    if(isPast(toDateStr)||isSaturday(parseISO(toDateStr)))return;
+    const idsToMove=[...selectedEntries];
+    try{
+      // Sort all selected entries by date
+      const sortedSelected=[...idsToMove].sort((a,b)=>{
+        const ea=entries.find(x=>x.id===a);
+        const eb=entries.find(x=>x.id===b);
+        return ea.dateStr.localeCompare(eb.dateStr);
+      });
+
+      // Build list of working days relative to drop target, based on UNIQUE dates
+      // (multiple entries can share a date, e.g. Slot 1 + Slot 2 on the same day -
+      // indexing by raw entry position would spread those across extra days)
+      function getWorkingDay(baseDate, offset){
+        return isoDate(addWorkingDays(baseDate, offset));
+      }
+
+      const uniqueDates=[...new Set(sortedSelected.map(id=>entries.find(x=>x.id===id).dateStr))].sort();
+      const draggedDateIdx=uniqueDates.indexOf(anchorEntry.dateStr);
+      const tgtDate=parseISO(toDateStr);
+      const dateOffsetByDate=Object.fromEntries(uniqueDates.map((ds,i)=>[ds,i-draggedDateIdx]));
+      const idToDate=Object.fromEntries(sortedSelected.map(id=>{
+        const en=entries.find(x=>x.id===id);
+        return[id,getWorkingDay(tgtDate,dateOffsetByDate[en.dateStr])];
+      }));
+
+      // Preserve each entry's slot relative to the anchor entry's slot, so a
+      // Slot1+Slot2 pair stays a Slot1+Slot2 pair instead of collapsing onto one slot
+      const slotOffset=toSlot-anchorEntry.slot;
+      const idToSlot=Object.fromEntries(idsToMove.map(id=>{
+        const en=entries.find(x=>x.id===id);
+        return[id,Math.min(1,Math.max(0,en.slot+slotOffset))];
+      }));
+
+      // Preserve each entry's staff row relative to the anchor entry's staff row,
+      // so dropping copies the exact layout across staff instead of collapsing onto one person
+      const staffOrderIds=orderedStaff.map(s=>s.id);
+      const origStaffIdx=staffOrderIds.indexOf(anchorEntry.staffId);
+      const targetStaffIdx=staffOrderIds.indexOf(toStaffId);
+      const rowOffset=targetStaffIdx-origStaffIdx;
+      const idToStaff=Object.fromEntries(idsToMove.map(id=>{
+        const en=entries.find(x=>x.id===id);
+        const idx=staffOrderIds.indexOf(en.staffId);
+        const newIdx=Math.min(staffOrderIds.length-1,Math.max(0,idx+rowOffset));
+        return[id,staffOrderIds[newIdx]];
+      }));
+
+      const prevStates=idsToMove.map(id=>{
+        const en=entries.find(x=>x.id===id);
+        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
+      });
+      pushUndo("moveMultiple",{prevStates});
+      const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id]}));
+      await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
+        db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot},`?id=eq.${id}`)
+      ));
+      setEntries(prev=>prev.map(x=>{
+        const u=updates.find(u=>u.id===x.id);
+        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot}:x;
+      }));
+      setSelectedEntries(new Set());
+      setSelectionMode(false);
+      setMoveMode(false);
+    }catch(err){setError("Failed to move entries.");}
+  }
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
   function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr)||isSaturday(parseISO(dateStr)))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
@@ -786,75 +888,7 @@ function MainApp({currentUser,onLogout}) {
     if(isPast(toDateStr)||isSaturday(parseISO(toDateStr)))return;
     // Multi-select: shift all entries by same date offset, preserve relative staff rows
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
-      const idsToMove=[...selectedEntries];
-      try{
-        // Sort all selected entries by date
-        const sortedSelected=[...idsToMove].sort((a,b)=>{
-          const ea=entries.find(x=>x.id===a);
-          const eb=entries.find(x=>x.id===b);
-          return ea.dateStr.localeCompare(eb.dateStr);
-        });
-
-        // Find position of dragged entry in the sorted list
-        const draggedIdx=sortedSelected.indexOf(entry.id);
-
-        // Build list of working days relative to drop target, based on UNIQUE dates
-        // (multiple entries can share a date, e.g. Slot 1 + Slot 2 on the same day -
-        // indexing by raw entry position would spread those across extra days)
-        function getWorkingDay(baseDate, offset){
-          // offset can be negative (backward) or positive (forward)
-          return isoDate(addWorkingDays(baseDate, offset));
-        }
-
-        const uniqueDates=[...new Set(sortedSelected.map(id=>entries.find(x=>x.id===id).dateStr))].sort();
-        const draggedDateIdx=uniqueDates.indexOf(entry.dateStr);
-        const tgtDate=parseISO(toDateStr);
-        const dateOffsetByDate=Object.fromEntries(uniqueDates.map((ds,i)=>[ds,i-draggedDateIdx]));
-        const idToDate=Object.fromEntries(sortedSelected.map(id=>{
-          const en=entries.find(x=>x.id===id);
-          return[id,getWorkingDay(tgtDate,dateOffsetByDate[en.dateStr])];
-        }));
-
-        // Preserve each entry's slot relative to the dragged entry's slot, so a
-        // Slot1+Slot2 pair stays a Slot1+Slot2 pair instead of collapsing onto one slot
-        const slotOffset=toSlot-entry.slot;
-        const idToSlot=Object.fromEntries(idsToMove.map(id=>{
-          const en=entries.find(x=>x.id===id);
-          return[id,Math.min(1,Math.max(0,en.slot+slotOffset))];
-        }));
-
-        // Preserve each entry's staff row relative to the dragged entry's staff row,
-        // so dropping copies the exact layout across staff instead of collapsing onto one person
-        const staffOrderIds=orderedStaff.map(s=>s.id);
-        const origStaffIdx=staffOrderIds.indexOf(entry.staffId);
-        const targetStaffIdx=staffOrderIds.indexOf(toStaffId);
-        const rowOffset=targetStaffIdx-origStaffIdx;
-        const idToStaff=Object.fromEntries(idsToMove.map(id=>{
-          const en=entries.find(x=>x.id===id);
-          const idx=staffOrderIds.indexOf(en.staffId);
-          const newIdx=Math.min(staffOrderIds.length-1,Math.max(0,idx+rowOffset));
-          return[id,staffOrderIds[newIdx]];
-        }));
-
-        const prevStates=idsToMove.map(id=>{
-          const en=entries.find(x=>x.id===id);
-          return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
-        });
-        pushUndo("moveMultiple",{prevStates});
-        // Calculate new dates/staff/slot for all entries first
-        const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id]}));
-        // Patch all in parallel
-        await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
-          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot},`?id=eq.${id}`)
-        ));
-        // Single state update
-        setEntries(prev=>prev.map(x=>{
-          const u=updates.find(u=>u.id===x.id);
-          return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot}:x;
-        }));
-        setSelectedEntries(new Set());
-        setSelectionMode(false);
-      }catch(err){setError("Failed to move entries.");}
+      await performGroupMove(entry,toStaffId,toDateStr,toSlot);
       dragEntry.current=null;
       return;
     }
@@ -890,26 +924,19 @@ function MainApp({currentUser,onLogout}) {
       setEntries(prev=>prev.filter(e=>!selectedEntries.has(e.id)));
       setSelectedEntries(new Set());
       setSelectionMode(false);
+      setMoveMode(false);
     }catch(e){setError("Failed to delete entries.");}
     setSaving(false);
   }
 
-  async function moveSelectedEntries(toStaffId,toDateStr,toSlot){
-    if(selectedEntries.size===0)return;
-    setSaving(true);
-    try{
-      const ids=[...selectedEntries];
-      for(const id of ids){
-        await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot},`?id=eq.${id}`);
-      }
-      setEntries(prev=>prev.map(e=>selectedEntries.has(e.id)?{...e,staffId:toStaffId,dateStr:toDateStr,slot:toSlot}:e));
-      setSelectedEntries(new Set());
-      setSelectionMode(false);
-    }catch(e){setError("Failed to move entries.");}
-    setSaving(false);
-  }
   function nextPreset(){return JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length];}
 
+  const moveAnchor=useMemo(()=>{
+    if(selectedEntries.size===0)return null;
+    const objs=[...selectedEntries].map(id=>entries.find(e=>e.id===id)).filter(Boolean);
+    if(objs.length===0)return null;
+    return [...objs].sort((a,b)=>a.dateStr.localeCompare(b.dateStr))[0];
+  },[selectedEntries,entries]);
   const roleColors={admin:"#FEF3C7",manager:"#DBEAFE",staff:"#F0FDF4"};
   const roleTextColors={admin:"#92400E",manager:"#1D4ED8",staff:"#15803D"};
 
@@ -1016,15 +1043,21 @@ function MainApp({currentUser,onLogout}) {
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
               {canEdit&&(
                 <>
-                  <button onClick={()=>{setSelectionMode(s=>!s);setSelectedEntries(new Set());}}
+                  <button onClick={()=>{setSelectionMode(s=>!s);setSelectedEntries(new Set());setMoveMode(false);}}
                     style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:selectionMode?"#3B82F6":"#fff",cursor:"pointer",fontSize:12,color:selectionMode?"#fff":"#64748B"}}>
                     {selectionMode?"✓ Selecting":"Select"}
                   </button>
                   {selectionMode&&selectedEntries.size>0&&(
-                    <button onClick={deleteSelectedEntries}
-                      style={{padding:"5px 12px",border:"1px solid #FECACA",borderRadius:7,background:"#FEF2F2",cursor:"pointer",fontSize:12,color:"#EF4444",fontWeight:600}}>
-                      Delete {selectedEntries.size}
-                    </button>
+                    <>
+                      <button onClick={deleteSelectedEntries}
+                        style={{padding:"5px 12px",border:"1px solid #FECACA",borderRadius:7,background:"#FEF2F2",cursor:"pointer",fontSize:12,color:"#EF4444",fontWeight:600}}>
+                        Delete {selectedEntries.size}
+                      </button>
+                      <button onClick={()=>setMoveMode(m=>!m)}
+                        style={{padding:"5px 12px",border:"1px solid #93C5FD",borderRadius:7,background:moveMode?"#3B82F6":"#EFF6FF",cursor:"pointer",fontSize:12,color:moveMode?"#fff":"#1D4ED8",fontWeight:600}}>
+                        {moveMode?"Tap destination…":`Move ${selectedEntries.size}`}
+                      </button>
+                    </>
                   )}
                 </>
               )}
@@ -1056,7 +1089,7 @@ function MainApp({currentUser,onLogout}) {
           </div>{/* end sticky controls */}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
 
-          <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 280px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff"}}>
+          <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 280px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch"}}>
             <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"fixed"}}>
               <colgroup>
                 <col style={{width:110}}/>
@@ -1122,7 +1155,7 @@ function MainApp({currentUser,onLogout}) {
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode}/>
                                 : job
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
@@ -1132,10 +1165,10 @@ function MainApp({currentUser,onLogout}) {
                                       const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
                                       const totalBudget=si?.totalHours||null;
                                       const isOver=si&&isLastEntry&&budgetRemaining!==null&&budgetRemaining<0;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver}/>;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} onCopy={handleCopy} copyMode={copyMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver}/>;
                                     })()
-                                  : <EmptySlot onClick={()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
-                              : <EmptySlot onClick={isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit} copyMode={copyMode}/>
+                                  : <EmptySlot onClick={moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
+                              : <EmptySlot onClick={isSat?undefined:moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)||isSat} canEdit={canEdit} copyMode={copyMode}/>
                             }
                           </td>
                         );
@@ -1174,11 +1207,11 @@ function MainApp({currentUser,onLogout}) {
         <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
           <div style={{marginBottom:12}}>
             <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Work Day Start</div>
-            <input type="time" value={workStart} onChange={e=>setWorkStart(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box"}}/>
+            <input type="time" value={workStart} onChange={e=>setWorkStart(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box"}}/>
           </div>
           <div style={{marginBottom:16}}>
             <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Work Day End</div>
-            <input type="time" value={workEnd} onChange={e=>setWorkEnd(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box"}}/>
+            <input type="time" value={workEnd} onChange={e=>setWorkEnd(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box"}}/>
           </div>
           <div style={{padding:"10px 14px",background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,fontSize:13,color:"#15803D",fontWeight:500,marginBottom:12}}>
             Work day: {workStart} – {workEnd} = {workHoursPerDay}h/day
@@ -1444,7 +1477,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
           {autoFill&&form.mode==="new"?(
             <div style={{marginBottom:10}}>
               <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Deduct from Budget</div>
-              <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours} (from budget)`:"Enter hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,boxSizing:"border-box",outline:"none"}}/>
+              <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours} (from budget)`:"Enter hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
               {form.staffIds.length>1&&(()=>{
                 const staffWithPh=form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,name:sf?.name,ph:Number(sf?.productiveHours)||8};});
                 const shares=splitHoursByStaff(staffWithPh,form.totalHours||0);
@@ -1516,8 +1549,8 @@ function JobModal({data,onSave,onDelete,onClose}) {
           <div style={{display:"flex",flexDirection:"column",gap:7}}>
             {form.subItems.map((si,i)=>(
               <div key={si.id} style={{display:"flex",gap:6,alignItems:"center"}}>
-                <input value={si.name} onChange={e=>setSubItem(i,"name",e.target.value)} placeholder="Item name" autoFocus={!!si.autoFocus} style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:13,outline:"none"}}/>
-                <input type="number" value={si.totalHours||""} onChange={e=>setSubItem(i,"totalHours",Number(e.target.value))} placeholder="Hrs" min={0} step={1} style={{width:60,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:13,outline:"none"}}/>
+                <input value={si.name} onChange={e=>setSubItem(i,"name",e.target.value)} placeholder="Item name" autoFocus={!!si.autoFocus} style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,outline:"none"}}/>
+                <input type="number" value={si.totalHours||""} onChange={e=>setSubItem(i,"totalHours",Number(e.target.value))} placeholder="Hrs" min={0} step={1} style={{width:60,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,outline:"none"}}/>
                 <button onClick={()=>removeSubItem(i)} style={{background:"none",border:"1px solid #FCA5A5",color:"#EF4444",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:13}}>×</button>
               </div>
             ))}
@@ -1529,7 +1562,7 @@ function JobModal({data,onSave,onDelete,onClose}) {
                   if(e.target.value) addSubItemWithName(e.target.value);
                   e.target.value="";
                 }}
-                style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:13,background:"#fff",color:"#475569",outline:"none"}}>
+                style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,background:"#fff",color:"#475569",outline:"none"}}>
                 <option value="">+ Add new item...</option>
                 {JOINERY_ITEM_PRESETS.map(p=><option key={p} value={p}>{p}</option>)}
                 <option value="__custom__">Custom (type below)</option>
