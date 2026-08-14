@@ -784,7 +784,21 @@ function MainApp({currentUser,onLogout}) {
       :`Delete "${job?.jobNo} ${job?.name}"? This cannot be undone.`;
     if(!window.confirm(msg))return;
     setSaving(true);
-    try{await db("DELETE","jobs",null,`?id=eq.${id}`);setJobs(prev=>prev.filter(j=>j.id!==id));setSubItems(prev=>prev.filter(s=>s.jobId!==id));setEntries(prev=>prev.filter(e=>e.jobId!==id));setJobModal(null);}
+    try{
+      const jobEntryIds=entries.filter(e=>e.jobId===id).map(e=>e.id);
+      const jobSubIds=subItems.filter(s=>s.jobId===id).map(s=>s.id);
+      // Delete children explicitly first - don't rely on the DB having
+      // ON DELETE CASCADE set up, since deleting the job row while entries/
+      // sub_items still reference it would otherwise fail with a foreign
+      // key violation and silently do nothing.
+      if(jobEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${jobEntryIds.join(",")})`);
+      if(jobSubIds.length>0)await db("DELETE","sub_items",null,`?id=in.(${jobSubIds.join(",")})`);
+      await db("DELETE","jobs",null,`?id=eq.${id}`);
+      setJobs(prev=>prev.filter(j=>j.id!==id));
+      setSubItems(prev=>prev.filter(s=>s.jobId!==id));
+      setEntries(prev=>prev.filter(e=>e.jobId!==id));
+      setJobModal(null);
+    }
     catch(e){setError("Failed to delete job.");}
     setSaving(false);
   }
@@ -812,7 +826,14 @@ function MainApp({currentUser,onLogout}) {
       :`Remove ${s?.name}? This cannot be undone.`;
     if(!window.confirm(msg))return;
     setSaving(true);
-    try{await db("DELETE","staff",null,`?id=eq.${id}`);setStaff(prev=>prev.filter(s=>s.id!==id));setEntries(prev=>prev.filter(e=>e.staffId!==id));setStaffModal(null);}
+    try{
+      const staffEntryIds=entries.filter(e=>e.staffId===id).map(e=>e.id);
+      if(staffEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${staffEntryIds.join(",")})`);
+      await db("DELETE","staff",null,`?id=eq.${id}`);
+      setStaff(prev=>prev.filter(s=>s.id!==id));
+      setEntries(prev=>prev.filter(e=>e.staffId!==id));
+      setStaffModal(null);
+    }
     catch(e){setError("Failed to remove staff.");}
     setSaving(false);
   }
