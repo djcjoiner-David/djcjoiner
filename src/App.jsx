@@ -516,22 +516,33 @@ function MainApp({currentUser,onLogout}) {
     return staffOrder.filter(id=>map[id]).map(id=>map[id]).concat(staff.filter(s=>!staffOrder.includes(s.id)));
   },[staff,staffOrder]);
 
+  function persistStaffOrder(ids){
+    ids.forEach((id,i)=>db("PATCH","staff",{sort_order:i},`?id=eq.${id}`).catch(()=>{}));
+  }
   function handleStaffDragStart(e,staffId){
     dragStaff.current=staffId;
     e.dataTransfer.effectAllowed="move";
   }
+  function moveStaffOrder(staffId,direction){
+    const ids=orderedStaff.map(s=>s.id);
+    const idx=ids.indexOf(staffId);
+    const swapIdx=idx+(direction==="up"?-1:1);
+    if(idx===-1||swapIdx<0||swapIdx>=ids.length)return;
+    [ids[idx],ids[swapIdx]]=[ids[swapIdx],ids[idx]];
+    setStaffOrder(ids);
+    persistStaffOrder(ids);
+  }
   function handleStaffDrop(e,targetStaffId){
     e.preventDefault();
     if(!dragStaff.current||dragStaff.current===targetStaffId)return;
-    setStaffOrder(prev=>{
-      const order=[...prev];
-      const fromIdx=order.indexOf(dragStaff.current);
-      const toIdx=order.indexOf(targetStaffId);
-      if(fromIdx===-1||toIdx===-1)return prev;
-      order.splice(fromIdx,1);
-      order.splice(toIdx,0,dragStaff.current);
-      return order;
-    });
+    const order=[...orderedStaff.map(s=>s.id)];
+    const fromIdx=order.indexOf(dragStaff.current);
+    const toIdx=order.indexOf(targetStaffId);
+    if(fromIdx===-1||toIdx===-1){dragStaff.current=null;return;}
+    order.splice(fromIdx,1);
+    order.splice(toIdx,0,dragStaff.current);
+    setStaffOrder(order);
+    persistStaffOrder(order);
     dragStaff.current=null;
   }
   const [undoStack,setUndoStack]=useState([]); // each item: {type, data}
@@ -607,12 +618,20 @@ function MainApp({currentUser,onLogout}) {
     try {
       setLoading(true);
       const [staffData,jobsData,subData,entriesData]=await Promise.all([
-        db("GET","staff","","?order=created_at"),
+        db("GET","staff","","?order=sort_order"),
         db("GET","jobs","","?order=created_at"),
         db("GET","sub_items","","?order=created_at"),
         db("GET","entries","","?order=created_at"),
       ]);
-      setStaff(staffData.map(s=>({id:s.id,name:s.name,productiveHours:Number(s.productive_hours)||8})));
+      const staffSorted=staffData.map(s=>({id:s.id,name:s.name,productiveHours:Number(s.productive_hours)||8,sortOrder:s.sort_order}));
+      setStaff(staffSorted);
+      if(staffSorted.some(s=>s.sortOrder==null)){
+        // First load after the sort_order migration - assign stable positions
+        // now so the order sticks permanently from here on, without requiring
+        // the user to manually reorder first.
+        staffSorted.forEach((s,i)=>db("PATCH","staff",{sort_order:i},`?id=eq.${s.id}`).catch(()=>{}));
+        setStaffOrder(staffSorted.map(s=>s.id));
+      }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
       setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null})));
@@ -1245,7 +1264,7 @@ function MainApp({currentUser,onLogout}) {
 
       {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
-      {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)}/>}
+      {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)}/>}
       {workHoursOpen&&(
         <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
@@ -1628,11 +1647,26 @@ function JobModal({data,onSave,onDelete,onClose}) {
 
 // ── Staff Modal ───────────────────────────────────────────────
 
-function StaffModal({data,onSave,onRemove,onClose}) {
+function StaffModal({data,onSave,onRemove,onClose,onMove,isFirst,isLast}) {
   const [form,setForm]=useState({...data,productiveHours:data.productiveHours||8});
   return(
     <Modal title={form.isNew?"New Staff Member":"Edit Staff Member"} onClose={onClose} small>
       <Inp label="Name" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
+      {!form.isNew&&onMove&&(
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Position in schedule</div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>onMove(form.id,"up")} disabled={isFirst}
+              style={{flex:1,padding:"7px 0",border:"1px solid #CBD5E1",borderRadius:8,background:isFirst?"#F8FAFC":"#fff",color:isFirst?"#CBD5E1":"#334155",cursor:isFirst?"not-allowed":"pointer",fontSize:13,fontWeight:600}}>
+              ↑ Move Up
+            </button>
+            <button onClick={()=>onMove(form.id,"down")} disabled={isLast}
+              style={{flex:1,padding:"7px 0",border:"1px solid #CBD5E1",borderRadius:8,background:isLast?"#F8FAFC":"#fff",color:isLast?"#CBD5E1":"#334155",cursor:isLast?"not-allowed":"pointer",fontSize:13,fontWeight:600}}>
+              ↓ Move Down
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{marginBottom:12}}>
         <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Productive hours per 8h day</div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
