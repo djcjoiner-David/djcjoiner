@@ -274,16 +274,16 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode}) {
+function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode}) {
   return (
     <div
       draggable={canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
-      style={{background:conflict?"#FEF2F2":"#F1F5F9",border:conflict?"2px solid #EF4444":"1.5px solid #94A3B8",borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{note} · {hours}h</div>
+      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
     </div>
   );
 }
@@ -1239,7 +1239,7 @@ function MainApp({currentUser,onLogout}) {
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode}/>
                                 : job
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
