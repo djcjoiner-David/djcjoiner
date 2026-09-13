@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import * as XLSX from "xlsx";
 
 // ╔══════════════════════════════════════════════════════════════╗
 // ║           CLIENT CONFIGURATION — EDIT THIS SECTION           ║
@@ -1602,6 +1603,8 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
 
 function JobModal({data,onSave,onDelete,onClose}) {
   const [form,setForm]=useState({...data,subItems:data.subItems.map(s=>({...s}))});
+  const [importMsg,setImportMsg]=useState(null);
+  const fileInputRef=useRef(null);
   function set(k,v){setForm(f=>({...f,[k]:v}));}
   function addSubItem(){setForm(f=>({...f,subItems:[...f.subItems,{id:`new_${Date.now()}`,isNew:true,name:"",totalHours:0}]}));}
   function addSubItemWithName(name){
@@ -1610,6 +1613,54 @@ function JobModal({data,onSave,onDelete,onClose}) {
   }
   function setSubItem(idx,field,value){setForm(f=>{const s=[...f.subItems];s[idx]={...s[idx],[field]:value};return{...f,subItems:s};});}
   function removeSubItem(idx){setForm(f=>{const s=[...f.subItems];s.splice(idx,1);return{...f,subItems:s};});}
+
+  // Reads a Brennan-style "Quote Sheet" Excel workbook's "Summary" tab and adds
+  // one Joinery Item per Workshop/Site hour figure found, for every row marked
+  // Y/Yes in the "Proceeding?" column. Column layout (fixed, per template):
+  //   A = item name, E = Proceeding? (Y/N), G = Workshop Hours, H = Site Hours
+  // Row 8 onward is data (rows 1-7 are title/header rows). Stops at the first
+  // fully blank row (the sheet's totals/footer row).
+  async function handleExcelImport(e){
+    const file=e.target.files[0];
+    if(!file)return;
+    setImportMsg(null);
+    try{
+      const buf=await file.arrayBuffer();
+      const wb=XLSX.read(buf,{type:"array"});
+      const sheet=wb.Sheets["Summary"];
+      if(!sheet){
+        setImportMsg({type:"error",text:'Could not find a sheet named "Summary" in that file.'});
+        e.target.value="";
+        return;
+      }
+      const rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:""});
+      const newItems=[];
+      let skippedNoHours=0;
+      for(let i=7;i<rows.length;i++){
+        const row=rows[i];
+        const name=(row[0]||"").toString().split(",")[0].trim();
+        const proceeding=(row[4]||"").toString().trim().toLowerCase();
+        if(!name&&!proceeding)break; // blank row = end of data (totals/footer row)
+        if(proceeding!=="y"&&proceeding!=="yes")continue;
+        const workshopHours=Number(row[6])||0;
+        const siteHours=Number(row[7])||0;
+        if(workshopHours<=0&&siteHours<=0){skippedNoHours++;continue;}
+        if(workshopHours>0)newItems.push({id:`new_${Date.now()}_${i}w`,isNew:true,name:`${name} W`,totalHours:workshopHours});
+        if(siteHours>0)newItems.push({id:`new_${Date.now()}_${i}s`,isNew:true,name:`${name} S`,totalHours:siteHours});
+      }
+      if(newItems.length===0){
+        setImportMsg({type:"error",text:"No items imported. Check column E has Y/Yes and columns G/H have hours."});
+        e.target.value="";
+        return;
+      }
+      setForm(f=>({...f,subItems:[...f.subItems,...newItems]}));
+      setImportMsg({type:"success",text:`Imported ${newItems.length} item${newItems.length>1?"s":""}${skippedNoHours>0?` — skipped ${skippedNoHours} row${skippedNoHours>1?"s":""} with no hours`:""}.`});
+    }catch(err){
+      setImportMsg({type:"error",text:"Could not read that file. Make sure it's a valid Excel (.xlsx) workbook with a 'Summary' sheet."});
+    }
+    e.target.value="";
+  }
+
   return(
     <Modal title={form.isNew?"New Job":"Edit Job"} wide onClose={onClose}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
@@ -1629,7 +1680,19 @@ function JobModal({data,onSave,onDelete,onClose}) {
               <div style={{fontSize:10,color:form.textColor,opacity:0.7}}>8h</div>
             </div>
           </div>
-          <div style={{fontSize:12,color:"#64748B",marginBottom:6,fontWeight:500}}>Joinery Items <span style={{fontWeight:400,color:"#94A3B8"}}>(name + hour budget)</span></div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+            <div style={{fontSize:12,color:"#64748B",fontWeight:500}}>Joinery Items <span style={{fontWeight:400,color:"#94A3B8"}}>(name + hour budget)</span></div>
+            <button type="button" onClick={()=>fileInputRef.current?.click()}
+              style={{fontSize:11,color:"#3B82F6",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:6,padding:"4px 9px",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
+              📥 Import from Excel
+            </button>
+            <input type="file" accept=".xlsx" ref={fileInputRef} style={{display:"none"}} onChange={handleExcelImport}/>
+          </div>
+          {importMsg&&(
+            <div style={{fontSize:11,padding:"6px 9px",borderRadius:6,marginBottom:8,background:importMsg.type==="error"?"#FEF2F2":"#F0FDF4",border:`1px solid ${importMsg.type==="error"?"#FECACA":"#BBF7D0"}`,color:importMsg.type==="error"?"#DC2626":"#15803D"}}>
+              {importMsg.text}
+            </div>
+          )}
           <div style={{display:"flex",flexDirection:"column",gap:7}}>
             {form.subItems.map((si,i)=>(
               <div key={si.id} style={{display:"flex",gap:6,alignItems:"center"}}>
