@@ -2,6 +2,8 @@ import { neon } from '@neondatabase/serverless';
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
 
 const SCRYPT_KEYLEN = 64;
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_MINUTES = 15;
 
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex');
@@ -19,11 +21,12 @@ function verifyPassword(password, stored) {
   return timingSafeEqual(hash, storedHash);
 }
 
-// user_roles.password never leaves this file - every response for that
-// table has it stripped, whether the row came from select/insert/update/delete.
+// user_roles.password (and the internal login-lockout bookkeeping) never
+// leaves this file - every response for that table has them stripped,
+// whether the row came from select/insert/update/delete.
 function sanitizeRows(table, rows) {
   if (table !== 'user_roles') return rows;
-  return rows.map(({ password, ...rest }) => rest);
+  return rows.map(({ password, failed_login_count, locked_until, ...rest }) => rest);
 }
 
 // Session tokens prove *who* is making a request without the server having to
@@ -61,7 +64,7 @@ const ALLOWED_COLUMNS = {
   jobs:           ['id', 'job_no', 'name', 'bg_color', 'border_color', 'text_color', 'created_at'],
   sub_items:      ['id', 'job_id', 'name', 'total_hours', 'created_at'],
   entries:        ['id', 'staff_id', 'job_id', 'sub_item_id', 'date_str', 'slot', 'hours', 'misc_note', 'created_at'],
-  user_roles:     ['id', 'email', 'role', 'name', 'password', 'created_at'],
+  user_roles:     ['id', 'email', 'role', 'name', 'password', 'created_at', 'failed_login_count', 'locked_until'],
   keepalive_ping: ['id', 'pinged_at'],
 };
 const ALLOWED_TABLES = Object.keys(ALLOWED_COLUMNS);
@@ -135,6 +138,15 @@ export default async function handler(req, res) {
       const user = rows[0];
       if (!user) return res.status(401).json({ error: 'Invalid email or password.' });
 
+      // Rate limiting: after too many wrong passwords in a row, lock the
+      // account out for a while instead of letting a script keep guessing
+      // indefinitely. Tracked per-account (not per-IP) since that needs no
+      // extra infrastructure - just two columns on the row we already load.
+      if (user.locked_until && new Date(user.locked_until) > new Date()) {
+        const minutesLeft = Math.max(1, Math.ceil((new Date(user.locked_until) - new Date()) / 60000));
+        return res.status(429).json({ error: `Too many failed attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'}.` });
+      }
+
       let authenticated = verifyPassword(password, user.password);
       // One-time migration: accounts created before password hashing was
       // added still have their plaintext password in this column. Verify
@@ -145,7 +157,21 @@ export default async function handler(req, res) {
         user.password = upgraded;
         authenticated = true;
       }
-      if (!authenticated) return res.status(401).json({ error: 'Invalid email or password.' });
+      if (!authenticated) {
+        const attempts = (user.failed_login_count || 0) + 1;
+        if (attempts >= LOGIN_MAX_ATTEMPTS) {
+          const lockUntil = new Date(Date.now() + LOGIN_LOCKOUT_MINUTES * 60000).toISOString();
+          await sql('update user_roles set failed_login_count = 0, locked_until = $1 where id = $2', [lockUntil, user.id]);
+          return res.status(429).json({ error: `Too many failed attempts. Try again in ${LOGIN_LOCKOUT_MINUTES} minutes.` });
+        }
+        await sql('update user_roles set failed_login_count = $1 where id = $2', [attempts, user.id]);
+        return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      // A successful login clears any earlier failed attempts.
+      if (user.failed_login_count || user.locked_until) {
+        await sql('update user_roles set failed_login_count = 0, locked_until = null where id = $1', [user.id]);
+      }
 
       const [safeUser] = sanitizeRows(table, [user]);
       return res.status(200).json({ ...safeUser, token: signSession({ id: user.id }) });
