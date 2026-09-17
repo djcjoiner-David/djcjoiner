@@ -66,6 +66,13 @@ const ALLOWED_COLUMNS = {
 };
 const ALLOWED_TABLES = Object.keys(ALLOWED_COLUMNS);
 
+// Thrown only for input the caller can actually fix (an unknown column/filter
+// name they sent). Anything else that reaches the catch block - a real
+// database error, a driver/connection failure - is an internal detail and
+// must never reach the client as-is, since it can contain table/column
+// names, constraint names, or fragments of the query itself.
+class ClientError extends Error {}
+
 export default async function handler(req, res) {
   // --- Authentication ---
   // Requires a matching secret on every request. Set API_SECRET in Vercel's
@@ -91,7 +98,7 @@ export default async function handler(req, res) {
     const conditions = [];
     for (const [key, val] of Object.entries(filterObj)) {
       if (!validColumns.includes(key)) {
-        throw new Error(`Invalid filter column: ${key}`);
+        throw new ClientError(`Invalid filter column: ${key}`);
       }
       if (typeof val === 'string' && val.startsWith('eq.')) {
         paramsArr.push(val.slice(3));
@@ -101,7 +108,7 @@ export default async function handler(req, res) {
         const placeholders = items.map(v => { paramsArr.push(v); return `$${paramsArr.length}`; });
         conditions.push(`${key} in (${placeholders.join(',')})`);
       } else {
-        throw new Error(`Invalid filter value for ${key}`);
+        throw new ClientError(`Invalid filter value for ${key}`);
       }
     }
     return conditions;
@@ -112,7 +119,7 @@ export default async function handler(req, res) {
   function buildOrderClause(orderParam) {
     if (!orderParam) return '';
     const [col, dir] = orderParam.split('.');
-    if (!validColumns.includes(col)) throw new Error('Invalid order column');
+    if (!validColumns.includes(col)) throw new ClientError('Invalid order column');
     const safeDir = dir === 'desc' ? 'desc' : 'asc';
     return ` order by ${col} ${safeDir}`;
   }
@@ -234,6 +241,13 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    if (e instanceof ClientError) {
+      return res.status(400).json({ error: e.message });
+    }
+    // Real database/driver errors can contain table names, constraint
+    // names, or fragments of the query - log the detail for the developer
+    // (visible in Vercel's function logs) but never send it to the client.
+    console.error('api/db error:', e);
+    return res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 }
