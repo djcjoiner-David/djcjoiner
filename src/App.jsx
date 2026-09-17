@@ -314,13 +314,10 @@ function LoginScreen({onLogin}) {
     if (!email||!password){setError("Please enter your email and password.");return;}
     setLoading(true);setError("");
     try {
-      const users=await db("GET","user_roles","",`?email=eq.${encodeURIComponent(email.toLowerCase().trim())}`);
-      if (!users||users.length===0){setError("No account found for this email address.");setLoading(false);return;}
-      const user=users[0];
-      if (password!==user.password){setError("Incorrect password.");setLoading(false);return;}
+      const user=await db("POST","user_roles",{email:email.toLowerCase().trim(),password},"?login=1");
       sessionStorage.setItem("djc_user",JSON.stringify({email:user.email,role:user.role,name:user.name,id:user.id}));
       onLogin({email:user.email,role:user.role,name:user.name,id:user.id});
-    } catch(err){setError("Login failed. Please try again.");}
+    } catch(err){setError("Incorrect email or password.");}
     setLoading(false);
   }
 
