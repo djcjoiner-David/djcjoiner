@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
 
 const SCRYPT_KEYLEN = 64;
 
@@ -24,6 +24,32 @@ function verifyPassword(password, stored) {
 function sanitizeRows(table, rows) {
   if (table !== 'user_roles') return rows;
   return rows.map(({ password, ...rest }) => rest);
+}
+
+// Session tokens prove *who* is making a request without the server having to
+// keep any state. They're signed with API_SECRET (already a private,
+// server-only value) so a client can't forge one or edit the user id inside
+// it. The role itself is never trusted from the token - it's looked up fresh
+// from the database on every request, so a role change or removed account
+// takes effect immediately instead of waiting for the old token to expire.
+function signSession(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = createHmac('sha256', process.env.API_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+function verifySession(token) {
+  if (typeof token !== 'string' || !token.includes('.')) return null;
+  const [body, sig] = token.split('.');
+  const expected = createHmac('sha256', process.env.API_SECRET).update(body).digest('base64url');
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expected);
+  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return null;
+  try {
+    return JSON.parse(Buffer.from(body, 'base64url').toString());
+  } catch {
+    return null;
+  }
 }
 
 // Every real column name in your schema, per table. Anything not listed here
@@ -115,7 +141,33 @@ export default async function handler(req, res) {
       if (!authenticated) return res.status(401).json({ error: 'Invalid email or password.' });
 
       const [safeUser] = sanitizeRows(table, [user]);
-      return res.status(200).json(safeUser);
+      return res.status(200).json({ ...safeUser, token: signSession({ id: user.id }) });
+    }
+
+    // --- Role enforcement ---
+    // Everything below this point requires a valid session (proof of which
+    // user is asking), except the keepalive ping, which has no user behind
+    // it - it's just a scheduled request that keeps the database awake.
+    // The role is re-read from the database on every request rather than
+    // trusted from the token, so revoking/downgrading someone's role takes
+    // effect on their very next click, not just their next login.
+    if (table !== 'keepalive_ping') {
+      const session = verifySession(req.headers['x-session-token']);
+      if (!session) return res.status(401).json({ error: 'Session expired - please log in again.' });
+      const [sessionUser] = await sql('select role from user_roles where id = $1', [session.id]);
+      if (!sessionUser) return res.status(401).json({ error: 'Session expired - please log in again.' });
+      const role = sessionUser.role;
+
+      // Only admins may read or write the user_roles table at all - it's
+      // where every account's role (and password hash) lives.
+      if (table === 'user_roles' && role !== 'admin') {
+        return res.status(403).json({ error: 'Admin access required.' });
+      }
+      // Staff accounts are view-only everywhere else: they can GET, but
+      // never create/edit/delete.
+      if (table !== 'user_roles' && req.method !== 'GET' && role === 'staff') {
+        return res.status(403).json({ error: 'Staff accounts are view-only.' });
+      }
     }
 
     if (req.method === 'GET') {

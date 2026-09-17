@@ -24,15 +24,34 @@ function parseQuery(query) {
   return obj;
 }
 
+function getSessionToken() {
+  try { return JSON.parse(sessionStorage.getItem("djc_user")||"null")?.token; } catch { return undefined; }
+}
+
 async function db(method, table, body, query="") {
   const extraParams = parseQuery(query);
+  const isLogin = table === "user_roles" && extraParams.login === "1";
   const qs = new URLSearchParams({ table, ...extraParams }).toString();
+  const token = getSessionToken();
   const res = await fetch(`/api/db?${qs}`, {
     method,
-    headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_API_SECRET },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": import.meta.env.VITE_API_SECRET,
+      ...(token ? { "x-session-token": token } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) { const e = await res.text(); throw new Error(e); }
+  if (!res.ok) {
+    const e = await res.text();
+    // A rejected/missing session (e.g. an older tab open from before this
+    // was added, or a role that changed) - send them back to a clean login
+    // instead of leaving the app stuck on confusing errors. A wrong password
+    // at the login screen itself is also a 401 but isn't a stale session, so
+    // it's excluded here and left for the login form to show as an error.
+    if (res.status === 401 && !isLogin) { sessionStorage.removeItem("djc_user"); window.location.reload(); }
+    throw new Error(e);
+  }
   const text = await res.text();
   return text ? JSON.parse(text) : [];
 }
@@ -315,7 +334,7 @@ function LoginScreen({onLogin}) {
     setLoading(true);setError("");
     try {
       const user=await db("POST","user_roles",{email:email.toLowerCase().trim(),password},"?login=1");
-      sessionStorage.setItem("djc_user",JSON.stringify({email:user.email,role:user.role,name:user.name,id:user.id}));
+      sessionStorage.setItem("djc_user",JSON.stringify({email:user.email,role:user.role,name:user.name,id:user.id,token:user.token}));
       onLogin({email:user.email,role:user.role,name:user.name,id:user.id});
     } catch(err){setError("Incorrect email or password.");}
     setLoading(false);
