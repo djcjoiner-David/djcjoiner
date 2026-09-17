@@ -1,4 +1,30 @@
 import { neon } from '@neondatabase/serverless';
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+
+const SCRYPT_KEYLEN = 64;
+
+function hashPassword(password) {
+  const salt = randomBytes(16).toString('hex');
+  const hash = scryptSync(password, salt, SCRYPT_KEYLEN).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  if (typeof stored !== 'string' || !stored.startsWith('scrypt$')) return false;
+  const [, salt, hashHex] = stored.split('$');
+  if (!salt || !hashHex) return false;
+  const hash = scryptSync(password, salt, SCRYPT_KEYLEN);
+  const storedHash = Buffer.from(hashHex, 'hex');
+  if (hash.length !== storedHash.length) return false;
+  return timingSafeEqual(hash, storedHash);
+}
+
+// user_roles.password never leaves this file - every response for that
+// table has it stripped, whether the row came from select/insert/update/delete.
+function sanitizeRows(table, rows) {
+  if (table !== 'user_roles') return rows;
+  return rows.map(({ password, ...rest }) => rest);
+}
 
 // Every real column name in your schema, per table. Anything not listed here
 // is rejected before it ever reaches SQL - this is what closes the injection
@@ -66,6 +92,32 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Login verifies the password hash server-side and never echoes it back,
+    // instead of the old approach of handing the stored password to the
+    // client over GET and comparing it there.
+    if (req.method === 'POST' && table === 'user_roles' && req.query.login === '1') {
+      const { email, password } = req.body || {};
+      if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
+      const rows = await sql('select * from user_roles where email = $1', [String(email).toLowerCase().trim()]);
+      const user = rows[0];
+      if (!user) return res.status(401).json({ error: 'Invalid email or password.' });
+
+      let authenticated = verifyPassword(password, user.password);
+      // One-time migration: accounts created before password hashing was
+      // added still have their plaintext password in this column. Verify
+      // against it once, then transparently upgrade it to a hash.
+      if (!authenticated && user.password === password) {
+        const upgraded = hashPassword(password);
+        await sql('update user_roles set password = $1 where id = $2', [upgraded, user.id]);
+        user.password = upgraded;
+        authenticated = true;
+      }
+      if (!authenticated) return res.status(401).json({ error: 'Invalid email or password.' });
+
+      const [safeUser] = sanitizeRows(table, [user]);
+      return res.status(200).json(safeUser);
+    }
+
     if (req.method === 'GET') {
       const params = [];
       const conditions = buildConditions(filters, params);
@@ -73,7 +125,7 @@ export default async function handler(req, res) {
       if (conditions.length) query += ' where ' + conditions.join(' and ');
       query += buildOrderClause(order);
       const rows = await sql(query, params);
-      return res.status(200).json(rows);
+      return res.status(200).json(sanitizeRows(table, rows));
     }
 
     if (req.method === 'POST') {
@@ -84,13 +136,13 @@ export default async function handler(req, res) {
         for (const c of cols) {
           if (!validColumns.includes(c)) return res.status(400).json({ error: `Invalid column: ${c}` });
         }
-        const vals = Object.values(row);
+        const vals = cols.map(c => (table === 'user_roles' && c === 'password') ? hashPassword(row[c]) : row[c]);
         const placeholders = vals.map((_, i) => `$${i + 1}`).join(',');
         const q = `insert into ${table} (${cols.join(',')}) values (${placeholders}) returning *`;
         const r = await sql(q, vals);
         results.push(r[0]);
       }
-      return res.status(200).json(results);
+      return res.status(200).json(sanitizeRows(table, results));
     }
 
     if (req.method === 'PATCH') {
@@ -98,7 +150,7 @@ export default async function handler(req, res) {
       for (const c of cols) {
         if (!validColumns.includes(c)) return res.status(400).json({ error: `Invalid column: ${c}` });
       }
-      const vals = Object.values(req.body);
+      const vals = cols.map(c => (table === 'user_roles' && c === 'password') ? hashPassword(req.body[c]) : req.body[c]);
       const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(',');
       const params = [...vals];
       const conditions = buildConditions(filters, params);
@@ -110,7 +162,7 @@ export default async function handler(req, res) {
       }
       const q = `update ${table} set ${setClause} where ${conditions.join(' and ')} returning *`;
       const rows = await sql(q, params);
-      return res.status(200).json(rows);
+      return res.status(200).json(sanitizeRows(table, rows));
     }
 
     if (req.method === 'DELETE') {
@@ -125,7 +177,7 @@ export default async function handler(req, res) {
       }
       const q = `delete from ${table} where ${conditions.join(' and ')} returning *`;
       const rows = await sql(q, params);
-      return res.status(200).json(rows);
+      return res.status(200).json(sanitizeRows(table, rows));
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
