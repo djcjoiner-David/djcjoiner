@@ -71,6 +71,7 @@ const ALLOWED_COLUMNS = {
   entries:        ['id', 'staff_id', 'job_id', 'sub_item_id', 'date_str', 'slot', 'hours', 'misc_note', 'created_at'],
   user_roles:     ['id', 'email', 'role', 'name', 'password', 'created_at', 'failed_login_count', 'locked_until'],
   keepalive_ping: ['id', 'pinged_at'],
+  app_settings:   ['id', 'theme'],
 };
 const ALLOWED_TABLES = Object.keys(ALLOWED_COLUMNS);
 
@@ -205,6 +206,13 @@ export default async function handler(req, res) {
       // never create/edit/delete.
       if (table !== 'user_roles' && req.method !== 'GET' && role === 'staff') {
         return res.status(403).json({ error: 'Staff accounts are view-only.' });
+      }
+      // The colour theme is a company-wide setting - everyone can read it
+      // (so the header renders correctly for staff too), but only an admin
+      // can change it. Managers are excluded here even though they can edit
+      // schedule data, since branding is an admin-level decision.
+      if (table === 'app_settings' && req.method !== 'GET' && role !== 'admin') {
+        return res.status(403).json({ error: 'Admin access required.' });
       }
     }
 
