@@ -1621,8 +1621,17 @@ function MainApp({currentUser,onLogout}) {
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/6);const isWeekBound=d.getDay()===1&&weekIdx>0;
                     const isSat=d.getDay()===6;
+                    const isFirstDayOfWeek=i%6===0;
                     return(
                       <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9}}>
+                        {!isMobile&&totalWeeks>1&&isFirstDayOfWeek&&(
+                          <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
+                            Week of {formatDate(addDays(anchorDate,weekIdx*7))}
+                          </div>
+                        )}
+                        {!isMobile&&totalWeeks>1&&!isFirstDayOfWeek&&(
+                          <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9"}}/>
+                        )}
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
                       </th>
                     );
