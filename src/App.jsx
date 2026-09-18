@@ -682,6 +682,7 @@ function MainApp({currentUser,onLogout}) {
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [tab,setTab]=useState("schedule");
+  useEffect(()=>{if(isMobile&&tab!=="schedule")setTab("schedule");},[isMobile,tab]);
   const [themeKey,setThemeKey]=useState(DEFAULT_THEME_KEY);
   const theme=THEMES[themeKey]||THEMES[DEFAULT_THEME_KEY];
   const [logoSrc,setLogoSrc]=useState(CLIENT_LOGO);
@@ -1508,14 +1509,16 @@ function MainApp({currentUser,onLogout}) {
                     🕐 {workStart}–{workEnd}
                   </button>
             )}
-            <button onClick={onLogout} title="Sign Out" style={{padding:isMobile?"7px 10px":"7px 12px",borderRadius:8,fontSize:isMobile?14:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>{isMobile?"⏻":"Sign Out"}</button>
+            <button onClick={onLogout} style={{padding:isMobile?"7px 10px":"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
           </div>
         </div>
-        <div style={{display:"flex"}}>
-          {[["schedule","📅 Schedule"],["summary","📋 Job Summary"]].map(([key,label])=>(
-            <button key={key} onClick={()=>setTab(key)} title={label} style={{padding:isMobile?"8px 14px":"9px 22px",fontSize:14,fontWeight:500,cursor:"pointer",background:"none",border:"none",borderBottom:tab===key?`2.5px solid ${theme.heading}`:"2.5px solid transparent",color:tab===key?theme.heading:hexToRgba(theme.sub,0.55),transition:"all 0.15s"}}>{isMobile?label.split(" ")[0]:label}</button>
-          ))}
-        </div>
+        {!isMobile&&(
+          <div style={{display:"flex"}}>
+            {[["schedule","📅 Schedule"],["summary","📋 Job Summary"]].map(([key,label])=>(
+              <button key={key} onClick={()=>setTab(key)} style={{padding:"9px 22px",fontSize:14,fontWeight:500,cursor:"pointer",background:"none",border:"none",borderBottom:tab===key?`2.5px solid ${theme.heading}`:"2.5px solid transparent",color:tab===key?theme.heading:hexToRgba(theme.sub,0.55),transition:"all 0.15s"}}>{label}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       {error&&(
@@ -1543,7 +1546,7 @@ function MainApp({currentUser,onLogout}) {
               <button onClick={goToday} style={{padding:"5px 14px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:13,color:"#475569"}}>Today</button>
               <button onClick={()=>navigate(1)} style={{padding:"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:16,color:"#475569"}}>›</button>
             </div>
-            <span style={{fontSize:13,color:"#64748B"}}>{formatDate(anchorDate)} – {formatDate(addDays(anchorDate,totalWeeks*7-2))}</span>
+            <span style={{fontSize:13,color:"#64748B"}}>{isMobile?formatDateRangeCompact(anchorDate,addDays(anchorDate,totalWeeks*7-2)):`${formatDate(anchorDate)} – ${formatDate(addDays(anchorDate,totalWeeks*7-2))}`}</span>
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
               {canEdit&&!isMobile&&(
                 <>
@@ -1585,8 +1588,8 @@ function MainApp({currentUser,onLogout}) {
             </div>
           </div>
 
-          {activeJobs.length>0&&(
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,position:"relative",zIndex:0}}> 
+          {activeJobs.length>0&&!isMobile&&(
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,position:"relative",zIndex:0}}>
               {activeJobs.map(j=>(
                 <div key={j.id} onClick={canEdit?()=>setJobModal({isNew:false,...j,subItems:subItems.filter(s=>s.jobId===j.id)}):undefined}
                   style={{background:j.bgColor,border:`1.5px solid ${j.borderColor}`,color:j.textColor,borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:600,cursor:canEdit?"pointer":"default"}}>
