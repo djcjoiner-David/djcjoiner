@@ -155,6 +155,11 @@ function isSaturday(d) { return d.getDay()===6; }
 function isPast(dateStr) { return dateStr < todayStr; }
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
 
+// Shared between undo and redo: the row shape the API expects for an insert,
+// and the entry shape the app uses once that insert comes back with an id.
+function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}; }
+function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}; }
+
 function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   if (!totalHours||totalHours<=0) return [];
   const ph = productiveHoursPerDay||8;
@@ -735,9 +740,11 @@ function MainApp({currentUser,onLogout}) {
     dragStaff.current=null;
   }
   const [undoStack,setUndoStack]=useState([]); // each item: {type, data}
+  const [redoStack,setRedoStack]=useState([]); // same shapes, populated by undo/redo themselves
 
   function pushUndo(type, data) {
     setUndoStack(prev=>[...prev.slice(-19),{type,data}]);
+    setRedoStack([]); // a genuine new action invalidates whatever could have been redone
   }
 
   async function handleUndo() {
@@ -747,41 +754,109 @@ function MainApp({currentUser,onLogout}) {
     setSaving(true);
     try {
       if(last.type==="addEntries") {
-        // Remove entries that were added
+        // Remove entries that were added, but keep their data so Redo can re-add them
+        const rows=entries.filter(e=>last.data.ids.includes(e.id)).map(entryFields);
         for(const id of last.data.ids) await db("DELETE","entries",null,`?id=eq.${id}`);
         setEntries(prev=>prev.filter(e=>!last.data.ids.includes(e.id)));
+        setRedoStack(prev=>[...prev,{type:"addEntries",data:{rows}}]);
       } else if(last.type==="editEntry") {
-        // Restore previous entry state
+        // Restore previous entry state, keeping the current one for Redo
         const e=last.data.prev;
+        const current=entries.find(en=>en.id===e.id);
         await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote},`?id=eq.${e.id}`);
         setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
+        if(current)setRedoStack(prev=>[...prev,{type:"editEntry",data:{state:current}}]);
       } else if(last.type==="deleteEntry") {
-        // Re-insert deleted entry
+        // Re-insert deleted entry - the new id is what Redo needs to delete it again
         const e=last.data.entry;
-        const [inserted]=await db("POST","entries",[{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}]);
-        setEntries(prev=>[...prev,{id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}]);
+        const [inserted]=await db("POST","entries",[entryFields(e)]);
+        setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
+        setRedoStack(prev=>[...prev,{type:"deleteEntry",data:{id:inserted.id}}]);
       } else if(last.type==="moveEntry") {
         const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
+        const current=entries.find(e=>e.id===id);
         await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
         setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
+        if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot}}]);
       } else if(last.type==="moveMultiple") {
+        const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot}:null;}).filter(Boolean);
         for(const {id,prevStaffId,prevDateStr,prevSlot} of last.data.prevStates){
           await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
         }
         setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+        setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
       } else if(last.type==="deleteMultiple") {
-        // Re-insert all deleted entries
+        // Re-insert all deleted entries - the new ids are what Redo needs to delete them again
+        const newIds=[];
         for(const en of last.data.deletedEntries){
-          const [inserted]=await db("POST","entries",[{staff_id:en.staffId,job_id:en.jobId,sub_item_id:en.subItemId,date_str:en.dateStr,slot:en.slot,hours:en.hours,misc_note:en.miscNote}]);
-          setEntries(prev=>[...prev,{id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}]);
+          const [inserted]=await db("POST","entries",[entryFields(en)]);
+          setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
+          newIds.push(inserted.id);
         }
+        setRedoStack(prev=>[...prev,{type:"deleteMultiple",data:{ids:newIds}}]);
       } else if(last.type==="unscheduleItem") {
+        const newIds=[];
         for(const en of last.data.deletedEntries){
-          const [inserted]=await db("POST","entries",[{staff_id:en.staffId,job_id:en.jobId,sub_item_id:en.subItemId,date_str:en.dateStr,slot:en.slot,hours:en.hours,misc_note:en.miscNote}]);
-          setEntries(prev=>[...prev,{id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}]);
+          const [inserted]=await db("POST","entries",[entryFields(en)]);
+          setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
+          newIds.push(inserted.id);
         }
+        setRedoStack(prev=>[...prev,{type:"unscheduleItem",data:{ids:newIds}}]);
       }
     } catch(e){setError("Undo failed.");}
+    setSaving(false);
+  }
+
+  async function handleRedo() {
+    if(redoStack.length===0) return;
+    const last=redoStack[redoStack.length-1];
+    setRedoStack(prev=>prev.slice(0,-1));
+    setSaving(true);
+    try {
+      if(last.type==="addEntries") {
+        const inserted=await db("POST","entries",last.data.rows);
+        const mapped=inserted.map(mapInsertedEntry);
+        setEntries(prev=>[...prev,...mapped]);
+        setUndoStack(prev=>[...prev,{type:"addEntries",data:{ids:mapped.map(e=>e.id)}}]);
+      } else if(last.type==="editEntry") {
+        const s=last.data.state;
+        const current=entries.find(en=>en.id===s.id);
+        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote},`?id=eq.${s.id}`);
+        setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
+        if(current)setUndoStack(prev=>[...prev,{type:"editEntry",data:{prev:current}}]);
+      } else if(last.type==="deleteEntry") {
+        const {id}=last.data;
+        const entry=entries.find(e=>e.id===id);
+        await db("DELETE","entries",null,`?id=eq.${id}`);
+        setEntries(prev=>prev.filter(e=>e.id!==id));
+        if(entry)setUndoStack(prev=>[...prev,{type:"deleteEntry",data:{entry}}]);
+      } else if(last.type==="moveEntry") {
+        const {id,staffId,dateStr,slot}=last.data;
+        const current=entries.find(e=>e.id===id);
+        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
+        setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot}:e));
+        if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot}}]);
+      } else if(last.type==="moveMultiple") {
+        const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot}:null;}).filter(Boolean);
+        for(const {id,staffId,dateStr,slot} of last.data.states){
+          await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
+        }
+        setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+        setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
+      } else if(last.type==="deleteMultiple") {
+        const {ids}=last.data;
+        const deletedEntries=entries.filter(e=>ids.includes(e.id));
+        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
+        setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
+        setUndoStack(prev=>[...prev,{type:"deleteMultiple",data:{deletedEntries}}]);
+      } else if(last.type==="unscheduleItem") {
+        const {ids}=last.data;
+        const deletedEntries=entries.filter(e=>ids.includes(e.id));
+        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
+        setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
+        setUndoStack(prev=>[...prev,{type:"unscheduleItem",data:{deletedEntries}}]);
+      }
+    } catch(e){setError("Redo failed.");}
     setSaving(false);
   }
   const [copyMode,setCopyMode]=useState(false); // tap-to-copy, arms via Select toolbar's Copy button
@@ -1343,6 +1418,10 @@ function MainApp({currentUser,onLogout}) {
               <button onClick={handleUndo} disabled={undoStack.length===0}
                 style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:undoStack.length>0?"#fff":"#F8FAFC",cursor:undoStack.length>0?"pointer":"not-allowed",fontSize:12,color:undoStack.length>0?"#475569":"#CBD5E1"}}>
                 ↩ Undo
+              </button>
+              <button onClick={handleRedo} disabled={redoStack.length===0}
+                style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:redoStack.length>0?"#fff":"#F8FAFC",cursor:redoStack.length>0?"pointer":"not-allowed",fontSize:12,color:redoStack.length>0?"#475569":"#CBD5E1"}}>
+                ↪ Redo
               </button>
               <button onClick={loadAll} style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:12,color:"#64748B"}}>↻ Refresh</button>
             </div>
