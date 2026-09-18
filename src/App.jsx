@@ -192,6 +192,29 @@ function nextAvailableDate(staffIds, slot, entries, fromDateStr) {
   return startStr;
 }
 
+// Like nextAvailableDate, but for an auto-fill block that spans multiple
+// days per person: checks that EVERY day each person's share would actually
+// land on is free, not just the first day. staffShares is [{sid,ph,hours}].
+function blockFits(staffShares, slot, entries, startDateStr) {
+  return staffShares.every(({sid,ph,hours})=>{
+    const days=buildAutoFill(startDateStr,hours,ph);
+    return days.every(d=>!entries.some(e=>e.staffId===sid&&e.dateStr===d.dateStr&&e.slot===slot));
+  });
+}
+
+function nextAvailableBlockDate(staffShares, slot, entries, fromDateStr) {
+  const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
+  let cur=parseISO(startStr);
+  for(let i=0;i<730;i++){
+    if(!isWeekend(cur)){
+      const ds=isoDate(cur);
+      if(blockFits(staffShares,slot,entries,ds))return ds;
+    }
+    cur=addDays(cur,1);
+  }
+  return startStr;
+}
+
 // Splits totalHours across staff proportional to each person's productive
 // rate, so equal-rate staff get an equal share and different-rate staff get
 // shares matching their own daily rate. Each share is rounded to the nearest
@@ -1834,9 +1857,17 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
             <button type="button" onClick={()=>{
                 const ids=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
                 if(ids.length===0)return;
-                set("dateStr",nextAvailableDate(ids,form.slot,entries,todayStr));
+                if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
+                  // A day only counts as "available" if every day the auto-fill
+                  // would actually use is free - not just the start day.
+                  const staffWithPh=ids.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,ph:Number(sf?.productiveHours)||8};});
+                  const shares=ids.length>1?splitHoursByStaff(staffWithPh,form.totalHours):staffWithPh.map(s=>({...s,hours:form.totalHours}));
+                  set("dateStr",nextAvailableBlockDate(shares,form.slot,entries,todayStr));
+                } else {
+                  set("dateStr",nextAvailableDate(ids,form.slot,entries,todayStr));
+                }
               }} style={{width:"100%",padding:"7px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:12,cursor:"pointer",marginBottom:14}}>
-              First Available {form.staffIds.length>1?"(for whole group)":""}
+              First Available
             </button>
           )}
 
