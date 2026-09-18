@@ -215,22 +215,20 @@ function splitHoursByStaff(staffWithPh, totalHours) {
 // (originally #5 and #6) sat only ~15° apart - inside the blue-green band
 // where the human eye is naturally worst at telling hues apart - so teal was
 // swapped for yellow, which sits far from both its neighbours (~97°/143°).
-// Backgrounds are one shade more saturated than a first pass at this palette
-// used - at the very palest tier, the fill colour was nearly invisible next
-// to white and people were only reading the border/text colour instead of
-// the block's fill. This tier still keeps every text colour comfortably
-// legible (4.5:1+ contrast) while making the fill itself actually visible.
+// Backgrounds sit halfway between the original, near-invisible tier and a
+// more saturated pass that turned out too strong - a compromise checked
+// against contrast math, still comfortably legible (4.5:1+) for every colour.
 const JOB_COLOUR_PRESETS = [
-  {bgColor:"#FEE2E2",borderColor:"#EF4444",textColor:"#B91C1C"}, // red
-  {bgColor:"#FFEDD5",borderColor:"#F97316",textColor:"#C2410C"}, // orange
-  {bgColor:"#ECFCCB",borderColor:"#84CC16",textColor:"#4D7C0F"}, // lime
-  {bgColor:"#DCFCE7",borderColor:"#22C55E",textColor:"#15803D"}, // green
-  {bgColor:"#FEF9C3",borderColor:"#EAB308",textColor:"#854D0E"}, // yellow
-  {bgColor:"#CFFAFE",borderColor:"#06B6D4",textColor:"#0E7490"}, // cyan
-  {bgColor:"#DBEAFE",borderColor:"#3B82F6",textColor:"#1D4ED8"}, // blue
-  {bgColor:"#EDE9FE",borderColor:"#8B5CF6",textColor:"#6D28D9"}, // violet
-  {bgColor:"#FAE8FF",borderColor:"#D946EF",textColor:"#A21CAF"}, // fuchsia
-  {bgColor:"#FCE7F3",borderColor:"#EC4899",textColor:"#9D174D"}, // pink
+  {bgColor:"#FEEAEA",borderColor:"#EF4444",textColor:"#B91C1C"}, // red
+  {bgColor:"#FFF2E1",borderColor:"#F97316",textColor:"#C2410C"}, // orange
+  {bgColor:"#F2FDD9",borderColor:"#84CC16",textColor:"#4D7C0F"}, // lime
+  {bgColor:"#E6FDEE",borderColor:"#22C55E",textColor:"#15803D"}, // green
+  {bgColor:"#FEFBD6",borderColor:"#EAB308",textColor:"#854D0E"}, // yellow
+  {bgColor:"#DEFCFF",borderColor:"#06B6D4",textColor:"#0E7490"}, // cyan
+  {bgColor:"#E5F0FF",borderColor:"#3B82F6",textColor:"#1D4ED8"}, // blue
+  {bgColor:"#F1EEFF",borderColor:"#8B5CF6",textColor:"#6D28D9"}, // violet
+  {bgColor:"#FCEEFF",borderColor:"#D946EF",textColor:"#A21CAF"}, // fuchsia
+  {bgColor:"#FDEDF6",borderColor:"#EC4899",textColor:"#9D174D"}, // pink
 ];
 
 
