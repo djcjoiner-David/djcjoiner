@@ -211,15 +211,16 @@ function splitHoursByStaff(staffWithPh, totalHours) {
   });
 }
 
-// Hues spaced ~36° apart around the colour wheel (red, orange, lime, green,
-// teal, cyan, blue, violet, fuchsia, pink) so all 10 stay tellable apart at
-// a glance, instead of several landing in the same colour family.
+// Hues chosen for maximum separation around the colour wheel. Teal and cyan
+// (originally #5 and #6) sat only ~15° apart - inside the blue-green band
+// where the human eye is naturally worst at telling hues apart - so teal was
+// swapped for yellow, which sits far from both its neighbours (~97°/143°).
 const JOB_COLOUR_PRESETS = [
   {bgColor:"#FEF2F2",borderColor:"#EF4444",textColor:"#B91C1C"}, // red
   {bgColor:"#FFF7ED",borderColor:"#F97316",textColor:"#C2410C"}, // orange
   {bgColor:"#F7FEE7",borderColor:"#84CC16",textColor:"#4D7C0F"}, // lime
   {bgColor:"#F0FDF4",borderColor:"#22C55E",textColor:"#15803D"}, // green
-  {bgColor:"#F0FDFA",borderColor:"#14B8A6",textColor:"#0F766E"}, // teal
+  {bgColor:"#FEFCE8",borderColor:"#EAB308",textColor:"#854D0E"}, // yellow
   {bgColor:"#ECFEFF",borderColor:"#06B6D4",textColor:"#0E7490"}, // cyan
   {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"}, // blue
   {bgColor:"#F5F3FF",borderColor:"#8B5CF6",textColor:"#6D28D9"}, // violet
