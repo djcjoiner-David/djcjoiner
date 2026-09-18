@@ -383,12 +383,16 @@ function LoginScreen({onLogin}) {
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(false);
   const [logoSrc,setLogoSrc]=useState(CLIENT_LOGO);
+  const [companyName,setCompanyName]=useState(CLIENT_NAME);
+  const [companyTagline,setCompanyTagline]=useState(CLIENT_TAGLINE);
 
   useEffect(()=>{
     db("GET","app_settings").then(rows=>{
-      const saved=rows?.[0]?.logo_data;
-      if(saved)setLogoSrc(saved);
-    }).catch(()=>{}); // table may not exist yet on older deployments - just keep the default logo
+      const saved=rows?.[0];
+      if(saved?.logo_data)setLogoSrc(saved.logo_data);
+      if(saved?.company_name)setCompanyName(saved.company_name);
+      if(saved?.company_tagline)setCompanyTagline(saved.company_tagline);
+    }).catch(()=>{}); // table may not exist yet on older deployments - just keep the defaults
   },[]);
 
   async function handleLogin(e) {
@@ -415,8 +419,8 @@ function LoginScreen({onLogin}) {
       <div style={{background:BRAND_HEADER_BG,padding:"16px 24px",display:"flex",alignItems:"center",gap:14}}>
         <img src={logoSrc} alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
         <div>
-          <div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{CLIENT_NAME}</div>
-          <div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{CLIENT_TAGLINE}</div>
+          <div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{companyName}</div>
+          <div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{companyTagline}</div>
         </div>
       </div>
       <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
@@ -443,13 +447,15 @@ function LoginScreen({onLogin}) {
 
 // ── User Management Modal ─────────────────────────────────────
 
-function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo}) {
+function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo,companyName,onChangeCompanyName,companyTagline,onChangeCompanyTagline}) {
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [form,setForm]=useState({name:"",email:"",password:"",role:"staff"});
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState("");
   const [logoUploading,setLogoUploading]=useState(false);
+  const [nameInput,setNameInput]=useState(companyName);
+  const [taglineInput,setTaglineInput]=useState(companyTagline);
 
   async function handleLogoFile(e){
     const file=e.target.files[0];
@@ -501,10 +507,10 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
             </Sel>
           </div>
           <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
-            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Company Logo</div>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Company Branding</div>
             <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Shown on the login screen and in the header, for everyone.</div>
-            <div style={{display:"flex",alignItems:"center",gap:14}}>
-              <div style={{width:64,height:64,border:"1px solid #E2E8F0",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:"#F8FAFC",overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+              <div style={{width:64,height:64,border:"1px solid #E2E8F0",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:"#F8FAFC",overflow:"hidden",flexShrink:0}}>
                 <img src={logoSrc} alt="Current logo" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/>
               </div>
               <div>
@@ -515,6 +521,10 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
                 <button onClick={onResetLogo} style={{marginLeft:8,padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid #E2E8F0",background:"none",color:"#94A3B8"}}>Reset to default</button>
                 <div style={{fontSize:11,color:"#94A3B8",marginTop:6}}>PNG, JPG, or similar - up to 5MB.</div>
               </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <Inp label="Company Name" value={nameInput} onChange={e=>setNameInput(e.target.value)} onBlur={()=>onChangeCompanyName(nameInput)} placeholder="Company Name"/>
+              <Inp label="Tagline" value={taglineInput} onChange={e=>setTaglineInput(e.target.value)} onBlur={()=>onChangeCompanyTagline(taglineInput)} placeholder="Tagline"/>
             </div>
           </div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:24}}>
@@ -603,12 +613,16 @@ function MainApp({currentUser,onLogout}) {
   const [themeKey,setThemeKey]=useState(DEFAULT_THEME_KEY);
   const theme=THEMES[themeKey]||THEMES[DEFAULT_THEME_KEY];
   const [logoSrc,setLogoSrc]=useState(CLIENT_LOGO);
+  const [companyName,setCompanyName]=useState(CLIENT_NAME);
+  const [companyTagline,setCompanyTagline]=useState(CLIENT_TAGLINE);
 
   useEffect(()=>{
     db("GET","app_settings").then(rows=>{
       const saved=rows?.[0];
       if(saved?.theme&&THEMES[saved.theme])setThemeKey(saved.theme);
       if(saved?.logo_data)setLogoSrc(saved.logo_data);
+      if(saved?.company_name)setCompanyName(saved.company_name);
+      if(saved?.company_tagline)setCompanyTagline(saved.company_tagline);
     }).catch(()=>{}); // table may not exist yet on older deployments - just keep the defaults
   },[]);
 
@@ -628,6 +642,20 @@ function MainApp({currentUser,onLogout}) {
     setLogoSrc(CLIENT_LOGO);
     try{await db("PATCH","app_settings",{logo_data:null},"?id=eq.1");}
     catch{setError("Could not reset the logo - it'll reappear next time the page loads.");}
+  }
+
+  async function changeCompanyName(name){
+    const value=name.trim()||CLIENT_NAME;
+    setCompanyName(value);
+    try{await db("PATCH","app_settings",{company_name:value},"?id=eq.1");}
+    catch{setError("Could not save the company name - it'll reset next time the page loads.");}
+  }
+
+  async function changeCompanyTagline(tagline){
+    const value=tagline.trim()||CLIENT_TAGLINE;
+    setCompanyTagline(value);
+    try{await db("PATCH","app_settings",{company_tagline:value},"?id=eq.1");}
+    catch{setError("Could not save the tagline - it'll reset next time the page loads.");}
   }
 
   const [viewWeeks,setViewWeeks]=useState(2);
@@ -1184,7 +1212,7 @@ function MainApp({currentUser,onLogout}) {
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
       <div style={{background:BRAND_HEADER_BG,padding:"14px 24px",display:"flex",alignItems:"center",gap:14}}>
         <img src={logoSrc} alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
-        <div><div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{CLIENT_NAME}</div><div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{CLIENT_TAGLINE}</div></div>
+        <div><div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{companyName}</div><div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{companyTagline}</div></div>
       </div>
       <Spinner text="Loading schedule..."/>
     </div>
@@ -1199,8 +1227,8 @@ function MainApp({currentUser,onLogout}) {
           <div style={{display:"flex",alignItems:"center",gap:14}}>
             <img src={logoSrc} alt="Logo" style={{height:48,maxWidth:130,objectFit:"contain"}}/>
             <div>
-              <div style={{fontSize:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{CLIENT_NAME}</div>
-              <div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{CLIENT_TAGLINE}</div>
+              <div style={{fontSize:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
+              <div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>
             </div>
             <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
             <div style={{fontSize:14,color:theme.sub,opacity:0.7}}>Production Schedule</div>
@@ -1440,7 +1468,7 @@ function MainApp({currentUser,onLogout}) {
       {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id}/>}
-      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo}/>}
+      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline}/>}
       {workHoursOpen&&(
         <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
           <div style={{marginBottom:12}}>
