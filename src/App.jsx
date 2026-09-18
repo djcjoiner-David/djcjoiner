@@ -1453,7 +1453,7 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Header */}
       <div ref={headerRef} style={{background:theme.header,padding:"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14,flexWrap:"wrap",rowGap:8}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:10,paddingBottom:10,flexWrap:"wrap",rowGap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
             <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
             <div>
@@ -1469,12 +1469,6 @@ function MainApp({currentUser,onLogout}) {
             {saving&&!isMobile&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",rowGap:8}}>
-            {!isMobile&&(
-              <button onClick={()=>setWorkHoursOpen(true)}
-                    style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
-                    🕐 {workStart}–{workEnd}
-                  </button>
-            )}
             {isManager&&!isMobile&&(
               <button onClick={()=>setJobModal({isNew:true,jobNo:"",name:"",...nextPreset(),subItems:[]})}
                 style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${theme.heading}`,background:theme.heading,color:theme.header}}
@@ -1482,6 +1476,12 @@ function MainApp({currentUser,onLogout}) {
                 onMouseLeave={e=>{e.currentTarget.style.opacity=1;}}>
                 + Add Job
               </button>
+            )}
+            {!isMobile&&(
+              <button onClick={()=>setWorkHoursOpen(true)}
+                    style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
+                    🕐 {workStart}–{workEnd}
+                  </button>
             )}
             {isAdmin&&!isMobile&&(
               <button onClick={()=>setUserMgmtOpen(true)}
@@ -1500,17 +1500,17 @@ function MainApp({currentUser,onLogout}) {
               </button>
             )}
             {!isMobile&&(
-              <div style={{display:"flex",flexDirection:"column",alignItems:"stretch",gap:4}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
-                  <div style={{width:28,height:28,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:theme.header}}>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"stretch",gap:2}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.08)",borderRadius:7,padding:"3px 10px"}}>
+                  <div style={{width:22,height:22,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:theme.header,flexShrink:0}}>
                     {currentUser.name.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <div style={{fontSize:13,color:theme.sub,fontWeight:500}}>{currentUser.name}</div>
-                    <div style={{fontSize:10,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 5px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
+                    <div style={{fontSize:12,color:theme.sub,fontWeight:500,lineHeight:1.2}}>{currentUser.name}</div>
+                    <div style={{fontSize:9,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 4px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
                   </div>
                 </div>
-                <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
+                <button onClick={onLogout} style={{padding:"3px 10px",borderRadius:7,fontSize:11,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
               </div>
             )}
             {isMobile&&(
