@@ -4,6 +4,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
 const SCRYPT_KEYLEN = 64;
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_MINUTES = 15;
+const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours
 
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex');
@@ -35,8 +36,10 @@ function sanitizeRows(table, rows) {
 // it. The role itself is never trusted from the token - it's looked up fresh
 // from the database on every request, so a role change or removed account
 // takes effect immediately instead of waiting for the old token to expire.
+// Every token also carries its own expiry, so a stolen/leaked token only
+// stays usable for a limited window rather than forever.
 function signSession(payload) {
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + SESSION_DURATION_MS })).toString('base64url');
   const sig = createHmac('sha256', process.env.API_SECRET).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
@@ -49,7 +52,9 @@ function verifySession(token) {
   const expectedBuf = Buffer.from(expected);
   if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return null;
   try {
-    return JSON.parse(Buffer.from(body, 'base64url').toString());
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
+    if (typeof payload.exp !== 'number' || Date.now() > payload.exp) return null;
+    return payload;
   } catch {
     return null;
   }
