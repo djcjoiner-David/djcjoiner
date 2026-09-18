@@ -41,6 +41,19 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)").matches : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const onChange = () => setIsMobile(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return isMobile;
+}
+
 const LOGO_MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5MB - just a sanity cap before we even try to process it
 const LOGO_MAX_HEIGHT = 200; // stored/display size - the logo never renders taller than ~48px in the app
 
@@ -640,6 +653,7 @@ function MainApp({currentUser,onLogout}) {
   const isAdmin=currentUser.role==="admin";
   const isManager=currentUser.role==="admin"||currentUser.role==="manager";
   const canEdit=isManager;
+  const isMobile=useIsMobile();
 
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
@@ -773,113 +787,162 @@ function MainApp({currentUser,onLogout}) {
     if(undoStack.length===0) return;
     const last=undoStack[undoStack.length-1];
     setUndoStack(prev=>prev.slice(0,-1));
-    setSaving(true);
-    try {
-      if(last.type==="addEntries") {
-        // Remove entries that were added, but keep their data so Redo can re-add them
-        const rows=entries.filter(e=>last.data.ids.includes(e.id)).map(entryFields);
-        for(const id of last.data.ids) await db("DELETE","entries",null,`?id=eq.${id}`);
-        setEntries(prev=>prev.filter(e=>!last.data.ids.includes(e.id)));
-        setRedoStack(prev=>[...prev,{type:"addEntries",data:{rows}}]);
-      } else if(last.type==="editEntry") {
-        // Restore previous entry state, keeping the current one for Redo
-        const e=last.data.prev;
-        const current=entries.find(en=>en.id===e.id);
-        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote},`?id=eq.${e.id}`);
-        setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
-        if(current)setRedoStack(prev=>[...prev,{type:"editEntry",data:{state:current}}]);
-      } else if(last.type==="deleteEntry") {
-        // Re-insert deleted entry - the new id is what Redo needs to delete it again
-        const e=last.data.entry;
-        const [inserted]=await db("POST","entries",[entryFields(e)]);
-        setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
-        setRedoStack(prev=>[...prev,{type:"deleteEntry",data:{id:inserted.id}}]);
-      } else if(last.type==="moveEntry") {
-        const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
-        const current=entries.find(e=>e.id===id);
-        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
-        setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
-        if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot}}]);
-      } else if(last.type==="moveMultiple") {
-        const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot}:null;}).filter(Boolean);
-        for(const {id,prevStaffId,prevDateStr,prevSlot} of last.data.prevStates){
-          await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
-        }
-        setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
-        setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
-      } else if(last.type==="deleteMultiple") {
-        // Re-insert all deleted entries - the new ids are what Redo needs to delete them again
-        const newIds=[];
-        for(const en of last.data.deletedEntries){
-          const [inserted]=await db("POST","entries",[entryFields(en)]);
-          setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
-          newIds.push(inserted.id);
-        }
-        setRedoStack(prev=>[...prev,{type:"deleteMultiple",data:{ids:newIds}}]);
-      } else if(last.type==="unscheduleItem") {
-        const newIds=[];
-        for(const en of last.data.deletedEntries){
-          const [inserted]=await db("POST","entries",[entryFields(en)]);
-          setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
-          newIds.push(inserted.id);
-        }
-        setRedoStack(prev=>[...prev,{type:"unscheduleItem",data:{ids:newIds}}]);
+    // Every branch applies its change to the screen first and talks to the
+    // server in the background, same as drag/copy/delete - rolling back (and
+    // popping the redo entry it just pushed) if the save actually fails.
+    if(last.type==="addEntries") {
+      const removed=entries.filter(e=>last.data.ids.includes(e.id));
+      const rows=removed.map(entryFields);
+      setEntries(prev=>prev.filter(e=>!last.data.ids.includes(e.id)));
+      setRedoStack(prev=>[...prev,{type:"addEntries",data:{rows}}]);
+      try{
+        await Promise.all(last.data.ids.map(id=>db("DELETE","entries",null,`?id=eq.${id}`)));
+      }catch(e){
+        setError("Undo failed - restored.");
+        setEntries(prev=>[...prev,...removed]);
+        setRedoStack(prev=>prev.slice(0,-1));
       }
-    } catch(e){setError("Undo failed.");}
-    setSaving(false);
+    } else if(last.type==="editEntry") {
+      const e=last.data.prev;
+      const current=entries.find(en=>en.id===e.id);
+      setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
+      if(current)setRedoStack(prev=>[...prev,{type:"editEntry",data:{state:current}}]);
+      try{
+        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote},`?id=eq.${e.id}`);
+      }catch(err){
+        setError("Undo failed - reverted.");
+        if(current){setEntries(prev=>prev.map(en=>en.id===e.id?current:en));setRedoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="deleteEntry") {
+      const e=last.data.entry;
+      const tempId=`temp_undo_${Date.now()}`;
+      setEntries(prev=>[...prev,{...e,id:tempId}]);
+      try{
+        const [inserted]=await db("POST","entries",[entryFields(e)]);
+        const real=mapInsertedEntry(inserted);
+        setEntries(prev=>prev.map(en=>en.id===tempId?real:en));
+        setRedoStack(prev=>[...prev,{type:"deleteEntry",data:{id:real.id}}]);
+      }catch(err){
+        setError("Undo failed.");
+        setEntries(prev=>prev.filter(en=>en.id!==tempId));
+      }
+    } else if(last.type==="moveEntry") {
+      const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
+      const current=entries.find(e=>e.id===id);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
+      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot}}]);
+      try{
+        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
+      }catch(err){
+        setError("Undo failed - reverted.");
+        if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setRedoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="moveMultiple") {
+      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+      setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
+      try{
+        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot})=>
+          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`)
+        ));
+      }catch(err){
+        setError("Undo failed - reverted.");
+        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+        setRedoStack(prev=>prev.slice(0,-1));
+      }
+    } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
+      // Re-insert all of them in a single batched request, not one at a time
+      const tempMap=last.data.deletedEntries.map((en,i)=>({tempId:`temp_undo_${Date.now()}_${i}`,en}));
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,en})=>({...en,id:tempId}))]);
+      const tempIds=tempMap.map(t=>t.tempId);
+      try{
+        const inserted=await db("POST","entries",last.data.deletedEntries.map(entryFields));
+        const mapped=inserted.map(mapInsertedEntry);
+        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
+        setRedoStack(prev=>[...prev,{type:last.type,data:{ids:mapped.map(e=>e.id)}}]);
+      }catch(err){
+        setError("Undo failed.");
+        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
+      }
+    }
   }
 
   async function handleRedo() {
     if(redoStack.length===0) return;
     const last=redoStack[redoStack.length-1];
     setRedoStack(prev=>prev.slice(0,-1));
-    setSaving(true);
-    try {
-      if(last.type==="addEntries") {
+    if(last.type==="addEntries") {
+      const tempMap=last.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}`,row}));
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:row.hours,miscNote:row.misc_note||null}))]);
+      const tempIds=tempMap.map(t=>t.tempId);
+      try{
         const inserted=await db("POST","entries",last.data.rows);
         const mapped=inserted.map(mapInsertedEntry);
-        setEntries(prev=>[...prev,...mapped]);
+        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
         setUndoStack(prev=>[...prev,{type:"addEntries",data:{ids:mapped.map(e=>e.id)}}]);
-      } else if(last.type==="editEntry") {
-        const s=last.data.state;
-        const current=entries.find(en=>en.id===s.id);
-        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote},`?id=eq.${s.id}`);
-        setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
-        if(current)setUndoStack(prev=>[...prev,{type:"editEntry",data:{prev:current}}]);
-      } else if(last.type==="deleteEntry") {
-        const {id}=last.data;
-        const entry=entries.find(e=>e.id===id);
-        await db("DELETE","entries",null,`?id=eq.${id}`);
-        setEntries(prev=>prev.filter(e=>e.id!==id));
-        if(entry)setUndoStack(prev=>[...prev,{type:"deleteEntry",data:{entry}}]);
-      } else if(last.type==="moveEntry") {
-        const {id,staffId,dateStr,slot}=last.data;
-        const current=entries.find(e=>e.id===id);
-        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
-        setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot}:e));
-        if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot}}]);
-      } else if(last.type==="moveMultiple") {
-        const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot}:null;}).filter(Boolean);
-        for(const {id,staffId,dateStr,slot} of last.data.states){
-          await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
-        }
-        setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
-        setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
-      } else if(last.type==="deleteMultiple") {
-        const {ids}=last.data;
-        const deletedEntries=entries.filter(e=>ids.includes(e.id));
-        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
-        setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
-        setUndoStack(prev=>[...prev,{type:"deleteMultiple",data:{deletedEntries}}]);
-      } else if(last.type==="unscheduleItem") {
-        const {ids}=last.data;
-        const deletedEntries=entries.filter(e=>ids.includes(e.id));
-        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
-        setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
-        setUndoStack(prev=>[...prev,{type:"unscheduleItem",data:{deletedEntries}}]);
+      }catch(err){
+        setError("Redo failed.");
+        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
       }
-    } catch(e){setError("Redo failed.");}
-    setSaving(false);
+    } else if(last.type==="editEntry") {
+      const s=last.data.state;
+      const current=entries.find(en=>en.id===s.id);
+      setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
+      if(current)setUndoStack(prev=>[...prev,{type:"editEntry",data:{prev:current}}]);
+      try{
+        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote},`?id=eq.${s.id}`);
+      }catch(err){
+        setError("Redo failed - reverted.");
+        if(current){setEntries(prev=>prev.map(en=>en.id===s.id?current:en));setUndoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="deleteEntry") {
+      const {id}=last.data;
+      const entry=entries.find(e=>e.id===id);
+      setEntries(prev=>prev.filter(e=>e.id!==id));
+      if(entry)setUndoStack(prev=>[...prev,{type:"deleteEntry",data:{entry}}]);
+      try{
+        await db("DELETE","entries",null,`?id=eq.${id}`);
+      }catch(err){
+        setError("Redo failed - restored.");
+        if(entry){setEntries(prev=>[...prev,entry]);setUndoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="moveEntry") {
+      const {id,staffId,dateStr,slot}=last.data;
+      const current=entries.find(e=>e.id===id);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot}:e));
+      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot}}]);
+      try{
+        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
+      }catch(err){
+        setError("Redo failed - reverted.");
+        if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setUndoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="moveMultiple") {
+      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+      setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
+      try{
+        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot})=>
+          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`)
+        ));
+      }catch(err){
+        setError("Redo failed - reverted.");
+        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+        setUndoStack(prev=>prev.slice(0,-1));
+      }
+    } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
+      const {ids}=last.data;
+      const deletedEntries=entries.filter(e=>ids.includes(e.id));
+      setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
+      setUndoStack(prev=>[...prev,{type:last.type,data:{deletedEntries}}]);
+      try{
+        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
+      }catch(err){
+        setError("Redo failed - restored.");
+        setEntries(prev=>[...prev,...deletedEntries]);
+        setUndoStack(prev=>prev.slice(0,-1));
+      }
+    }
   }
   const [copyMode,setCopyMode]=useState(false); // tap-to-copy, arms via Select toolbar's Copy button
   const [selectedEntries,setSelectedEntries]=useState(new Set()); // for multi-select
@@ -1366,18 +1429,20 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Header */}
       <div style={{background:theme.header,padding:"0 24px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14}}>
-          <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <img src={logoSrc} alt="Logo" style={{height:48,maxWidth:130,objectFit:"contain"}}/>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14,flexWrap:"wrap",rowGap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
+            <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
             <div>
-              <div style={{fontSize:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
-              <div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>
+              <div style={{fontSize:isMobile?15:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
+              {!isMobile&&<div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>}
             </div>
-            <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
-            <div style={{fontSize:14,color:theme.sub,opacity:0.7}}>Production Schedule</div>
+            {!isMobile&&<>
+              <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
+              <div style={{fontSize:14,color:theme.sub,opacity:0.7}}>Production Schedule</div>
+            </>}
             {saving&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",rowGap:8}}>
             <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
               <div style={{width:28,height:28,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:theme.header}}>
                 {currentUser.name.charAt(0).toUpperCase()}
