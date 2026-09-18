@@ -1573,7 +1573,7 @@ function MainApp({currentUser,onLogout}) {
         </div>
       )}
 
-      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)}/>}
+      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline}/>}
@@ -1707,7 +1707,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
 
 // ── Entry Modal ───────────────────────────────────────────────
 
-function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) {
+function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,saving}) {
   const [form,setForm]=useState(()=>{
     const jobSubs=subItems.filter(s=>s.jobId===data.jobId);
     const defaultSub=data.subItemId||(jobSubs[0]?.id||"");
@@ -1841,17 +1841,16 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
 
         {/* Right column: when, and how many hours */}
         <div>
-          <div style={{display:"flex",alignItems:"flex-end",gap:8,marginBottom:8}}>
-            <div style={{flex:1}}>
-              <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>set("dateStr",e.target.value)}/>
-            </div>
-            <div style={{width:88}}>
-              <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Slot</div>
-              <select value={form.slot} onChange={e=>set("slot",Number(e.target.value))}
-                style={{width:"100%",height:34,padding:"7px 8px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,background:"#fff",outline:"none",boxSizing:"border-box"}}>
-                <option value={0}>Slot 1</option><option value={1}>Slot 2</option>
-              </select>
-            </div>
+          <div style={{display:"flex",gap:8,marginBottom:8}}>
+            {[[0,"Slot 1"],[1,"Slot 2"]].map(([val,label])=>(
+              <button key={val} type="button" onClick={()=>set("slot",val)}
+                style={{flex:1,padding:"8px",borderRadius:8,border:`1.5px solid ${form.slot===val?"#8B5CF6":"#DDD6FE"}`,background:form.slot===val?"#8B5CF6":"#F5F3FF",color:form.slot===val?"#fff":"#6D28D9",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{marginBottom:8}}>
+            <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>set("dateStr",e.target.value)}/>
           </div>
           {form.mode==="new"&&(
             <button type="button" onClick={()=>{
@@ -1910,12 +1909,16 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
       </div>
 
       <div style={{display:"flex",gap:8,justifyContent:"space-between",marginTop:16}}>
-        <div>{form.mode==="edit"&&<Btn variant="danger" onClick={()=>onRemove(form.id)}>Remove</Btn>}</div>
+        <div>{form.mode==="edit"&&<Btn variant="danger" onClick={()=>onRemove(form.id)} disabled={saving}>Remove</Btn>}</div>
         <div style={{display:"flex",gap:8}}>
-          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={handleSave}>{autoFill&&form.entryType!=="misc"&&form.staffIds.length>1?`Schedule ${form.staffIds.length} staff`:autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save"}</Btn>
+          <Btn variant="ghost" onClick={onClose} disabled={saving}>Cancel</Btn>
+          <Btn variant="primary" onClick={handleSave} disabled={saving} style={{display:"flex",alignItems:"center",gap:8,cursor:saving?"not-allowed":"pointer",opacity:saving?0.75:1}}>
+            {saving&&<span style={{width:13,height:13,border:"2px solid rgba(255,255,255,0.4)",borderTop:"2px solid #fff",borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block"}}/>}
+            {saving?"Scheduling...":(autoFill&&form.entryType!=="misc"&&form.staffIds.length>1?`Schedule ${form.staffIds.length} staff`:autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save")}
+          </Btn>
         </div>
       </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </Modal>
   );
 }
