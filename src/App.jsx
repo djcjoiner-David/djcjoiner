@@ -393,9 +393,9 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {isMobile?(
         <>
-          <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,lineHeight:1.3}}>{job.jobNo}</div>
-          <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,overflowWrap:"break-word",wordBreak:"break-word",lineHeight:1.25}}>{subItem?subItem.name:job.name}</div>
-          <div style={{fontSize:12,fontWeight:700,color:isOver?"#EF4444":(conflict?"#EF4444":job.textColor),lineHeight:1.3}}>{hoursLabel}</div>
+          <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo}</div>
+          <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>{subItem?subItem.name:job.name}</div>
+          <div style={{fontSize:12,fontWeight:700,color:isOver?"#EF4444":(conflict?"#EF4444":job.textColor),whiteSpace:"nowrap",lineHeight:1.3}}>{hoursLabel}</div>
         </>
       ):(
         <>
@@ -1606,7 +1606,7 @@ function MainApp({currentUser,onLogout}) {
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block",flexShrink:0}}>👁 View only — contact a manager to make changes</div>}
 
           <div style={{overflowX:"auto",overflowY:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch",...(isMobile?{flex:1,minHeight:0}:{maxHeight:"calc(100vh - 280px)"})}}>
-            <table style={{borderCollapse:"separate",borderSpacing:0,width:staffColWidth+visibleDays.length*118,minWidth:"100%",tableLayout:"fixed"}}>
+            <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"auto"}}>
               <colgroup>
                 <col style={{width:staffColWidth}}/>
                 {visibleDays.map((_,i)=><col key={i} style={{width:118}}/>)}
