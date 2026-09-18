@@ -41,6 +41,36 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+const LOGO_MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5MB - just a sanity cap before we even try to process it
+const LOGO_MAX_HEIGHT = 200; // stored/display size - the logo never renders taller than ~48px in the app
+
+// Shrinks an uploaded image down before it's stored, so a phone photo doesn't
+// turn into a multi-megabyte row in the database. Keeps transparency (PNG)
+// since logos are usually shown on a coloured header background.
+function resizeImageToDataUrl(file, maxHeight) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) { reject(new Error("Please choose an image file.")); return; }
+    if (file.size > LOGO_MAX_UPLOAD_BYTES) { reject(new Error("That image is too large (max 5MB).")); return; }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read that file."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not read that image."));
+      img.onload = () => {
+        const scale = Math.min(1, maxHeight / img.height);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function parseQuery(query) {
   // Converts Supabase-style "?order=created_at" or "?id=eq.123" into an object
   const params = new URLSearchParams(query.replace(/^\?/, ""));
@@ -181,17 +211,24 @@ function splitHoursByStaff(staffWithPh, totalHours) {
   });
 }
 
+// Hues chosen for maximum separation around the colour wheel. Teal and cyan
+// (originally #5 and #6) sat only ~15° apart - inside the blue-green band
+// where the human eye is naturally worst at telling hues apart - so teal was
+// swapped for yellow, which sits far from both its neighbours (~97°/143°).
+// Backgrounds sit halfway between the original, near-invisible tier and a
+// more saturated pass that turned out too strong - a compromise checked
+// against contrast math, still comfortably legible (4.5:1+) for every colour.
 const JOB_COLOUR_PRESETS = [
-  {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"},
-  {bgColor:"#F0FDF4",borderColor:"#22C55E",textColor:"#15803D"},
-  {bgColor:"#FFFBEB",borderColor:"#F59E0B",textColor:"#B45309"},
-  {bgColor:"#FDF2F8",borderColor:"#EC4899",textColor:"#9D174D"},
-  {bgColor:"#F5F3FF",borderColor:"#8B5CF6",textColor:"#6D28D9"},
-  {bgColor:"#FFF1F2",borderColor:"#F43F5E",textColor:"#BE123C"},
-  {bgColor:"#ECFEFF",borderColor:"#06B6D4",textColor:"#0E7490"},
-  {bgColor:"#FFF7ED",borderColor:"#F97316",textColor:"#C2410C"},
-  {bgColor:"#F0FDF4",borderColor:"#10B981",textColor:"#065F46"},
-  {bgColor:"#FEF9C3",borderColor:"#EAB308",textColor:"#854D0E"},
+  {bgColor:"#FEEAEA",borderColor:"#EF4444",textColor:"#B91C1C"}, // red
+  {bgColor:"#FFF2E1",borderColor:"#F97316",textColor:"#C2410C"}, // orange
+  {bgColor:"#F2FDD9",borderColor:"#84CC16",textColor:"#4D7C0F"}, // lime
+  {bgColor:"#E6FDEE",borderColor:"#22C55E",textColor:"#15803D"}, // green
+  {bgColor:"#FEFBD6",borderColor:"#EAB308",textColor:"#854D0E"}, // yellow
+  {bgColor:"#DEFCFF",borderColor:"#06B6D4",textColor:"#0E7490"}, // cyan
+  {bgColor:"#E5F0FF",borderColor:"#3B82F6",textColor:"#1D4ED8"}, // blue
+  {bgColor:"#F1EEFF",borderColor:"#8B5CF6",textColor:"#6D28D9"}, // violet
+  {bgColor:"#FCEEFF",borderColor:"#D946EF",textColor:"#A21CAF"}, // fuchsia
+  {bgColor:"#FDEDF6",borderColor:"#EC4899",textColor:"#9D174D"}, // pink
 ];
 
 
@@ -352,6 +389,18 @@ function LoginScreen({onLogin}) {
   const [password,setPassword]=useState("");
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(false);
+  const [logoSrc,setLogoSrc]=useState(CLIENT_LOGO);
+  const [companyName,setCompanyName]=useState(CLIENT_NAME);
+  const [companyTagline,setCompanyTagline]=useState(CLIENT_TAGLINE);
+
+  useEffect(()=>{
+    db("GET","app_settings").then(rows=>{
+      const saved=rows?.[0];
+      if(saved?.logo_data)setLogoSrc(saved.logo_data);
+      if(saved?.company_name)setCompanyName(saved.company_name);
+      if(saved?.company_tagline)setCompanyTagline(saved.company_tagline);
+    }).catch(()=>{}); // table may not exist yet on older deployments - just keep the defaults
+  },[]);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -375,10 +424,10 @@ function LoginScreen({onLogin}) {
   return (
     <div style={{minHeight:"100vh",background:"#F8FAFC",display:"flex",flexDirection:"column"}}>
       <div style={{background:BRAND_HEADER_BG,padding:"16px 24px",display:"flex",alignItems:"center",gap:14}}>
-        <img src={CLIENT_LOGO} alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
+        <img src={logoSrc} alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
         <div>
-          <div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{CLIENT_NAME}</div>
-          <div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{CLIENT_TAGLINE}</div>
+          <div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{companyName}</div>
+          <div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{companyTagline}</div>
         </div>
       </div>
       <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
@@ -405,12 +454,27 @@ function LoginScreen({onLogin}) {
 
 // ── User Management Modal ─────────────────────────────────────
 
-function UserManagementModal({onClose,themeKey,onChangeTheme}) {
+function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo,companyName,onChangeCompanyName,companyTagline,onChangeCompanyTagline}) {
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [form,setForm]=useState({name:"",email:"",password:"",role:"staff"});
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState("");
+  const [logoUploading,setLogoUploading]=useState(false);
+  const [nameInput,setNameInput]=useState(companyName);
+  const [taglineInput,setTaglineInput]=useState(companyTagline);
+
+  async function handleLogoFile(e){
+    const file=e.target.files[0];
+    if(!file)return;
+    setLogoUploading(true);setError("");
+    try{
+      const dataUrl=await resizeImageToDataUrl(file,LOGO_MAX_HEIGHT);
+      await onChangeLogo(dataUrl);
+    }catch(err){setError(err.message||"Could not use that image.");}
+    setLogoUploading(false);
+    e.target.value="";
+  }
 
   useEffect(()=>{db("GET","user_roles","","?order=created_at").then(data=>{setUsers(data);setLoading(false);});},[]);
 
@@ -448,6 +512,27 @@ function UserManagementModal({onClose,themeKey,onChangeTheme}) {
             <Sel label="" value={themeKey} onChange={e=>onChangeTheme(e.target.value)}>
               {Object.entries(THEMES).map(([key,t])=><option key={key} value={key}>{t.name}</option>)}
             </Sel>
+          </div>
+          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Company Branding</div>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Shown on the login screen and in the header, for everyone.</div>
+            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+              <div style={{width:64,height:64,border:"1px solid #E2E8F0",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:"#F8FAFC",overflow:"hidden",flexShrink:0}}>
+                <img src={logoSrc} alt="Current logo" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/>
+              </div>
+              <div>
+                <label style={{display:"inline-block",padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:logoUploading?"not-allowed":"pointer",border:"1px solid #CBD5E1",background:"#fff",color:"#475569"}}>
+                  {logoUploading?"Uploading...":"Upload New Logo"}
+                  <input type="file" accept="image/*" onChange={handleLogoFile} disabled={logoUploading} style={{display:"none"}}/>
+                </label>
+                <button onClick={onResetLogo} style={{marginLeft:8,padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid #E2E8F0",background:"none",color:"#94A3B8"}}>Reset to default</button>
+                <div style={{fontSize:11,color:"#94A3B8",marginTop:6}}>PNG, JPG, or similar - up to 5MB.</div>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <Inp label="Company Name" value={nameInput} onChange={e=>setNameInput(e.target.value)} onBlur={()=>onChangeCompanyName(nameInput)} placeholder="Company Name"/>
+              <Inp label="Tagline" value={taglineInput} onChange={e=>setTaglineInput(e.target.value)} onBlur={()=>onChangeCompanyTagline(taglineInput)} placeholder="Tagline"/>
+            </div>
           </div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:24}}>
             <thead>
@@ -534,18 +619,50 @@ function MainApp({currentUser,onLogout}) {
   const [tab,setTab]=useState("schedule");
   const [themeKey,setThemeKey]=useState(DEFAULT_THEME_KEY);
   const theme=THEMES[themeKey]||THEMES[DEFAULT_THEME_KEY];
+  const [logoSrc,setLogoSrc]=useState(CLIENT_LOGO);
+  const [companyName,setCompanyName]=useState(CLIENT_NAME);
+  const [companyTagline,setCompanyTagline]=useState(CLIENT_TAGLINE);
 
   useEffect(()=>{
     db("GET","app_settings").then(rows=>{
-      const saved=rows?.[0]?.theme;
-      if(saved&&THEMES[saved])setThemeKey(saved);
-    }).catch(()=>{}); // table may not exist yet on older deployments - just keep the default look
+      const saved=rows?.[0];
+      if(saved?.theme&&THEMES[saved.theme])setThemeKey(saved.theme);
+      if(saved?.logo_data)setLogoSrc(saved.logo_data);
+      if(saved?.company_name)setCompanyName(saved.company_name);
+      if(saved?.company_tagline)setCompanyTagline(saved.company_tagline);
+    }).catch(()=>{}); // table may not exist yet on older deployments - just keep the defaults
   },[]);
 
   async function changeTheme(key){
     setThemeKey(key); // apply immediately, save in the background
     try{await db("PATCH","app_settings",{theme:key},"?id=eq.1");}
     catch{setError("Could not save the theme choice - it'll reset next time the page loads.");}
+  }
+
+  async function changeLogo(dataUrl){
+    setLogoSrc(dataUrl); // apply immediately, save in the background
+    try{await db("PATCH","app_settings",{logo_data:dataUrl},"?id=eq.1");}
+    catch{setError("Could not save the new logo - it'll reset next time the page loads.");}
+  }
+
+  async function resetLogo(){
+    setLogoSrc(CLIENT_LOGO);
+    try{await db("PATCH","app_settings",{logo_data:null},"?id=eq.1");}
+    catch{setError("Could not reset the logo - it'll reappear next time the page loads.");}
+  }
+
+  async function changeCompanyName(name){
+    const value=name.trim()||CLIENT_NAME;
+    setCompanyName(value);
+    try{await db("PATCH","app_settings",{company_name:value},"?id=eq.1");}
+    catch{setError("Could not save the company name - it'll reset next time the page loads.");}
+  }
+
+  async function changeCompanyTagline(tagline){
+    const value=tagline.trim()||CLIENT_TAGLINE;
+    setCompanyTagline(value);
+    try{await db("PATCH","app_settings",{company_tagline:value},"?id=eq.1");}
+    catch{setError("Could not save the tagline - it'll reset next time the page loads.");}
   }
 
   const [viewWeeks,setViewWeeks]=useState(2);
@@ -1101,8 +1218,8 @@ function MainApp({currentUser,onLogout}) {
   if(loading) return (
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
       <div style={{background:BRAND_HEADER_BG,padding:"14px 24px",display:"flex",alignItems:"center",gap:14}}>
-        <img src={CLIENT_LOGO} alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
-        <div><div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{CLIENT_NAME}</div><div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{CLIENT_TAGLINE}</div></div>
+        <img src={logoSrc} alt="Logo" style={{height:44,maxWidth:120,objectFit:"contain"}}/>
+        <div><div style={{fontSize:20,fontWeight:700,color:"#E8A030"}}>{companyName}</div><div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase"}}>{companyTagline}</div></div>
       </div>
       <Spinner text="Loading schedule..."/>
     </div>
@@ -1115,10 +1232,10 @@ function MainApp({currentUser,onLogout}) {
       <div style={{background:theme.header,padding:"0 24px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <img src={CLIENT_LOGO} alt="Logo" style={{height:48,maxWidth:130,objectFit:"contain"}}/>
+            <img src={logoSrc} alt="Logo" style={{height:48,maxWidth:130,objectFit:"contain"}}/>
             <div>
-              <div style={{fontSize:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{CLIENT_NAME}</div>
-              <div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{CLIENT_TAGLINE}</div>
+              <div style={{fontSize:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
+              <div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>
             </div>
             <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
             <div style={{fontSize:14,color:theme.sub,opacity:0.7}}>Production Schedule</div>
@@ -1358,7 +1475,7 @@ function MainApp({currentUser,onLogout}) {
       {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id}/>}
-      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme}/>}
+      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline}/>}
       {workHoursOpen&&(
         <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
           <div style={{marginBottom:12}}>
@@ -1739,6 +1856,19 @@ function JobModal({data,onSave,onDelete,onClose}) {
         <div>
           <Inp label="Job Number" value={form.jobNo} onChange={e=>set("jobNo",e.target.value)}/>
           <Inp label="Job Name" value={form.name} onChange={e=>set("name",e.target.value)}/>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:6,fontWeight:500}}>Colour</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {JOB_COLOUR_PRESETS.map((p,i)=>{
+                const selected=form.bgColor===p.bgColor&&form.borderColor===p.borderColor&&form.textColor===p.textColor;
+                return (
+                  <button key={i} type="button" onClick={()=>setForm(f=>({...f,bgColor:p.bgColor,borderColor:p.borderColor,textColor:p.textColor}))}
+                    title={`Colour ${i+1}`}
+                    style={{width:28,height:28,borderRadius:"50%",background:p.bgColor,border:selected?`2.5px solid ${p.borderColor}`:`1.5px solid ${p.borderColor}`,boxShadow:selected?`0 0 0 2px #fff, 0 0 0 3.5px ${p.borderColor}`:"none",cursor:"pointer",padding:0}}/>
+                );
+              })}
+            </div>
+          </div>
           <ColorPicker label="Background Colour" value={form.bgColor} onChange={v=>set("bgColor",v)}/>
           <ColorPicker label="Border Colour" value={form.borderColor} onChange={v=>set("borderColor",v)}/>
           <ColorPicker label="Text Colour" value={form.textColor} onChange={v=>set("textColor",v)}/>
