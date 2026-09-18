@@ -211,17 +211,20 @@ function splitHoursByStaff(staffWithPh, totalHours) {
   });
 }
 
+// Hues spaced ~36° apart around the colour wheel (red, orange, lime, green,
+// teal, cyan, blue, violet, fuchsia, pink) so all 10 stay tellable apart at
+// a glance, instead of several landing in the same colour family.
 const JOB_COLOUR_PRESETS = [
-  {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"},
-  {bgColor:"#F0FDF4",borderColor:"#22C55E",textColor:"#15803D"},
-  {bgColor:"#FFFBEB",borderColor:"#F59E0B",textColor:"#B45309"},
-  {bgColor:"#FDF2F8",borderColor:"#EC4899",textColor:"#9D174D"},
-  {bgColor:"#F5F3FF",borderColor:"#8B5CF6",textColor:"#6D28D9"},
-  {bgColor:"#FFF1F2",borderColor:"#F43F5E",textColor:"#BE123C"},
-  {bgColor:"#ECFEFF",borderColor:"#06B6D4",textColor:"#0E7490"},
-  {bgColor:"#FFF7ED",borderColor:"#F97316",textColor:"#C2410C"},
-  {bgColor:"#F0FDF4",borderColor:"#10B981",textColor:"#065F46"},
-  {bgColor:"#FEF9C3",borderColor:"#EAB308",textColor:"#854D0E"},
+  {bgColor:"#FEF2F2",borderColor:"#EF4444",textColor:"#B91C1C"}, // red
+  {bgColor:"#FFF7ED",borderColor:"#F97316",textColor:"#C2410C"}, // orange
+  {bgColor:"#F7FEE7",borderColor:"#84CC16",textColor:"#4D7C0F"}, // lime
+  {bgColor:"#F0FDF4",borderColor:"#22C55E",textColor:"#15803D"}, // green
+  {bgColor:"#F0FDFA",borderColor:"#14B8A6",textColor:"#0F766E"}, // teal
+  {bgColor:"#ECFEFF",borderColor:"#06B6D4",textColor:"#0E7490"}, // cyan
+  {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"}, // blue
+  {bgColor:"#F5F3FF",borderColor:"#8B5CF6",textColor:"#6D28D9"}, // violet
+  {bgColor:"#FDF4FF",borderColor:"#D946EF",textColor:"#A21CAF"}, // fuchsia
+  {bgColor:"#FDF2F8",borderColor:"#EC4899",textColor:"#9D174D"}, // pink
 ];
 
 
