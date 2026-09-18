@@ -1459,7 +1459,9 @@ function MainApp({currentUser,onLogout}) {
             <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
             <div>
               <div style={{fontSize:isMobile?15:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
-              {!isMobile&&<div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>}
+              {isMobile
+                ?<div style={{fontSize:10,color:theme.sub,opacity:0.7,marginTop:2}}>Production Schedule</div>
+                :<div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>}
             </div>
             {!isMobile&&<>
               <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
