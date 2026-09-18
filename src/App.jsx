@@ -1844,7 +1844,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             {[[0,"Slot 1"],[1,"Slot 2"]].map(([val,label])=>(
               <button key={val} type="button" onClick={()=>set("slot",val)}
-                style={{flex:1,padding:"8px",borderRadius:8,border:`1.5px solid ${form.slot===val?"#8B5CF6":"#DDD6FE"}`,background:form.slot===val?"#8B5CF6":"#F5F3FF",color:form.slot===val?"#fff":"#6D28D9",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                style={{flex:1,padding:"8px",borderRadius:8,border:`1.5px solid ${form.slot===val?"#1D4ED8":"#93C5FD"}`,background:form.slot===val?"#3B82F6":"#EFF6FF",color:form.slot===val?"#fff":"#1D4ED8",fontSize:13,fontWeight:600,cursor:"pointer"}}>
                 {label}
               </button>
             ))}
