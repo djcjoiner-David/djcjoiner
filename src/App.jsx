@@ -41,6 +41,19 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)").matches : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const onChange = () => setIsMobile(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return isMobile;
+}
+
 const LOGO_MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5MB - just a sanity cap before we even try to process it
 const LOGO_MAX_HEIGHT = 200; // stored/display size - the logo never renders taller than ~48px in the app
 
@@ -122,6 +135,10 @@ function parseISO(s) { const [y,m,d]=s.split("-").map(Number); return new Date(y
 function addDays(d,n) { const r=new Date(d); r.setDate(r.getDate()+n); return r; }
 function mondayOf(d) { const day=d.getDay(); return addDays(d,day===0?-6:1-day); }
 function formatDate(d) { return d.toLocaleDateString("en-AU",{day:"numeric",month:"short"}); }
+function formatDateRangeCompact(start,end) {
+  const sameMonth=start.getMonth()===end.getMonth()&&start.getFullYear()===end.getFullYear();
+  return sameMonth?`${start.getDate()}–${end.getDate()} ${start.toLocaleDateString("en-AU",{month:"short"})}`:`${formatDate(start)} – ${formatDate(end)}`;
+}
 function formatDateLong(d) { return d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
 function isWeekend(d) { return d.getDay()===0||d.getDay()===6; }
 function isSunday(d) { return d.getDay()===0; }
@@ -362,37 +379,46 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver,isMobile}) {
+  const hoursLabel=isLastEntry&&budgetRemaining!==null
+    ?(isOver?`${Math.abs(budgetRemaining)}h OVER`:`${budgetRemaining}h`)
+    :(totalBudget?`${totalBudget}h`:`${hours}h`);
   return (
     <div
       draggable={canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:canEdit?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
-      <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
-        {subItem?subItem.name:"General"} · {isLastEntry&&budgetRemaining!==null
-          ?<span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>
-            {isOver?`${Math.abs(budgetRemaining)}h OVER`:`${budgetRemaining}h`}
-          </span>
-          :totalBudget?`${totalBudget}h`:`${hours}h`}
-      </div>
+      {isMobile?(
+        <>
+          <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo}</div>
+          <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>{subItem?subItem.name:job.name}</div>
+          <div style={{fontSize:12,fontWeight:700,color:isOver?"#EF4444":(conflict?"#EF4444":job.textColor),whiteSpace:"nowrap",lineHeight:1.3}}>{hoursLabel}</div>
+        </>
+      ):(
+        <>
+          <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
+          <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
+            {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode}) {
+function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile}) {
   return (
     <div
       draggable={canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
+      <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
     </div>
   );
 }
@@ -640,10 +666,24 @@ function MainApp({currentUser,onLogout}) {
   const isAdmin=currentUser.role==="admin";
   const isManager=currentUser.role==="admin"||currentUser.role==="manager";
   const canEdit=isManager;
-
+  const isMobile=useIsMobile();
+  const staffColWidth=isMobile?64:110;
+  const headerRef=useRef(null);
+  const [headerHeight,setHeaderHeight]=useState(115);
   const [loading,setLoading]=useState(true);
+  useEffect(()=>{
+    if(!headerRef.current)return;
+    const el=headerRef.current;
+    const update=()=>setHeaderHeight(el.getBoundingClientRect().height);
+    update();
+    const ro=new ResizeObserver(update);
+    ro.observe(el);
+    return()=>ro.disconnect();
+  },[loading]);
+
   const [saving,setSaving]=useState(false);
   const [tab,setTab]=useState("schedule");
+  useEffect(()=>{if(isMobile&&tab!=="schedule")setTab("schedule");},[isMobile,tab]);
   const [themeKey,setThemeKey]=useState(DEFAULT_THEME_KEY);
   const theme=THEMES[themeKey]||THEMES[DEFAULT_THEME_KEY];
   const [logoSrc,setLogoSrc]=useState(CLIENT_LOGO);
@@ -773,113 +813,162 @@ function MainApp({currentUser,onLogout}) {
     if(undoStack.length===0) return;
     const last=undoStack[undoStack.length-1];
     setUndoStack(prev=>prev.slice(0,-1));
-    setSaving(true);
-    try {
-      if(last.type==="addEntries") {
-        // Remove entries that were added, but keep their data so Redo can re-add them
-        const rows=entries.filter(e=>last.data.ids.includes(e.id)).map(entryFields);
-        for(const id of last.data.ids) await db("DELETE","entries",null,`?id=eq.${id}`);
-        setEntries(prev=>prev.filter(e=>!last.data.ids.includes(e.id)));
-        setRedoStack(prev=>[...prev,{type:"addEntries",data:{rows}}]);
-      } else if(last.type==="editEntry") {
-        // Restore previous entry state, keeping the current one for Redo
-        const e=last.data.prev;
-        const current=entries.find(en=>en.id===e.id);
-        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote},`?id=eq.${e.id}`);
-        setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
-        if(current)setRedoStack(prev=>[...prev,{type:"editEntry",data:{state:current}}]);
-      } else if(last.type==="deleteEntry") {
-        // Re-insert deleted entry - the new id is what Redo needs to delete it again
-        const e=last.data.entry;
-        const [inserted]=await db("POST","entries",[entryFields(e)]);
-        setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
-        setRedoStack(prev=>[...prev,{type:"deleteEntry",data:{id:inserted.id}}]);
-      } else if(last.type==="moveEntry") {
-        const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
-        const current=entries.find(e=>e.id===id);
-        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
-        setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
-        if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot}}]);
-      } else if(last.type==="moveMultiple") {
-        const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot}:null;}).filter(Boolean);
-        for(const {id,prevStaffId,prevDateStr,prevSlot} of last.data.prevStates){
-          await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
-        }
-        setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
-        setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
-      } else if(last.type==="deleteMultiple") {
-        // Re-insert all deleted entries - the new ids are what Redo needs to delete them again
-        const newIds=[];
-        for(const en of last.data.deletedEntries){
-          const [inserted]=await db("POST","entries",[entryFields(en)]);
-          setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
-          newIds.push(inserted.id);
-        }
-        setRedoStack(prev=>[...prev,{type:"deleteMultiple",data:{ids:newIds}}]);
-      } else if(last.type==="unscheduleItem") {
-        const newIds=[];
-        for(const en of last.data.deletedEntries){
-          const [inserted]=await db("POST","entries",[entryFields(en)]);
-          setEntries(prev=>[...prev,mapInsertedEntry(inserted)]);
-          newIds.push(inserted.id);
-        }
-        setRedoStack(prev=>[...prev,{type:"unscheduleItem",data:{ids:newIds}}]);
+    // Every branch applies its change to the screen first and talks to the
+    // server in the background, same as drag/copy/delete - rolling back (and
+    // popping the redo entry it just pushed) if the save actually fails.
+    if(last.type==="addEntries") {
+      const removed=entries.filter(e=>last.data.ids.includes(e.id));
+      const rows=removed.map(entryFields);
+      setEntries(prev=>prev.filter(e=>!last.data.ids.includes(e.id)));
+      setRedoStack(prev=>[...prev,{type:"addEntries",data:{rows}}]);
+      try{
+        await Promise.all(last.data.ids.map(id=>db("DELETE","entries",null,`?id=eq.${id}`)));
+      }catch(e){
+        setError("Undo failed - restored.");
+        setEntries(prev=>[...prev,...removed]);
+        setRedoStack(prev=>prev.slice(0,-1));
       }
-    } catch(e){setError("Undo failed.");}
-    setSaving(false);
+    } else if(last.type==="editEntry") {
+      const e=last.data.prev;
+      const current=entries.find(en=>en.id===e.id);
+      setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
+      if(current)setRedoStack(prev=>[...prev,{type:"editEntry",data:{state:current}}]);
+      try{
+        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote},`?id=eq.${e.id}`);
+      }catch(err){
+        setError("Undo failed - reverted.");
+        if(current){setEntries(prev=>prev.map(en=>en.id===e.id?current:en));setRedoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="deleteEntry") {
+      const e=last.data.entry;
+      const tempId=`temp_undo_${Date.now()}`;
+      setEntries(prev=>[...prev,{...e,id:tempId}]);
+      try{
+        const [inserted]=await db("POST","entries",[entryFields(e)]);
+        const real=mapInsertedEntry(inserted);
+        setEntries(prev=>prev.map(en=>en.id===tempId?real:en));
+        setRedoStack(prev=>[...prev,{type:"deleteEntry",data:{id:real.id}}]);
+      }catch(err){
+        setError("Undo failed.");
+        setEntries(prev=>prev.filter(en=>en.id!==tempId));
+      }
+    } else if(last.type==="moveEntry") {
+      const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
+      const current=entries.find(e=>e.id===id);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
+      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot}}]);
+      try{
+        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
+      }catch(err){
+        setError("Undo failed - reverted.");
+        if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setRedoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="moveMultiple") {
+      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+      setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
+      try{
+        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot})=>
+          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`)
+        ));
+      }catch(err){
+        setError("Undo failed - reverted.");
+        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+        setRedoStack(prev=>prev.slice(0,-1));
+      }
+    } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
+      // Re-insert all of them in a single batched request, not one at a time
+      const tempMap=last.data.deletedEntries.map((en,i)=>({tempId:`temp_undo_${Date.now()}_${i}`,en}));
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,en})=>({...en,id:tempId}))]);
+      const tempIds=tempMap.map(t=>t.tempId);
+      try{
+        const inserted=await db("POST","entries",last.data.deletedEntries.map(entryFields));
+        const mapped=inserted.map(mapInsertedEntry);
+        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
+        setRedoStack(prev=>[...prev,{type:last.type,data:{ids:mapped.map(e=>e.id)}}]);
+      }catch(err){
+        setError("Undo failed.");
+        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
+      }
+    }
   }
 
   async function handleRedo() {
     if(redoStack.length===0) return;
     const last=redoStack[redoStack.length-1];
     setRedoStack(prev=>prev.slice(0,-1));
-    setSaving(true);
-    try {
-      if(last.type==="addEntries") {
+    if(last.type==="addEntries") {
+      const tempMap=last.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}`,row}));
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:row.hours,miscNote:row.misc_note||null}))]);
+      const tempIds=tempMap.map(t=>t.tempId);
+      try{
         const inserted=await db("POST","entries",last.data.rows);
         const mapped=inserted.map(mapInsertedEntry);
-        setEntries(prev=>[...prev,...mapped]);
+        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
         setUndoStack(prev=>[...prev,{type:"addEntries",data:{ids:mapped.map(e=>e.id)}}]);
-      } else if(last.type==="editEntry") {
-        const s=last.data.state;
-        const current=entries.find(en=>en.id===s.id);
-        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote},`?id=eq.${s.id}`);
-        setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
-        if(current)setUndoStack(prev=>[...prev,{type:"editEntry",data:{prev:current}}]);
-      } else if(last.type==="deleteEntry") {
-        const {id}=last.data;
-        const entry=entries.find(e=>e.id===id);
-        await db("DELETE","entries",null,`?id=eq.${id}`);
-        setEntries(prev=>prev.filter(e=>e.id!==id));
-        if(entry)setUndoStack(prev=>[...prev,{type:"deleteEntry",data:{entry}}]);
-      } else if(last.type==="moveEntry") {
-        const {id,staffId,dateStr,slot}=last.data;
-        const current=entries.find(e=>e.id===id);
-        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
-        setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot}:e));
-        if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot}}]);
-      } else if(last.type==="moveMultiple") {
-        const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot}:null;}).filter(Boolean);
-        for(const {id,staffId,dateStr,slot} of last.data.states){
-          await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
-        }
-        setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
-        setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
-      } else if(last.type==="deleteMultiple") {
-        const {ids}=last.data;
-        const deletedEntries=entries.filter(e=>ids.includes(e.id));
-        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
-        setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
-        setUndoStack(prev=>[...prev,{type:"deleteMultiple",data:{deletedEntries}}]);
-      } else if(last.type==="unscheduleItem") {
-        const {ids}=last.data;
-        const deletedEntries=entries.filter(e=>ids.includes(e.id));
-        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
-        setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
-        setUndoStack(prev=>[...prev,{type:"unscheduleItem",data:{deletedEntries}}]);
+      }catch(err){
+        setError("Redo failed.");
+        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
       }
-    } catch(e){setError("Redo failed.");}
-    setSaving(false);
+    } else if(last.type==="editEntry") {
+      const s=last.data.state;
+      const current=entries.find(en=>en.id===s.id);
+      setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
+      if(current)setUndoStack(prev=>[...prev,{type:"editEntry",data:{prev:current}}]);
+      try{
+        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote},`?id=eq.${s.id}`);
+      }catch(err){
+        setError("Redo failed - reverted.");
+        if(current){setEntries(prev=>prev.map(en=>en.id===s.id?current:en));setUndoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="deleteEntry") {
+      const {id}=last.data;
+      const entry=entries.find(e=>e.id===id);
+      setEntries(prev=>prev.filter(e=>e.id!==id));
+      if(entry)setUndoStack(prev=>[...prev,{type:"deleteEntry",data:{entry}}]);
+      try{
+        await db("DELETE","entries",null,`?id=eq.${id}`);
+      }catch(err){
+        setError("Redo failed - restored.");
+        if(entry){setEntries(prev=>[...prev,entry]);setUndoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="moveEntry") {
+      const {id,staffId,dateStr,slot}=last.data;
+      const current=entries.find(e=>e.id===id);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot}:e));
+      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot}}]);
+      try{
+        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
+      }catch(err){
+        setError("Redo failed - reverted.");
+        if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setUndoStack(prev=>prev.slice(0,-1));}
+      }
+    } else if(last.type==="moveMultiple") {
+      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+      setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
+      try{
+        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot})=>
+          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`)
+        ));
+      }catch(err){
+        setError("Redo failed - reverted.");
+        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+        setUndoStack(prev=>prev.slice(0,-1));
+      }
+    } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
+      const {ids}=last.data;
+      const deletedEntries=entries.filter(e=>ids.includes(e.id));
+      setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
+      setUndoStack(prev=>[...prev,{type:last.type,data:{deletedEntries}}]);
+      try{
+        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
+      }catch(err){
+        setError("Redo failed - restored.");
+        setEntries(prev=>[...prev,...deletedEntries]);
+        setUndoStack(prev=>prev.slice(0,-1));
+      }
+    }
   }
   const [copyMode,setCopyMode]=useState(false); // tap-to-copy, arms via Select toolbar's Copy button
   const [selectedEntries,setSelectedEntries]=useState(new Set()); // for multi-select
@@ -1362,32 +1451,38 @@ function MainApp({currentUser,onLogout}) {
   );
 
   return (
-    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
+    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh",...(isMobile?{height:"100%",overflow:"hidden",display:"flex",flexDirection:"column"}:{})}}>
 
       {/* Header */}
-      <div style={{background:theme.header,padding:"0 24px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14}}>
-          <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <img src={logoSrc} alt="Logo" style={{height:48,maxWidth:130,objectFit:"contain"}}/>
+      <div ref={headerRef} style={{background:theme.header,padding:"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14,flexWrap:"wrap",rowGap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
+            <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
             <div>
-              <div style={{fontSize:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
-              <div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>
+              <div style={{fontSize:isMobile?15:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
+              {isMobile
+                ?<div style={{fontSize:10,color:theme.sub,opacity:0.7,marginTop:2}}>Production Schedule</div>
+                :<div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>}
             </div>
-            <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
-            <div style={{fontSize:14,color:theme.sub,opacity:0.7}}>Production Schedule</div>
-            {saving&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
+            {!isMobile&&<>
+              <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
+              <div style={{fontSize:14,color:theme.sub,opacity:0.7}}>Production Schedule</div>
+            </>}
+            {saving&&!isMobile&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
-              <div style={{width:28,height:28,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:theme.header}}>
-                {currentUser.name.charAt(0).toUpperCase()}
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",rowGap:8}}>
+            {!isMobile&&(
+              <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
+                <div style={{width:28,height:28,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:theme.header}}>
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div style={{fontSize:13,color:theme.sub,fontWeight:500}}>{currentUser.name}</div>
+                  <div style={{fontSize:10,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 5px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
+                </div>
               </div>
-              <div>
-                <div style={{fontSize:13,color:theme.sub,fontWeight:500}}>{currentUser.name}</div>
-                <div style={{fontSize:10,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 5px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
-              </div>
-            </div>
-            {isAdmin&&(
+            )}
+            {isAdmin&&!isMobile&&(
               <button onClick={()=>setUserMgmtOpen(true)}
                 style={{padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.4)}`,background:"transparent",color:theme.heading}}
                 onMouseEnter={e=>{e.currentTarget.style.borderColor=theme.heading;}}
@@ -1395,7 +1490,7 @@ function MainApp({currentUser,onLogout}) {
                 👥 Users
               </button>
             )}
-            {isManager&&(
+            {isManager&&!isMobile&&(
               <>
                 <button onClick={()=>setJobModal({isNew:true,jobNo:"",name:"",...nextPreset(),subItems:[]})}
                   style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${theme.heading}`,background:"transparent",color:theme.heading}}
@@ -1411,22 +1506,26 @@ function MainApp({currentUser,onLogout}) {
                 </button>
               </>
             )}
-            <button onClick={()=>setWorkHoursOpen(true)}
-                  style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
-                  🕐 {workStart}–{workEnd}
-                </button>
-                <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
+            {!isMobile&&(
+              <button onClick={()=>setWorkHoursOpen(true)}
+                    style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
+                    🕐 {workStart}–{workEnd}
+                  </button>
+            )}
+            <button onClick={onLogout} style={{padding:isMobile?"7px 10px":"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
           </div>
         </div>
-        <div style={{display:"flex"}}>
-          {[["schedule","📅 Schedule"],["summary","📋 Job Summary"]].map(([key,label])=>(
-            <button key={key} onClick={()=>setTab(key)} style={{padding:"9px 22px",fontSize:14,fontWeight:500,cursor:"pointer",background:"none",border:"none",borderBottom:tab===key?`2.5px solid ${theme.heading}`:"2.5px solid transparent",color:tab===key?theme.heading:hexToRgba(theme.sub,0.55),transition:"all 0.15s"}}>{label}</button>
-          ))}
-        </div>
+        {!isMobile&&(
+          <div style={{display:"flex"}}>
+            {[["schedule","📅 Schedule"],["summary","📋 Job Summary"]].map(([key,label])=>(
+              <button key={key} onClick={()=>setTab(key)} style={{padding:"9px 22px",fontSize:14,fontWeight:500,cursor:"pointer",background:"none",border:"none",borderBottom:tab===key?`2.5px solid ${theme.heading}`:"2.5px solid transparent",color:tab===key?theme.heading:hexToRgba(theme.sub,0.55),transition:"all 0.15s"}}>{label}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       {error&&(
-        <div style={{background:"#FEF2F2",border:"1px solid #FECACA",padding:"10px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{background:"#FEF2F2",border:"1px solid #FECACA",padding:"10px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
           <span style={{color:"#DC2626",fontSize:14}}>⚠ {error}</span>
           <button onClick={()=>setError(null)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:16}}>×</button>
         </div>
@@ -1434,25 +1533,25 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Schedule Tab */}
       {tab==="schedule"&&(
-        <div style={{padding:"0 16px 16px",position:"relative",zIndex:1}}>
-          <div style={{position:"sticky",top:115,zIndex:50,background:"#F8FAFC",paddingTop:12,paddingBottom:8,marginBottom:4}}>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8,flexWrap:"wrap"}}>
+        <div style={{padding:"0 16px 16px",position:"relative",zIndex:1,...(isMobile?{flex:1,minHeight:0,display:"flex",flexDirection:"column",overflow:"hidden"}:{})}}>
+          <div style={{position:isMobile?"relative":"sticky",top:isMobile?undefined:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isMobile?6:12,paddingBottom:isMobile?4:8,marginBottom:4,flexShrink:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:isMobile?6:12,marginBottom:isMobile?4:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
               {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],["month","Month"]].map(([v,label])=>(
                 <button key={v} onClick={()=>{if(v==="month"){setViewMode("month");}else{setViewMode("weeks");setViewWeeks(v);}}}
-                  style={{padding:"5px 12px",borderRadius:6,border:"none",fontSize:13,fontWeight:500,cursor:"pointer",background:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#fff":"transparent",color:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#1E293B":"#64748B"}}>
-                  {label}
+                  style={{padding:isMobile?"3px 8px":"5px 12px",borderRadius:6,border:"none",fontSize:isMobile?11:13,fontWeight:500,cursor:"pointer",background:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#fff":"transparent",color:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#1E293B":"#64748B"}}>
+                  {isMobile?(v==="month"?"Mo":`${v}w`):label}
                 </button>
               ))}
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <button onClick={()=>navigate(-1)} style={{padding:"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:16,color:"#475569"}}>‹</button>
-              <button onClick={goToday} style={{padding:"5px 14px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:13,color:"#475569"}}>Today</button>
-              <button onClick={()=>navigate(1)} style={{padding:"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:16,color:"#475569"}}>›</button>
+            <div style={{display:"flex",alignItems:"center",gap:isMobile?4:6}}>
+              <button onClick={()=>navigate(-1)} style={{padding:isMobile?"3px 8px":"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?13:16,color:"#475569"}}>‹</button>
+              <button onClick={goToday} style={{padding:isMobile?"3px 10px":"5px 14px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?11:13,color:"#475569"}}>Today</button>
+              <button onClick={()=>navigate(1)} style={{padding:isMobile?"3px 8px":"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?13:16,color:"#475569"}}>›</button>
             </div>
-            <span style={{fontSize:13,color:"#64748B"}}>{formatDate(anchorDate)} – {formatDate(addDays(anchorDate,totalWeeks*7-2))}</span>
+            <span style={{fontSize:isMobile?11:13,color:"#64748B"}}>{isMobile?formatDateRangeCompact(anchorDate,addDays(anchorDate,totalWeeks*7-2)):`${formatDate(anchorDate)} – ${formatDate(addDays(anchorDate,totalWeeks*7-2))}`}</span>
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
-              {canEdit&&(
+              {canEdit&&!isMobile&&(
                 <>
                   <button onClick={()=>{setSelectionMode(s=>!s);setSelectedEntries(new Set());setMoveMode(false);setCopyMode(false);}}
                     style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:selectionMode?"#3B82F6":"#fff",cursor:"pointer",fontSize:12,color:selectionMode?"#fff":"#64748B"}}>
@@ -1476,20 +1575,24 @@ function MainApp({currentUser,onLogout}) {
                   )}
                 </>
               )}
-              <button onClick={handleUndo} disabled={undoStack.length===0}
-                style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:undoStack.length>0?"#fff":"#F8FAFC",cursor:undoStack.length>0?"pointer":"not-allowed",fontSize:12,color:undoStack.length>0?"#475569":"#CBD5E1"}}>
-                ↩ Undo
-              </button>
-              <button onClick={handleRedo} disabled={redoStack.length===0}
-                style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:redoStack.length>0?"#fff":"#F8FAFC",cursor:redoStack.length>0?"pointer":"not-allowed",fontSize:12,color:redoStack.length>0?"#475569":"#CBD5E1"}}>
-                ↪ Redo
-              </button>
-              <button onClick={loadAll} style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:12,color:"#64748B"}}>↻ Refresh</button>
+              {!isMobile&&(
+                <>
+                  <button onClick={handleUndo} disabled={undoStack.length===0}
+                    style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:undoStack.length>0?"#fff":"#F8FAFC",cursor:undoStack.length>0?"pointer":"not-allowed",fontSize:12,color:undoStack.length>0?"#475569":"#CBD5E1"}}>
+                    ↩ Undo
+                  </button>
+                  <button onClick={handleRedo} disabled={redoStack.length===0}
+                    style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:redoStack.length>0?"#fff":"#F8FAFC",cursor:redoStack.length>0?"pointer":"not-allowed",fontSize:12,color:redoStack.length>0?"#475569":"#CBD5E1"}}>
+                    ↪ Redo
+                  </button>
+                </>
+              )}
+              <button onClick={loadAll} style={{padding:isMobile?"3px 8px":"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?11:12,color:"#64748B"}}>↻ Refresh</button>
             </div>
           </div>
 
-          {activeJobs.length>0&&(
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,position:"relative",zIndex:0}}> 
+          {activeJobs.length>0&&!isMobile&&(
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,position:"relative",zIndex:0}}>
               {activeJobs.map(j=>(
                 <div key={j.id} onClick={canEdit?()=>setJobModal({isNew:false,...j,subItems:subItems.filter(s=>s.jobId===j.id)}):undefined}
                   style={{background:j.bgColor,border:`1.5px solid ${j.borderColor}`,color:j.textColor,borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:600,cursor:canEdit?"pointer":"default"}}>
@@ -1500,17 +1603,17 @@ function MainApp({currentUser,onLogout}) {
           )}
 
           </div>{/* end sticky controls */}
-          {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
+          {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block",flexShrink:0}}>👁 View only — contact a manager to make changes</div>}
 
-          <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 280px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch"}}>
-            <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"fixed"}}>
+          <div style={{overflowX:"auto",overflowY:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch",...(isMobile?{flex:1,minHeight:0}:{maxHeight:"calc(100vh - 280px)"})}}>
+            <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"auto"}}>
               <colgroup>
-                <col style={{width:110}}/>
+                <col style={{width:staffColWidth}}/>
                 {visibleDays.map((_,i)=><col key={i} style={{width:118}}/>)}
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px 8px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,left:0,zIndex:20,verticalAlign:"bottom",width:110,minWidth:110}}></th>
+                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px 8px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,left:0,zIndex:20,verticalAlign:"bottom",width:staffColWidth,minWidth:staffColWidth}}></th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/6);const isWeekBound=d.getDay()===1&&weekIdx>0;
@@ -1544,10 +1647,10 @@ function MainApp({currentUser,onLogout}) {
                           onDragStart={e=>handleStaffDragStart(e,st.id)}
                           onDragOver={e=>{e.preventDefault();}}
                           onDrop={e=>handleStaffDrop(e,st.id)}
-                          style={{border:"1px solid #E2E8F0",borderBottom:"3px solid #94A3B8",padding:"4px 8px",verticalAlign:"middle",background:si%2===0?"#fff":"#F8FAFC",position:"sticky",left:0,zIndex:5,boxShadow:"2px 0 3px rgba(0,0,0,0.06)",width:110,minWidth:110,cursor:canEdit?"grab":"default"}}>
-                          {canEdit&&<div style={{fontSize:9,color:"#CBD5E1",marginBottom:1}}>⠿</div>}
-                          <div style={{fontWeight:600,fontSize:12,color:"#1E293B",marginBottom:1}}>{st.name}</div>
-                          {canEdit&&<button onClick={()=>setStaffModal({isNew:false,...st})} style={{fontSize:11,color:"#94A3B8",background:"none",border:"1px solid #E2E8F0",borderRadius:4,padding:"1px 6px",cursor:"pointer"}}>Edit</button>}
+                          style={{border:"1px solid #E2E8F0",borderBottom:"3px solid #94A3B8",padding:isMobile?"4px 4px":"4px 8px",verticalAlign:"middle",background:si%2===0?"#fff":"#F8FAFC",position:"sticky",left:0,zIndex:5,boxShadow:"2px 0 3px rgba(0,0,0,0.06)",width:staffColWidth,minWidth:staffColWidth,cursor:canEdit?"grab":"default"}}>
+                          {canEdit&&!isMobile&&<div style={{fontSize:9,color:"#CBD5E1",marginBottom:1}}>⠿</div>}
+                          <div style={{fontWeight:600,fontSize:isMobile?11:12,color:"#1E293B",marginBottom:1,overflowWrap:"break-word"}}>{st.name}</div>
+                          {canEdit&&!isMobile&&<button onClick={()=>setStaffModal({isNew:false,...st})} style={{fontSize:11,color:"#94A3B8",background:"none",border:"1px solid #E2E8F0",borderRadius:4,padding:"1px 6px",cursor:"pointer"}}>Edit</button>}
                         </td>
                       )}
                       {visibleDays.map((d,di)=>{
@@ -1568,7 +1671,7 @@ function MainApp({currentUser,onLogout}) {
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile}/>
                                 : job
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
@@ -1578,7 +1681,7 @@ function MainApp({currentUser,onLogout}) {
                                       const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
                                       const totalBudget=si?.totalHours||null;
                                       const isOver=si&&isLastEntry&&budgetRemaining!==null&&budgetRemaining<0;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver}/>;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver} isMobile={isMobile}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
