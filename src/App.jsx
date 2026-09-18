@@ -375,7 +375,10 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver,isMobile}) {
+  const hoursLabel=isLastEntry&&budgetRemaining!==null
+    ?(isOver?`${Math.abs(budgetRemaining)}h OVER`:`${budgetRemaining}h`)
+    :(totalBudget?`${totalBudget}h`:`${hours}h`);
   return (
     <div
       draggable={canEdit&&!copyMode&&!moveMode}
@@ -384,14 +387,19 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       onClick={canEdit?onClick:undefined}
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:"2px 5px",cursor:canEdit?"pointer":"default",minHeight:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
-      <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
-        {subItem?subItem.name:"General"} · {isLastEntry&&budgetRemaining!==null
-          ?<span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>
-            {isOver?`${Math.abs(budgetRemaining)}h OVER`:`${budgetRemaining}h`}
-          </span>
-          :totalBudget?`${totalBudget}h`:`${hours}h`}
-      </div>
+      {isMobile?(
+        <>
+          <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo}</div>
+          <div style={{fontSize:10,fontWeight:400,color:isOver?"#EF4444":(conflict?"#EF4444":job.textColor),lineHeight:1.3}}>{hoursLabel}</div>
+        </>
+      ):(
+        <>
+          <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
+          <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
+            {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -654,6 +662,18 @@ function MainApp({currentUser,onLogout}) {
   const isManager=currentUser.role==="admin"||currentUser.role==="manager";
   const canEdit=isManager;
   const isMobile=useIsMobile();
+  const staffColWidth=isMobile?64:110;
+  const headerRef=useRef(null);
+  const [headerHeight,setHeaderHeight]=useState(115);
+  useEffect(()=>{
+    if(!headerRef.current)return;
+    const el=headerRef.current;
+    const update=()=>setHeaderHeight(el.getBoundingClientRect().height);
+    update();
+    const ro=new ResizeObserver(update);
+    ro.observe(el);
+    return()=>ro.disconnect();
+  },[]);
 
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
@@ -1428,7 +1448,7 @@ function MainApp({currentUser,onLogout}) {
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
 
       {/* Header */}
-      <div style={{background:theme.header,padding:"0 24px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
+      <div ref={headerRef} style={{background:theme.header,padding:"0 24px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14,flexWrap:"wrap",rowGap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
             <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
@@ -1440,7 +1460,7 @@ function MainApp({currentUser,onLogout}) {
               <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
               <div style={{fontSize:14,color:theme.sub,opacity:0.7}}>Production Schedule</div>
             </>}
-            {saving&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
+            {saving&&!isMobile&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",rowGap:8}}>
             <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
@@ -1500,7 +1520,7 @@ function MainApp({currentUser,onLogout}) {
       {/* Schedule Tab */}
       {tab==="schedule"&&(
         <div style={{padding:"0 16px 16px",position:"relative",zIndex:1}}>
-          <div style={{position:"sticky",top:115,zIndex:50,background:"#F8FAFC",paddingTop:12,paddingBottom:8,marginBottom:4}}>
+          <div style={{position:"sticky",top:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:12,paddingBottom:8,marginBottom:4}}>
           <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
               {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],["month","Month"]].map(([v,label])=>(
@@ -1517,7 +1537,7 @@ function MainApp({currentUser,onLogout}) {
             </div>
             <span style={{fontSize:13,color:"#64748B"}}>{formatDate(anchorDate)} – {formatDate(addDays(anchorDate,totalWeeks*7-2))}</span>
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
-              {canEdit&&(
+              {canEdit&&!isMobile&&(
                 <>
                   <button onClick={()=>{setSelectionMode(s=>!s);setSelectedEntries(new Set());setMoveMode(false);setCopyMode(false);}}
                     style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:selectionMode?"#3B82F6":"#fff",cursor:"pointer",fontSize:12,color:selectionMode?"#fff":"#64748B"}}>
@@ -1541,14 +1561,18 @@ function MainApp({currentUser,onLogout}) {
                   )}
                 </>
               )}
-              <button onClick={handleUndo} disabled={undoStack.length===0}
-                style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:undoStack.length>0?"#fff":"#F8FAFC",cursor:undoStack.length>0?"pointer":"not-allowed",fontSize:12,color:undoStack.length>0?"#475569":"#CBD5E1"}}>
-                ↩ Undo
-              </button>
-              <button onClick={handleRedo} disabled={redoStack.length===0}
-                style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:redoStack.length>0?"#fff":"#F8FAFC",cursor:redoStack.length>0?"pointer":"not-allowed",fontSize:12,color:redoStack.length>0?"#475569":"#CBD5E1"}}>
-                ↪ Redo
-              </button>
+              {!isMobile&&(
+                <>
+                  <button onClick={handleUndo} disabled={undoStack.length===0}
+                    style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:undoStack.length>0?"#fff":"#F8FAFC",cursor:undoStack.length>0?"pointer":"not-allowed",fontSize:12,color:undoStack.length>0?"#475569":"#CBD5E1"}}>
+                    ↩ Undo
+                  </button>
+                  <button onClick={handleRedo} disabled={redoStack.length===0}
+                    style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:redoStack.length>0?"#fff":"#F8FAFC",cursor:redoStack.length>0?"pointer":"not-allowed",fontSize:12,color:redoStack.length>0?"#475569":"#CBD5E1"}}>
+                    ↪ Redo
+                  </button>
+                </>
+              )}
               <button onClick={loadAll} style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:12,color:"#64748B"}}>↻ Refresh</button>
             </div>
           </div>
@@ -1567,15 +1591,15 @@ function MainApp({currentUser,onLogout}) {
           </div>{/* end sticky controls */}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block"}}>👁 View only — contact a manager to make changes</div>}
 
-          <div style={{overflowX:"auto",overflowY:"auto",maxHeight:"calc(100vh - 280px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch"}}>
+          <div style={{overflowX:"auto",overflowY:"auto",maxHeight:isMobile?"calc(100vh - 190px)":"calc(100vh - 280px)",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch"}}>
             <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"fixed"}}>
               <colgroup>
-                <col style={{width:110}}/>
+                <col style={{width:staffColWidth}}/>
                 {visibleDays.map((_,i)=><col key={i} style={{width:118}}/>)}
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px 8px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,left:0,zIndex:20,verticalAlign:"bottom",width:110,minWidth:110}}></th>
+                  <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px 8px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,left:0,zIndex:20,verticalAlign:"bottom",width:staffColWidth,minWidth:staffColWidth}}></th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
                     const weekIdx=Math.floor(i/6);const isWeekBound=d.getDay()===1&&weekIdx>0;
@@ -1609,10 +1633,10 @@ function MainApp({currentUser,onLogout}) {
                           onDragStart={e=>handleStaffDragStart(e,st.id)}
                           onDragOver={e=>{e.preventDefault();}}
                           onDrop={e=>handleStaffDrop(e,st.id)}
-                          style={{border:"1px solid #E2E8F0",borderBottom:"3px solid #94A3B8",padding:"4px 8px",verticalAlign:"middle",background:si%2===0?"#fff":"#F8FAFC",position:"sticky",left:0,zIndex:5,boxShadow:"2px 0 3px rgba(0,0,0,0.06)",width:110,minWidth:110,cursor:canEdit?"grab":"default"}}>
-                          {canEdit&&<div style={{fontSize:9,color:"#CBD5E1",marginBottom:1}}>⠿</div>}
-                          <div style={{fontWeight:600,fontSize:12,color:"#1E293B",marginBottom:1}}>{st.name}</div>
-                          {canEdit&&<button onClick={()=>setStaffModal({isNew:false,...st})} style={{fontSize:11,color:"#94A3B8",background:"none",border:"1px solid #E2E8F0",borderRadius:4,padding:"1px 6px",cursor:"pointer"}}>Edit</button>}
+                          style={{border:"1px solid #E2E8F0",borderBottom:"3px solid #94A3B8",padding:isMobile?"4px 4px":"4px 8px",verticalAlign:"middle",background:si%2===0?"#fff":"#F8FAFC",position:"sticky",left:0,zIndex:5,boxShadow:"2px 0 3px rgba(0,0,0,0.06)",width:staffColWidth,minWidth:staffColWidth,cursor:canEdit?"grab":"default"}}>
+                          {canEdit&&!isMobile&&<div style={{fontSize:9,color:"#CBD5E1",marginBottom:1}}>⠿</div>}
+                          <div style={{fontWeight:600,fontSize:isMobile?11:12,color:"#1E293B",marginBottom:1,overflowWrap:"break-word"}}>{st.name}</div>
+                          {canEdit&&!isMobile&&<button onClick={()=>setStaffModal({isNew:false,...st})} style={{fontSize:11,color:"#94A3B8",background:"none",border:"1px solid #E2E8F0",borderRadius:4,padding:"1px 6px",cursor:"pointer"}}>Edit</button>}
                         </td>
                       )}
                       {visibleDays.map((d,di)=>{
@@ -1633,7 +1657,7 @@ function MainApp({currentUser,onLogout}) {
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile}/>
                                 : job
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
@@ -1643,7 +1667,7 @@ function MainApp({currentUser,onLogout}) {
                                       const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
                                       const totalBudget=si?.totalHours||null;
                                       const isOver=si&&isLastEntry&&budgetRemaining!==null&&budgetRemaining<0;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver}/>;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver} isMobile={isMobile}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
