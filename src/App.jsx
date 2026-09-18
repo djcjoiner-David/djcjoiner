@@ -389,12 +389,13 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:canEdit?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {isMobile?(
         <>
-          <div style={{fontSize:13,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo}</div>
-          <div style={{fontSize:12,fontWeight:600,color:isOver?"#EF4444":(conflict?"#EF4444":job.textColor),lineHeight:1.3}}>{hoursLabel}</div>
+          <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,lineHeight:1.3}}>{job.jobNo}</div>
+          <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,overflowWrap:"break-word",wordBreak:"break-word",lineHeight:1.25}}>{subItem?subItem.name:job.name}</div>
+          <div style={{fontSize:12,fontWeight:700,color:isOver?"#EF4444":(conflict?"#EF4444":job.textColor),lineHeight:1.3}}>{hoursLabel}</div>
         </>
       ):(
         <>
@@ -1450,10 +1451,10 @@ function MainApp({currentUser,onLogout}) {
   );
 
   return (
-    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh",...(isMobile?{height:"100vh",overflow:"hidden",display:"flex",flexDirection:"column"}:{})}}>
+    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh",...(isMobile?{height:"100%",overflow:"hidden",display:"flex",flexDirection:"column"}:{})}}>
 
       {/* Header */}
-      <div ref={headerRef} style={{background:theme.header,padding:"0 24px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
+      <div ref={headerRef} style={{background:theme.header,padding:"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14,flexWrap:"wrap",rowGap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
             <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
@@ -1533,7 +1534,7 @@ function MainApp({currentUser,onLogout}) {
       {/* Schedule Tab */}
       {tab==="schedule"&&(
         <div style={{padding:"0 16px 16px",position:"relative",zIndex:1,...(isMobile?{flex:1,minHeight:0,display:"flex",flexDirection:"column",overflow:"hidden"}:{})}}>
-          <div style={{position:"sticky",top:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isMobile?6:12,paddingBottom:isMobile?4:8,marginBottom:4,flexShrink:0}}>
+          <div style={{position:isMobile?"relative":"sticky",top:isMobile?undefined:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isMobile?6:12,paddingBottom:isMobile?4:8,marginBottom:4,flexShrink:0}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?6:12,marginBottom:isMobile?4:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
               {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],["month","Month"]].map(([v,label])=>(
@@ -1605,7 +1606,7 @@ function MainApp({currentUser,onLogout}) {
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block",flexShrink:0}}>👁 View only — contact a manager to make changes</div>}
 
           <div style={{overflowX:"auto",overflowY:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch",...(isMobile?{flex:1,minHeight:0}:{maxHeight:"calc(100vh - 280px)"})}}>
-            <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"fixed"}}>
+            <table style={{borderCollapse:"separate",borderSpacing:0,width:staffColWidth+visibleDays.length*118,minWidth:"100%",tableLayout:"fixed"}}>
               <colgroup>
                 <col style={{width:staffColWidth}}/>
                 {visibleDays.map((_,i)=><col key={i} style={{width:118}}/>)}
