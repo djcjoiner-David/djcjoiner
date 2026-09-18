@@ -25,7 +25,7 @@ const THEMES = {
   classic_navy:        { name: "Classic navy",        header: "#1F2D3D", heading: "#3E5871", sub: "#D9D9D9" },
   charcoal_and_copper: { name: "Charcoal and copper", header: "#2B2B2B", heading: "#B87333", sub: "#E6E0D8" },
   forest_and_sand:     { name: "Forest and sand",     header: "#2F4F3D", heading: "#7A9471", sub: "#E9E4D4" },
-  slate_and_burgundy:  { name: "Slate and burgundy",  header: "#34394A", heading: "#7A2E3B", sub: "#DCD9DD" },
+  slate_and_bronze:    { name: "Slate and bronze",    header: "#34394A", heading: "#A9793D", sub: "#E3DFD8" },
   steel_blue:          { name: "Steel blue",          header: "#1C3A4B", heading: "#4A7A94", sub: "#DCE6EA" },
   warm_terracotta:     { name: "Warm terracotta",     header: "#5C2A1C", heading: "#C8683F", sub: "#F0E2D6" },
   deep_teal:           { name: "Deep teal",           header: "#0E3A38", heading: "#2E7D78", sub: "#D9E8E6" },
@@ -405,7 +405,7 @@ function LoginScreen({onLogin}) {
 
 // ── User Management Modal ─────────────────────────────────────
 
-function UserManagementModal({onClose}) {
+function UserManagementModal({onClose,themeKey,onChangeTheme}) {
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [form,setForm]=useState({name:"",email:"",password:"",role:"staff"});
@@ -442,6 +442,13 @@ function UserManagementModal({onClose}) {
     <Modal title="👥 User Management" wide onClose={onClose}>
       {loading?<Spinner text="Loading users..."/>:(
         <>
+          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Colour Theme</div>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Sets the colour of the header bar (logo, tabs, buttons) for everyone.</div>
+            <Sel label="" value={themeKey} onChange={e=>onChangeTheme(e.target.value)}>
+              {Object.entries(THEMES).map(([key,t])=><option key={key} value={key}>{t.name}</option>)}
+            </Sel>
+          </div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:24}}>
             <thead>
               <tr style={{background:"#F8FAFC",borderBottom:"1px solid #E2E8F0"}}>
@@ -1128,12 +1135,6 @@ function MainApp({currentUser,onLogout}) {
               </div>
             </div>
             {isAdmin&&(
-              <select value={themeKey} onChange={e=>changeTheme(e.target.value)} title="Colour theme (Admin only)"
-                style={{padding:"6px 8px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.4)}`,background:"transparent",color:theme.heading}}>
-                {Object.entries(THEMES).map(([key,t])=><option key={key} value={key} style={{color:"#1E293B"}}>{t.name}</option>)}
-              </select>
-            )}
-            {isAdmin&&(
               <button onClick={()=>setUserMgmtOpen(true)}
                 style={{padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.4)}`,background:"transparent",color:theme.heading}}
                 onMouseEnter={e=>{e.currentTarget.style.borderColor=theme.heading;}}
@@ -1357,7 +1358,7 @@ function MainApp({currentUser,onLogout}) {
       {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id}/>}
-      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)}/>}
+      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme}/>}
       {workHoursOpen&&(
         <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
           <div style={{marginBottom:12}}>
