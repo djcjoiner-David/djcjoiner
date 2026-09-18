@@ -71,7 +71,7 @@ const ALLOWED_COLUMNS = {
   entries:        ['id', 'staff_id', 'job_id', 'sub_item_id', 'date_str', 'slot', 'hours', 'misc_note', 'created_at'],
   user_roles:     ['id', 'email', 'role', 'name', 'password', 'created_at', 'failed_login_count', 'locked_until'],
   keepalive_ping: ['id', 'pinged_at'],
-  app_settings:   ['id', 'theme'],
+  app_settings:   ['id', 'theme', 'logo_data'],
 };
 const ALLOWED_TABLES = Object.keys(ALLOWED_COLUMNS);
 
@@ -185,12 +185,14 @@ export default async function handler(req, res) {
 
     // --- Role enforcement ---
     // Everything below this point requires a valid session (proof of which
-    // user is asking), except the keepalive ping, which has no user behind
-    // it - it's just a scheduled request that keeps the database awake.
+    // user is asking), except the keepalive ping (no user behind a scheduled
+    // request) and *reading* app_settings (the colour theme and logo aren't
+    // secret - the login screen itself needs to show them before anyone is
+    // signed in). Writing app_settings still requires a session, checked below.
     // The role is re-read from the database on every request rather than
     // trusted from the token, so revoking/downgrading someone's role takes
     // effect on their very next click, not just their next login.
-    if (table !== 'keepalive_ping') {
+    if (table !== 'keepalive_ping' && !(table === 'app_settings' && req.method === 'GET')) {
       const session = verifySession(req.headers['x-session-token']);
       if (!session) return res.status(401).json({ error: 'Session expired - please log in again.' });
       const [sessionUser] = await sql('select role from user_roles where id = $1', [session.id]);
