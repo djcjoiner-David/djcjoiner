@@ -1849,6 +1849,19 @@ function JobModal({data,onSave,onDelete,onClose}) {
         <div>
           <Inp label="Job Number" value={form.jobNo} onChange={e=>set("jobNo",e.target.value)}/>
           <Inp label="Job Name" value={form.name} onChange={e=>set("name",e.target.value)}/>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:6,fontWeight:500}}>Colour</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {JOB_COLOUR_PRESETS.map((p,i)=>{
+                const selected=form.bgColor===p.bgColor&&form.borderColor===p.borderColor&&form.textColor===p.textColor;
+                return (
+                  <button key={i} type="button" onClick={()=>setForm(f=>({...f,bgColor:p.bgColor,borderColor:p.borderColor,textColor:p.textColor}))}
+                    title={`Colour ${i+1}`}
+                    style={{width:28,height:28,borderRadius:"50%",background:p.bgColor,border:selected?`2.5px solid ${p.borderColor}`:`1.5px solid ${p.borderColor}`,boxShadow:selected?`0 0 0 2px #fff, 0 0 0 3.5px ${p.borderColor}`:"none",cursor:"pointer",padding:0}}/>
+                );
+              })}
+            </div>
+          </div>
           <ColorPicker label="Background Colour" value={form.bgColor} onChange={v=>set("bgColor",v)}/>
           <ColorPicker label="Border Colour" value={form.borderColor} onChange={v=>set("borderColor",v)}/>
           <ColorPicker label="Text Colour" value={form.textColor} onChange={v=>set("textColor",v)}/>
