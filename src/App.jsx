@@ -399,7 +399,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         </>
       ):(
         <>
-          <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
+          <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
             {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
           </div>
@@ -667,7 +667,7 @@ function MainApp({currentUser,onLogout}) {
   const isManager=currentUser.role==="admin"||currentUser.role==="manager";
   const canEdit=isManager;
   const isMobile=useIsMobile();
-  const staffColWidth=isMobile?64:110;
+  const staffColWidth=isMobile?56:90;
   const headerRef=useRef(null);
   const [headerHeight,setHeaderHeight]=useState(115);
   const [loading,setLoading]=useState(true);
@@ -1105,7 +1105,6 @@ function MainApp({currentUser,onLogout}) {
   }
 
   async function removeEntry(id){
-    if(!window.confirm("Remove this entry?"))return;
     const entry=entries.find(e=>e.id===id);
     if(!entry)return;
     // Disappear immediately - don't make the user wait on the delete to
@@ -1409,7 +1408,6 @@ function MainApp({currentUser,onLogout}) {
 
   async function deleteSelectedEntries(){
     if(selectedEntries.size===0)return;
-    if(!window.confirm(`Delete ${selectedEntries.size} selected entr${selectedEntries.size>1?"ies":"y"}?`))return;
     const ids=[...selectedEntries];
     const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);
     // Clear them immediately - don't make the user wait on the delete to
@@ -1455,7 +1453,7 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Header */}
       <div ref={headerRef} style={{background:theme.header,padding:"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14,flexWrap:"wrap",rowGap:8}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:10,paddingBottom:10,flexWrap:"wrap",rowGap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
             <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
             <div>
@@ -1471,16 +1469,19 @@ function MainApp({currentUser,onLogout}) {
             {saving&&!isMobile&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",rowGap:8}}>
+            {isManager&&!isMobile&&(
+              <button onClick={()=>setJobModal({isNew:true,jobNo:"",name:"",...nextPreset(),subItems:[]})}
+                style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${theme.heading}`,background:theme.heading,color:theme.header}}
+                onMouseEnter={e=>{e.currentTarget.style.opacity=0.85;}}
+                onMouseLeave={e=>{e.currentTarget.style.opacity=1;}}>
+                + Add Job
+              </button>
+            )}
             {!isMobile&&(
-              <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
-                <div style={{width:28,height:28,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:theme.header}}>
-                  {currentUser.name.charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <div style={{fontSize:13,color:theme.sub,fontWeight:500}}>{currentUser.name}</div>
-                  <div style={{fontSize:10,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 5px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
-                </div>
-              </div>
+              <button onClick={()=>setWorkHoursOpen(true)}
+                    style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
+                    🕐 {workStart}–{workEnd}
+                  </button>
             )}
             {isAdmin&&!isMobile&&(
               <button onClick={()=>setUserMgmtOpen(true)}
@@ -1491,28 +1492,30 @@ function MainApp({currentUser,onLogout}) {
               </button>
             )}
             {isManager&&!isMobile&&(
-              <>
-                <button onClick={()=>setJobModal({isNew:true,jobNo:"",name:"",...nextPreset(),subItems:[]})}
-                  style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${theme.heading}`,background:"transparent",color:theme.heading}}
-                  onMouseEnter={e=>{e.currentTarget.style.background=theme.heading;e.currentTarget.style.color=theme.header;}}
-                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=theme.heading;}}>
-                  + Add Job
-                </button>
-                <button onClick={()=>setStaffModal({isNew:true,name:"",productiveHours:8})}
-                  style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${theme.heading}`,background:theme.heading,color:theme.header}}
-                  onMouseEnter={e=>{e.currentTarget.style.opacity=0.85;}}
-                  onMouseLeave={e=>{e.currentTarget.style.opacity=1;}}>
-                  + Add Staff
-                </button>
-              </>
+              <button onClick={()=>setStaffModal({isNew:true,name:"",productiveHours:8})}
+                style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${theme.heading}`,background:"transparent",color:theme.heading}}
+                onMouseEnter={e=>{e.currentTarget.style.background=theme.heading;e.currentTarget.style.color=theme.header;}}
+                onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=theme.heading;}}>
+                + Add Staff
+              </button>
             )}
             {!isMobile&&(
-              <button onClick={()=>setWorkHoursOpen(true)}
-                    style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
-                    🕐 {workStart}–{workEnd}
-                  </button>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"stretch",gap:2}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.08)",borderRadius:7,padding:"3px 10px"}}>
+                  <div style={{width:22,height:22,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:theme.header,flexShrink:0}}>
+                    {currentUser.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div style={{fontSize:12,color:theme.sub,fontWeight:500,lineHeight:1.2}}>{currentUser.name}</div>
+                    <div style={{fontSize:9,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 4px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
+                  </div>
+                </div>
+                <button onClick={onLogout} style={{padding:"3px 10px",borderRadius:7,fontSize:11,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
+              </div>
             )}
-            <button onClick={onLogout} style={{padding:isMobile?"7px 10px":"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
+            {isMobile&&(
+              <button onClick={onLogout} style={{padding:"7px 10px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
+            )}
           </div>
         </div>
         {!isMobile&&(
@@ -1549,7 +1552,7 @@ function MainApp({currentUser,onLogout}) {
               <button onClick={goToday} style={{padding:isMobile?"3px 10px":"5px 14px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?11:13,color:"#475569"}}>Today</button>
               <button onClick={()=>navigate(1)} style={{padding:isMobile?"3px 8px":"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?13:16,color:"#475569"}}>›</button>
             </div>
-            <span style={{fontSize:isMobile?11:13,color:"#64748B"}}>{isMobile?formatDateRangeCompact(anchorDate,addDays(anchorDate,totalWeeks*7-2)):`${formatDate(anchorDate)} – ${formatDate(addDays(anchorDate,totalWeeks*7-2))}`}</span>
+            <span style={{fontSize:isMobile?11:13,color:"#64748B"}}>{formatDateRangeCompact(anchorDate,addDays(anchorDate,totalWeeks*7-2))}</span>
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
               {canEdit&&!isMobile&&(
                 <>
@@ -1621,12 +1624,12 @@ function MainApp({currentUser,onLogout}) {
                     const isFirstDayOfWeek=i%6===0;
                     return(
                       <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9}}>
-                        {totalWeeks>1&&isFirstDayOfWeek&&(
+                        {!isMobile&&totalWeeks>1&&isFirstDayOfWeek&&(
                           <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
                             Week of {formatDate(addDays(anchorDate,weekIdx*7))}
                           </div>
                         )}
-                        {totalWeeks>1&&!isFirstDayOfWeek&&(
+                        {!isMobile&&totalWeeks>1&&!isFirstDayOfWeek&&(
                           <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9"}}/>
                         )}
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
@@ -2132,7 +2135,7 @@ function JobModal({data,onSave,onDelete,onClose}) {
     <Modal title={form.isNew?"New Job":"Edit Job"} wide onClose={onClose}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
         <div>
-          <Inp label="Job Number" value={form.jobNo} onChange={e=>set("jobNo",e.target.value)}/>
+          <Inp label="Job Number" value={form.jobNo} onChange={e=>set("jobNo",e.target.value)} autoFocus/>
           <Inp label="Job Name" value={form.name} onChange={e=>set("name",e.target.value)}/>
           <div style={{marginBottom:10}}>
             <div style={{fontSize:12,color:"#64748B",marginBottom:6,fontWeight:500}}>Colour</div>
