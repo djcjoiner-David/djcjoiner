@@ -669,6 +669,7 @@ function MainApp({currentUser,onLogout}) {
   const staffColWidth=isMobile?64:110;
   const headerRef=useRef(null);
   const [headerHeight,setHeaderHeight]=useState(115);
+  const [loading,setLoading]=useState(true);
   useEffect(()=>{
     if(!headerRef.current)return;
     const el=headerRef.current;
@@ -677,9 +678,8 @@ function MainApp({currentUser,onLogout}) {
     const ro=new ResizeObserver(update);
     ro.observe(el);
     return()=>ro.disconnect();
-  },[]);
+  },[loading]);
 
-  const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [tab,setTab]=useState("schedule");
   useEffect(()=>{if(isMobile&&tab!=="schedule")setTab("schedule");},[isMobile,tab]);
@@ -1531,22 +1531,22 @@ function MainApp({currentUser,onLogout}) {
       {/* Schedule Tab */}
       {tab==="schedule"&&(
         <div style={{padding:"0 16px 16px",position:"relative",zIndex:1}}>
-          <div style={{position:"sticky",top:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:12,paddingBottom:8,marginBottom:4}}>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8,flexWrap:"wrap"}}>
+          <div style={{position:"sticky",top:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isMobile?6:12,paddingBottom:isMobile?4:8,marginBottom:4}}>
+          <div style={{display:"flex",alignItems:"center",gap:isMobile?6:12,marginBottom:isMobile?4:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
               {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],["month","Month"]].map(([v,label])=>(
                 <button key={v} onClick={()=>{if(v==="month"){setViewMode("month");}else{setViewMode("weeks");setViewWeeks(v);}}}
-                  style={{padding:"5px 12px",borderRadius:6,border:"none",fontSize:13,fontWeight:500,cursor:"pointer",background:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#fff":"transparent",color:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#1E293B":"#64748B"}}>
-                  {label}
+                  style={{padding:isMobile?"3px 8px":"5px 12px",borderRadius:6,border:"none",fontSize:isMobile?11:13,fontWeight:500,cursor:"pointer",background:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#fff":"transparent",color:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#1E293B":"#64748B"}}>
+                  {isMobile?(v==="month"?"Mo":`${v}w`):label}
                 </button>
               ))}
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <button onClick={()=>navigate(-1)} style={{padding:"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:16,color:"#475569"}}>‹</button>
-              <button onClick={goToday} style={{padding:"5px 14px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:13,color:"#475569"}}>Today</button>
-              <button onClick={()=>navigate(1)} style={{padding:"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:16,color:"#475569"}}>›</button>
+            <div style={{display:"flex",alignItems:"center",gap:isMobile?4:6}}>
+              <button onClick={()=>navigate(-1)} style={{padding:isMobile?"3px 8px":"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?13:16,color:"#475569"}}>‹</button>
+              <button onClick={goToday} style={{padding:isMobile?"3px 10px":"5px 14px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?11:13,color:"#475569"}}>Today</button>
+              <button onClick={()=>navigate(1)} style={{padding:isMobile?"3px 8px":"5px 11px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?13:16,color:"#475569"}}>›</button>
             </div>
-            <span style={{fontSize:13,color:"#64748B"}}>{isMobile?formatDateRangeCompact(anchorDate,addDays(anchorDate,totalWeeks*7-2)):`${formatDate(anchorDate)} – ${formatDate(addDays(anchorDate,totalWeeks*7-2))}`}</span>
+            <span style={{fontSize:isMobile?11:13,color:"#64748B"}}>{isMobile?formatDateRangeCompact(anchorDate,addDays(anchorDate,totalWeeks*7-2)):`${formatDate(anchorDate)} – ${formatDate(addDays(anchorDate,totalWeeks*7-2))}`}</span>
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
               {canEdit&&!isMobile&&(
                 <>
@@ -1584,7 +1584,7 @@ function MainApp({currentUser,onLogout}) {
                   </button>
                 </>
               )}
-              <button onClick={loadAll} style={{padding:"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:12,color:"#64748B"}}>↻ Refresh</button>
+              <button onClick={loadAll} style={{padding:isMobile?"3px 8px":"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?11:12,color:"#64748B"}}>↻ Refresh</button>
             </div>
           </div>
 
