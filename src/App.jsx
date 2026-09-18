@@ -399,7 +399,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         </>
       ):(
         <>
-          <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} · {job.name}</div>
+          <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
             {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
           </div>
