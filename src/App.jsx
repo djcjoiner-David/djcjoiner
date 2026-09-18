@@ -215,17 +215,22 @@ function splitHoursByStaff(staffWithPh, totalHours) {
 // (originally #5 and #6) sat only ~15° apart - inside the blue-green band
 // where the human eye is naturally worst at telling hues apart - so teal was
 // swapped for yellow, which sits far from both its neighbours (~97°/143°).
+// Backgrounds are one shade more saturated than a first pass at this palette
+// used - at the very palest tier, the fill colour was nearly invisible next
+// to white and people were only reading the border/text colour instead of
+// the block's fill. This tier still keeps every text colour comfortably
+// legible (4.5:1+ contrast) while making the fill itself actually visible.
 const JOB_COLOUR_PRESETS = [
-  {bgColor:"#FEF2F2",borderColor:"#EF4444",textColor:"#B91C1C"}, // red
-  {bgColor:"#FFF7ED",borderColor:"#F97316",textColor:"#C2410C"}, // orange
-  {bgColor:"#F7FEE7",borderColor:"#84CC16",textColor:"#4D7C0F"}, // lime
-  {bgColor:"#F0FDF4",borderColor:"#22C55E",textColor:"#15803D"}, // green
-  {bgColor:"#FEFCE8",borderColor:"#EAB308",textColor:"#854D0E"}, // yellow
-  {bgColor:"#ECFEFF",borderColor:"#06B6D4",textColor:"#0E7490"}, // cyan
-  {bgColor:"#EFF6FF",borderColor:"#3B82F6",textColor:"#1D4ED8"}, // blue
-  {bgColor:"#F5F3FF",borderColor:"#8B5CF6",textColor:"#6D28D9"}, // violet
-  {bgColor:"#FDF4FF",borderColor:"#D946EF",textColor:"#A21CAF"}, // fuchsia
-  {bgColor:"#FDF2F8",borderColor:"#EC4899",textColor:"#9D174D"}, // pink
+  {bgColor:"#FEE2E2",borderColor:"#EF4444",textColor:"#B91C1C"}, // red
+  {bgColor:"#FFEDD5",borderColor:"#F97316",textColor:"#C2410C"}, // orange
+  {bgColor:"#ECFCCB",borderColor:"#84CC16",textColor:"#4D7C0F"}, // lime
+  {bgColor:"#DCFCE7",borderColor:"#22C55E",textColor:"#15803D"}, // green
+  {bgColor:"#FEF9C3",borderColor:"#EAB308",textColor:"#854D0E"}, // yellow
+  {bgColor:"#CFFAFE",borderColor:"#06B6D4",textColor:"#0E7490"}, // cyan
+  {bgColor:"#DBEAFE",borderColor:"#3B82F6",textColor:"#1D4ED8"}, // blue
+  {bgColor:"#EDE9FE",borderColor:"#8B5CF6",textColor:"#6D28D9"}, // violet
+  {bgColor:"#FAE8FF",borderColor:"#D946EF",textColor:"#A21CAF"}, // fuchsia
+  {bgColor:"#FCE7F3",borderColor:"#EC4899",textColor:"#9D174D"}, // pink
 ];
 
 
