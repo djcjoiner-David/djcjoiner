@@ -16,6 +16,31 @@ const BRAND_CREAM     = "#FFF8EC";
 
 // ╚══════════════════════════════════════════════════════════════╝
 
+// Colour themes for the top header/nav bar only (logo row + Schedule/Job
+// Summary tabs) - nothing else in the app changes. "Timber and brass" is
+// kept pixel-identical to the app's original hardcoded look above; the rest
+// come from the client's own quote-spreadsheet colour palette.
+const THEMES = {
+  timber_and_brass:    { name: "Timber and brass",    header: "#3D2E14", heading: "#E8A030", sub: "#FFF8EC" },
+  classic_navy:        { name: "Classic navy",        header: "#1F2D3D", heading: "#3E5871", sub: "#D9D9D9" },
+  charcoal_and_copper: { name: "Charcoal and copper", header: "#2B2B2B", heading: "#B87333", sub: "#E6E0D8" },
+  forest_and_sand:     { name: "Forest and sand",     header: "#2F4F3D", heading: "#7A9471", sub: "#E9E4D4" },
+  slate_and_bronze:    { name: "Slate and bronze",    header: "#34394A", heading: "#A9793D", sub: "#E3DFD8" },
+  steel_blue:          { name: "Steel blue",          header: "#1C3A4B", heading: "#4A7A94", sub: "#DCE6EA" },
+  warm_terracotta:     { name: "Warm terracotta",     header: "#5C2A1C", heading: "#C8683F", sub: "#F0E2D6" },
+  deep_teal:           { name: "Deep teal",           header: "#0E3A38", heading: "#2E7D78", sub: "#D9E8E6" },
+  graphite_and_sage:   { name: "Graphite and sage",   header: "#3A3F3A", heading: "#8FA089", sub: "#E5E7E1" },
+};
+const DEFAULT_THEME_KEY = "timber_and_brass";
+
+function hexToRgba(hex, alpha) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function parseQuery(query) {
   // Converts Supabase-style "?order=created_at" or "?id=eq.123" into an object
   const params = new URLSearchParams(query.replace(/^\?/, ""));
@@ -380,7 +405,7 @@ function LoginScreen({onLogin}) {
 
 // ── User Management Modal ─────────────────────────────────────
 
-function UserManagementModal({onClose}) {
+function UserManagementModal({onClose,themeKey,onChangeTheme}) {
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [form,setForm]=useState({name:"",email:"",password:"",role:"staff"});
@@ -417,6 +442,13 @@ function UserManagementModal({onClose}) {
     <Modal title="👥 User Management" wide onClose={onClose}>
       {loading?<Spinner text="Loading users..."/>:(
         <>
+          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Colour Theme</div>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Sets the colour of the header bar (logo, tabs, buttons) for everyone.</div>
+            <Sel label="" value={themeKey} onChange={e=>onChangeTheme(e.target.value)}>
+              {Object.entries(THEMES).map(([key,t])=><option key={key} value={key}>{t.name}</option>)}
+            </Sel>
+          </div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:24}}>
             <thead>
               <tr style={{background:"#F8FAFC",borderBottom:"1px solid #E2E8F0"}}>
@@ -500,6 +532,22 @@ function MainApp({currentUser,onLogout}) {
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [tab,setTab]=useState("schedule");
+  const [themeKey,setThemeKey]=useState(DEFAULT_THEME_KEY);
+  const theme=THEMES[themeKey]||THEMES[DEFAULT_THEME_KEY];
+
+  useEffect(()=>{
+    db("GET","app_settings").then(rows=>{
+      const saved=rows?.[0]?.theme;
+      if(saved&&THEMES[saved])setThemeKey(saved);
+    }).catch(()=>{}); // table may not exist yet on older deployments - just keep the default look
+  },[]);
+
+  async function changeTheme(key){
+    setThemeKey(key); // apply immediately, save in the background
+    try{await db("PATCH","app_settings",{theme:key},"?id=eq.1");}
+    catch{setError("Could not save the theme choice - it'll reset next time the page loads.");}
+  }
+
   const [viewWeeks,setViewWeeks]=useState(2);
   const [viewMode,setViewMode]=useState("weeks");
   const [anchorDate,setAnchorDate]=useState(()=>mondayOf(TODAY));
@@ -1064,62 +1112,62 @@ function MainApp({currentUser,onLogout}) {
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
 
       {/* Header */}
-      <div style={{background:BRAND_HEADER_BG,padding:"0 24px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
+      <div style={{background:theme.header,padding:"0 24px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:14,paddingBottom:14}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
             <img src={CLIENT_LOGO} alt="Logo" style={{height:48,maxWidth:130,objectFit:"contain"}}/>
             <div>
-              <div style={{fontSize:20,fontWeight:700,color:BRAND_GOLD,lineHeight:1.2}}>{CLIENT_NAME}</div>
-              <div style={{fontSize:11,color:BRAND_GOLD,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{CLIENT_TAGLINE}</div>
+              <div style={{fontSize:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{CLIENT_NAME}</div>
+              <div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{CLIENT_TAGLINE}</div>
             </div>
-            <div style={{width:1,height:36,background:"#E8A030",opacity:0.35,margin:"0 8px"}}/>
-            <div style={{fontSize:14,color:"#FFF8EC",opacity:0.7}}>Production Schedule</div>
-            {saving&&<div style={{fontSize:12,color:"#E8A030",marginLeft:8}}>Saving...</div>}
+            <div style={{width:1,height:36,background:theme.heading,opacity:0.35,margin:"0 8px"}}/>
+            <div style={{fontSize:14,color:theme.sub,opacity:0.7}}>Production Schedule</div>
+            {saving&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
-              <div style={{width:28,height:28,borderRadius:"50%",background:"#E8A030",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:"#3D2E14"}}>
+              <div style={{width:28,height:28,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:theme.header}}>
                 {currentUser.name.charAt(0).toUpperCase()}
               </div>
               <div>
-                <div style={{fontSize:13,color:"#FFF8EC",fontWeight:500}}>{currentUser.name}</div>
+                <div style={{fontSize:13,color:theme.sub,fontWeight:500}}>{currentUser.name}</div>
                 <div style={{fontSize:10,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 5px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
               </div>
             </div>
             {isAdmin&&(
               <button onClick={()=>setUserMgmtOpen(true)}
-                style={{padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"1.5px solid rgba(232,160,48,0.4)",background:"transparent",color:"#E8A030"}}
-                onMouseEnter={e=>{e.currentTarget.style.borderColor="#E8A030";}}
-                onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(232,160,48,0.4)";}}>
+                style={{padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.4)}`,background:"transparent",color:theme.heading}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=theme.heading;}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=hexToRgba(theme.heading,0.4);}}>
                 👥 Users
               </button>
             )}
             {isManager&&(
               <>
                 <button onClick={()=>setJobModal({isNew:true,jobNo:"",name:"",...nextPreset(),subItems:[]})}
-                  style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:"1.5px solid #E8A030",background:"transparent",color:"#E8A030"}}
-                  onMouseEnter={e=>{e.currentTarget.style.background="#E8A030";e.currentTarget.style.color="#3D2E14";}}
-                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="#E8A030";}}>
+                  style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${theme.heading}`,background:"transparent",color:theme.heading}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=theme.heading;e.currentTarget.style.color=theme.header;}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=theme.heading;}}>
                   + Add Job
                 </button>
                 <button onClick={()=>setStaffModal({isNew:true,name:"",productiveHours:8})}
-                  style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:"1.5px solid #E8A030",background:"#E8A030",color:"#3D2E14"}}
-                  onMouseEnter={e=>{e.currentTarget.style.background="#F5C060";}}
-                  onMouseLeave={e=>{e.currentTarget.style.background="#E8A030";}}>
+                  style={{padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${theme.heading}`,background:theme.heading,color:theme.header}}
+                  onMouseEnter={e=>{e.currentTarget.style.opacity=0.85;}}
+                  onMouseLeave={e=>{e.currentTarget.style.opacity=1;}}>
                   + Add Staff
                 </button>
               </>
             )}
             <button onClick={()=>setWorkHoursOpen(true)}
-                  style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1.5px solid rgba(232,160,48,0.5)",background:"rgba(232,160,48,0.1)",color:"#E8A030",fontWeight:500}}>
+                  style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
                   🕐 {workStart}–{workEnd}
                 </button>
-                <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"rgba(255,248,236,0.6)"}}>Sign Out</button>
+                <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
           </div>
         </div>
         <div style={{display:"flex"}}>
           {[["schedule","📅 Schedule"],["summary","📋 Job Summary"]].map(([key,label])=>(
-            <button key={key} onClick={()=>setTab(key)} style={{padding:"9px 22px",fontSize:14,fontWeight:500,cursor:"pointer",background:"none",border:"none",borderBottom:tab===key?"2.5px solid #E8A030":"2.5px solid transparent",color:tab===key?"#E8A030":"rgba(255,248,236,0.55)",transition:"all 0.15s"}}>{label}</button>
+            <button key={key} onClick={()=>setTab(key)} style={{padding:"9px 22px",fontSize:14,fontWeight:500,cursor:"pointer",background:"none",border:"none",borderBottom:tab===key?`2.5px solid ${theme.heading}`:"2.5px solid transparent",color:tab===key?theme.heading:hexToRgba(theme.sub,0.55),transition:"all 0.15s"}}>{label}</button>
           ))}
         </div>
       </div>
@@ -1310,7 +1358,7 @@ function MainApp({currentUser,onLogout}) {
       {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id}/>}
-      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)}/>}
+      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme}/>}
       {workHoursOpen&&(
         <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
           <div style={{marginBottom:12}}>
@@ -1665,8 +1713,9 @@ function JobModal({data,onSave,onDelete,onClose}) {
         const proceeding=(row[4]||"").toString().trim().toLowerCase();
         if(!name&&!proceeding)break; // blank row = end of data (totals/footer row)
         if(proceeding!=="y"&&proceeding!=="yes")continue;
-        const workshopHours=Number(row[6])||0;
-        const siteHours=Number(row[7])||0;
+        // Round to the nearest whole hour (.5 rounds up, .49 and below rounds down)
+        const workshopHours=Math.round(Number(row[6])||0);
+        const siteHours=Math.round(Number(row[7])||0);
         if(workshopHours<=0&&siteHours<=0){skippedNoHours++;continue;}
         if(workshopHours>0)newItems.push({id:`new_${Date.now()}_${i}w`,isNew:true,name:`${name} W`,totalHours:workshopHours});
         if(siteHours>0)newItems.push({id:`new_${Date.now()}_${i}s`,isNew:true,name:`${name} S`,totalHours:siteHours});
