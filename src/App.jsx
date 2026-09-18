@@ -336,7 +336,14 @@ function LoginScreen({onLogin}) {
       const user=await db("POST","user_roles",{email:email.toLowerCase().trim(),password},"?login=1");
       sessionStorage.setItem("djc_user",JSON.stringify({email:user.email,role:user.role,name:user.name,id:user.id,token:user.token}));
       onLogin({email:user.email,role:user.role,name:user.name,id:user.id});
-    } catch(err){setError("Incorrect email or password.");}
+    } catch(err){
+      // The server's login errors are all safe, deliberate messages (wrong
+      // credentials, or a lockout notice with a wait time) - show them as-is
+      // instead of a generic message that would hide the lockout countdown.
+      let msg="Incorrect email or password.";
+      try{const parsed=JSON.parse(err.message);if(parsed?.error)msg=parsed.error;}catch{}
+      setError(msg);
+    }
     setLoading(false);
   }
 
