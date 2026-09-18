@@ -192,12 +192,12 @@ function nextAvailableDate(staffIds, slot, entries, fromDateStr) {
   return startStr;
 }
 
-// Splits totalHours across staff proportional to each person's productive rate.
-// Everyone except the last person gets only WHOLE days at their own rate -
-// the last person absorbs whatever's left over, so only one person ever ends
-// up with a partial day instead of every person getting their own partial day.
-// Always sums to exactly totalHours. Used by both the modal preview and the
-// actual save so they can never disagree.
+// Splits totalHours across staff proportional to each person's productive
+// rate, so equal-rate staff get an equal share and different-rate staff get
+// shares matching their own daily rate. Each share is rounded to the nearest
+// half hour; the last person absorbs whatever rounding leaves over, so the
+// total always adds up to exactly totalHours. Used by both the modal preview
+// and the actual save so they can never disagree.
 function splitHoursByStaff(staffWithPh, totalHours) {
   const totalPh=staffWithPh.reduce((a,x)=>a+x.ph,0)||1;
   let alloc=0;
@@ -207,9 +207,8 @@ function splitHoursByStaff(staffWithPh, totalHours) {
     if(isLast){
       hours=Math.round((totalHours-alloc)*10)/10;
     }else{
-      const rawDays=totalHours/totalPh;
-      const wholeDays=Math.floor(rawDays+1e-9);
-      hours=Math.round(wholeDays*ph*10)/10;
+      const share=totalHours*(ph/totalPh);
+      hours=Math.round(share*2)/2;
     }
     alloc+=hours;
     return{sid,name,ph,hours};
@@ -1756,9 +1755,9 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
   },[form,autoFill,preview]);
 
   return(
-    <Modal title={form.mode==="new"?"New Schedule Entry":"Edit Schedule Entry"} onClose={onClose} small>
+    <Modal title={form.mode==="new"?"New Schedule Entry":"Edit Schedule Entry"} onClose={onClose} wide>
       {/* Entry type switcher */}
-      <div style={{display:"flex",gap:6,marginBottom:12,background:"#F1F5F9",borderRadius:8,padding:3}}>
+      <div style={{display:"flex",gap:6,marginBottom:14,background:"#F1F5F9",borderRadius:8,padding:3}}>
         {[["job","📋 Job Entry"],["misc","Misc Entry"]].map(([type,label])=>(
           <button key={type} onClick={()=>set("entryType",type)}
             style={{flex:1,padding:"6px",borderRadius:6,border:"none",fontSize:12,fontWeight:500,cursor:"pointer",background:form.entryType===type?"#fff":"transparent",color:form.entryType===type?"#1E293B":"#64748B",boxShadow:form.entryType===type?"0 1px 3px rgba(0,0,0,0.1)":"none"}}>
@@ -1766,81 +1765,102 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
           </button>
         ))}
       </div>
-      <div style={{marginBottom:10}}>
-        <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Staff Member(s)</div>
-        <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:120,overflowY:"auto",border:"1px solid #CBD5E1",borderRadius:8,padding:"6px 10px"}}>
-          {staff.map(s=>(
-            <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155"}}>
-              <input type="checkbox" checked={form.staffIds.includes(s.id)}
-                onChange={e=>{
-                  const newStaffIds=e.target.checked?[...form.staffIds,s.id]:form.staffIds.filter(id=>id!==s.id);
-                  const newStaffId=e.target.checked?s.id:(form.staffIds.find(id=>id!==s.id)||"");
-                  setForm(f=>{
-                    const nextDate=data.mode==="new"&&newStaffIds.length>0&&entries
-                      ?nextAvailableDate(newStaffIds,f.slot,entries,f.dateStr)
-                      :f.dateStr;
-                    return{...f,staffIds:newStaffIds,staffId:newStaffId,dateStr:nextDate};
-                  });
-                }}
-                style={{width:14,height:14}}/>
-              {s.name} <span style={{fontSize:11,color:"#94A3B8"}}>({s.productiveHours}h/day)</span>
-            </label>
-          ))}
-        </div>
-      </div>
-      <div style={{display:"flex",alignItems:"flex-end",gap:8,marginBottom:14}}>
-        <div style={{flex:1}}>
-          <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>set("dateStr",e.target.value)}/>
-        </div>
-        {form.mode==="new"&&<button type="button" onClick={()=>{
-            const ids=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
-            if(ids.length===0)return;
-            set("dateStr",nextAvailableDate(ids,form.slot,entries,todayStr));
-          }} style={{padding:"7px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",height:34}}>First Available</button>}
-      </div>
-      <Sel label="Slot" value={form.slot} onChange={e=>set("slot",Number(e.target.value))}>
-        <option value={0}>Slot 1</option><option value={1}>Slot 2</option>
-      </Sel>
-      {form.entryType==="misc"?(
-        <>
-          <Inp label="Description (e.g. Wash Cars, Study Leave)" value={form.miscNote} onChange={e=>set("miscNote",e.target.value)} placeholder="Enter description..."/>
-          <Inp label="Hours" type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e=>set("hours",Number(e.target.value))}/>
-        </>
-      ):(
-        <>
-          <Sel label="Job" value={form.jobId} onChange={e=>handleJobChange(e.target.value)}>
-            <option value="">— Select job —</option>
-            {jobs.map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}</option>)}
-          </Sel>
-          {form.jobId&&(
-            <Sel label="Joinery Item" value={form.subItemId||""} onChange={e=>handleSubChange(e.target.value)}>
-              {jobSubs.map(s=><option key={s.id} value={s.id}>{s.name}{s.totalHours?` (${s.totalHours}h budget)`:""}</option>)}
-              <option value="">General / no item</option>
-            </Sel>
-          )}
-          {form.mode==="new"&&(
-            <div style={{marginBottom:10}}>
-              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155"}}>
-                <input type="checkbox" checked={autoFill} onChange={e=>setAutoFill(e.target.checked)} style={{width:15,height:15}}/>
-                Auto-fill consecutive days at 8h/day
-              </label>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+        {/* Left column: who, and what */}
+        <div>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Staff Member(s)</div>
+            <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:160,overflowY:"auto",border:"1px solid #CBD5E1",borderRadius:8,padding:"6px 10px"}}>
+              {staff.map(s=>(
+                <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155"}}>
+                  <input type="checkbox" checked={form.staffIds.includes(s.id)}
+                    onChange={e=>{
+                      const newStaffIds=e.target.checked?[...form.staffIds,s.id]:form.staffIds.filter(id=>id!==s.id);
+                      const newStaffId=e.target.checked?s.id:(form.staffIds.find(id=>id!==s.id)||"");
+                      setForm(f=>{
+                        const nextDate=data.mode==="new"&&newStaffIds.length>0&&entries
+                          ?nextAvailableDate(newStaffIds,f.slot,entries,f.dateStr)
+                          :f.dateStr;
+                        return{...f,staffIds:newStaffIds,staffId:newStaffId,dateStr:nextDate};
+                      });
+                    }}
+                    style={{width:14,height:14}}/>
+                  {s.name} <span style={{fontSize:11,color:"#94A3B8"}}>({s.productiveHours}h/day)</span>
+                </label>
+              ))}
             </div>
+          </div>
+
+          {form.entryType==="misc"?(
+            <Inp label="Description (e.g. Wash Cars, Study Leave)" value={form.miscNote} onChange={e=>set("miscNote",e.target.value)} placeholder="Enter description..."/>
+          ):(
+            <>
+              <Sel label="Job" value={form.jobId} onChange={e=>handleJobChange(e.target.value)}>
+                <option value="">— Select job —</option>
+                {jobs.map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}</option>)}
+              </Sel>
+              {form.jobId&&(
+                <Sel label="Joinery Item" value={form.subItemId||""} onChange={e=>handleSubChange(e.target.value)}>
+                  {jobSubs.map(s=><option key={s.id} value={s.id}>{s.name}{s.totalHours?` (${s.totalHours}h budget)`:""}</option>)}
+                  <option value="">General / no item</option>
+                </Sel>
+              )}
+              {form.mode==="new"&&(
+                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155",marginTop:8}}>
+                  <input type="checkbox" checked={autoFill} onChange={e=>setAutoFill(e.target.checked)} style={{width:15,height:15}}/>
+                  Auto-fill consecutive days at 8h/day
+                </label>
+              )}
+            </>
           )}
-          {autoFill&&form.mode==="new"?(
-            <div style={{marginBottom:10}}>
+        </div>
+
+        {/* Right column: when, and how many hours */}
+        <div>
+          <div style={{display:"flex",alignItems:"flex-end",gap:8,marginBottom:8}}>
+            <div style={{flex:1}}>
+              <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>set("dateStr",e.target.value)}/>
+            </div>
+            <div style={{width:88}}>
+              <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Slot</div>
+              <select value={form.slot} onChange={e=>set("slot",Number(e.target.value))}
+                style={{width:"100%",height:34,padding:"7px 8px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:14,background:"#fff",outline:"none",boxSizing:"border-box"}}>
+                <option value={0}>Slot 1</option><option value={1}>Slot 2</option>
+              </select>
+            </div>
+          </div>
+          {form.mode==="new"&&(
+            <button type="button" onClick={()=>{
+                const ids=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
+                if(ids.length===0)return;
+                set("dateStr",nextAvailableDate(ids,form.slot,entries,todayStr));
+              }} style={{width:"100%",padding:"7px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:12,cursor:"pointer",marginBottom:14}}>
+              First Available {form.staffIds.length>1?"(for whole group)":""}
+            </button>
+          )}
+
+          {form.entryType==="misc"?(
+            <div style={{width:130}}>
+              <Inp label="Hours" type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e=>set("hours",Number(e.target.value))}/>
+            </div>
+          ):autoFill&&form.mode==="new"?(
+            <div>
               <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Deduct from Budget</div>
-              <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours} (from budget)`:"Enter hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+              <div style={{width:130}}>
+                <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+              </div>
               {form.staffIds.length>1&&(()=>{
                 const staffWithPh=form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,name:sf?.name,ph:Number(sf?.productiveHours)||8};});
                 const shares=splitHoursByStaff(staffWithPh,form.totalHours||0);
-                return <div style={{fontSize:11,color:"#3B82F6",marginTop:3,lineHeight:1.5}}>
-                  📋 {form.totalHours}h split proportionally:<br/>
+                return <div style={{fontSize:11,color:"#3B82F6",marginTop:6,lineHeight:1.5}}>
+                  📋 {form.totalHours}h split evenly by rate:<br/>
                   {shares.map(({sid,name,ph,hours})=>(
                     <span key={sid} style={{display:"block",paddingLeft:8}}>• {name}: {hours}h ({ph}h/day = ~{ph>0?Math.ceil(hours/ph):0} days)</span>
                   ))}
                 </div>;
               })()}
-              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:3}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
+              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
               {form.staffIds.length<=1&&preview.length>0&&(
                 <div style={{marginTop:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px"}}>
                   <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted · {productiveHours}h/day rate</div>
@@ -1851,11 +1871,14 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose}) 
               )}
             </div>
           ):(
-            <Inp label="Hours" type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e=>set("hours",Number(e.target.value))}/>
+            <div style={{width:130}}>
+              <Inp label="Hours" type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e=>set("hours",Number(e.target.value))}/>
+            </div>
           )}
-        </>
-      )}
-      <div style={{display:"flex",gap:8,justifyContent:"space-between",marginTop:10}}>
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:8,justifyContent:"space-between",marginTop:16}}>
         <div>{form.mode==="edit"&&<Btn variant="danger" onClick={()=>onRemove(form.id)}>Remove</Btn>}</div>
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
