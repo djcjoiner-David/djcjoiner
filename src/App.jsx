@@ -1017,16 +1017,20 @@ function MainApp({currentUser,onLogout}) {
 
   async function removeEntry(id){
     if(!window.confirm("Remove this entry?"))return;
-    setSaving(true);
+    const entry=entries.find(e=>e.id===id);
+    if(!entry)return;
+    // Disappear immediately - don't make the user wait on the delete to
+    // round-trip before the modal closes and the entry is gone.
+    pushUndo("deleteEntry",{entry});
+    setEntries(prev=>prev.filter(e=>e.id!==id));
+    setEntryModal(null);
     try{
-      const entry=entries.find(e=>e.id===id);
       await db("DELETE","entries",null,`?id=eq.${id}`);
-      if(entry) pushUndo("deleteEntry",{entry});
-      setEntries(prev=>prev.filter(e=>e.id!==id));
-      setEntryModal(null);
+    }catch(e){
+      setError("Failed to remove entry - restored.");
+      setEntries(prev=>[...prev,entry]);
+      setUndoStack(s=>s.slice(0,-1));
     }
-    catch(e){setError("Failed to remove entry.");}
-    setSaving(false);
   }
 
   async function saveJob(data){
@@ -1179,9 +1183,8 @@ function MainApp({currentUser,onLogout}) {
       });
       pushUndo("moveMultiple",{prevStates});
       const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id]}));
-      await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
-        db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot},`?id=eq.${id}`)
-      ));
+      // Land the whole group immediately - don't make the user wait for every
+      // PATCH to round-trip before the drop appears to take effect.
       setEntries(prev=>prev.map(x=>{
         const u=updates.find(u=>u.id===x.id);
         return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot}:x;
@@ -1189,6 +1192,18 @@ function MainApp({currentUser,onLogout}) {
       setSelectedEntries(new Set());
       setSelectionMode(false);
       setMoveMode(false);
+      try{
+        await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
+          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot},`?id=eq.${id}`)
+        ));
+      }catch(err){
+        setError("Failed to move entries - reverted.");
+        setEntries(prev=>prev.map(x=>{
+          const ps=prevStates.find(p=>p.id===x.id);
+          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:x;
+        }));
+        setUndoStack(s=>s.slice(0,-1));
+      }
     }catch(err){setError("Failed to move entries.");}
   }
   async function performGroupCopy(anchorEntry,toStaffId,toDateStr,toSlot){
@@ -1241,14 +1256,27 @@ function MainApp({currentUser,onLogout}) {
         staff_id:newStaffId,job_id:en.jobId||null,sub_item_id:en.subItemId||null,
         date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null
       }));
-      const inserted=await db("POST","entries",rows);
-      const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:i.hours,miscNote:i.misc_note||null}));
-      setEntries(prev=>[...prev,...newEntries]);
-      pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
+      // Show the pasted copies immediately with temporary ids, swapped for the
+      // real ones once the server confirms - removed again if the save fails.
+      const tempEntries=toInsert.map(({en,newDate,newSlot,newStaffId},i)=>({
+        id:`temp_copy_${Date.now()}_${i}`,staffId:newStaffId,jobId:en.jobId||null,subItemId:en.subItemId||null,
+        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null
+      }));
+      setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
       setSelectedEntries(new Set());
       setSelectionMode(false);
       setCopyMode(false);
+      const tempIds=tempEntries.map(t=>t.id);
+      try{
+        const inserted=await db("POST","entries",rows);
+        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:i.hours,miscNote:i.misc_note||null}));
+        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
+        pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
+      }catch(err){
+        setError("Failed to copy entries.");
+        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
+      }
     }catch(err){setError("Failed to copy entries.");}
   }
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
@@ -1266,12 +1294,19 @@ function MainApp({currentUser,onLogout}) {
     }
     // Single entry drag
     if(entry.staffId===toStaffId&&entry.dateStr===toDateStr&&entry.slot===toSlot){dragEntry.current=null;return;}
-    try{
-      pushUndo("moveEntry",{id:entry.id,prevStaffId:entry.staffId,prevDateStr:entry.dateStr,prevSlot:entry.slot});
-      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot},`?id=eq.${entry.id}`);
-      setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot}:en));
-    }catch(err){setError("Failed to move entry.");}
+    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot};
+    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot});
+    // Move it on screen immediately - don't wait for the server round-trip to
+    // show the drop landing. Roll back if the save actually fails.
+    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot}:en));
     dragEntry.current=null;
+    try{
+      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot},`?id=eq.${entry.id}`);
+    }catch(err){
+      setError("Failed to move entry - change reverted.");
+      setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,...prevState}:en));
+      setUndoStack(s=>s.slice(0,-1));
+    }
   }
   function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
 
@@ -1286,19 +1321,23 @@ function MainApp({currentUser,onLogout}) {
   async function deleteSelectedEntries(){
     if(selectedEntries.size===0)return;
     if(!window.confirm(`Delete ${selectedEntries.size} selected entr${selectedEntries.size>1?"ies":"y"}?`))return;
-    setSaving(true);
+    const ids=[...selectedEntries];
+    const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);
+    // Clear them immediately - don't make the user wait on the delete to
+    // round-trip before the selection disappears.
+    pushUndo("deleteMultiple",{deletedEntries});
+    setEntries(prev=>prev.filter(e=>!selectedEntries.has(e.id)));
+    setSelectedEntries(new Set());
+    setSelectionMode(false);
+    setMoveMode(false);
+    setCopyMode(false);
     try{
-      const ids=[...selectedEntries];
-      const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);
       await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
-      pushUndo("deleteMultiple",{deletedEntries});
-      setEntries(prev=>prev.filter(e=>!selectedEntries.has(e.id)));
-      setSelectedEntries(new Set());
-      setSelectionMode(false);
-      setMoveMode(false);
-      setCopyMode(false);
-    }catch(e){setError("Failed to delete entries.");}
-    setSaving(false);
+    }catch(e){
+      setError("Failed to delete entries - restored.");
+      setEntries(prev=>[...prev,...deletedEntries]);
+      setUndoStack(s=>s.slice(0,-1));
+    }
   }
 
   function nextPreset(){return JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length];}
