@@ -135,6 +135,10 @@ function parseISO(s) { const [y,m,d]=s.split("-").map(Number); return new Date(y
 function addDays(d,n) { const r=new Date(d); r.setDate(r.getDate()+n); return r; }
 function mondayOf(d) { const day=d.getDay(); return addDays(d,day===0?-6:1-day); }
 function formatDate(d) { return d.toLocaleDateString("en-AU",{day:"numeric",month:"short"}); }
+function formatDateRangeCompact(start,end) {
+  const sameMonth=start.getMonth()===end.getMonth()&&start.getFullYear()===end.getFullYear();
+  return sameMonth?`${start.getDate()}–${end.getDate()} ${start.toLocaleDateString("en-AU",{month:"short"})}`:`${formatDate(start)} – ${formatDate(end)}`;
+}
 function formatDateLong(d) { return d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
 function isWeekend(d) { return d.getDay()===0||d.getDay()===6; }
 function isSunday(d) { return d.getDay()===0; }
@@ -1463,15 +1467,17 @@ function MainApp({currentUser,onLogout}) {
             {saving&&!isMobile&&<div style={{fontSize:12,color:theme.heading,marginLeft:8}}>Saving...</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",rowGap:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
-              <div style={{width:28,height:28,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:theme.header}}>
-                {currentUser.name.charAt(0).toUpperCase()}
+            {!isMobile&&(
+              <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px"}}>
+                <div style={{width:28,height:28,borderRadius:"50%",background:theme.heading,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:theme.header}}>
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div style={{fontSize:13,color:theme.sub,fontWeight:500}}>{currentUser.name}</div>
+                  <div style={{fontSize:10,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 5px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
+                </div>
               </div>
-              <div>
-                <div style={{fontSize:13,color:theme.sub,fontWeight:500}}>{currentUser.name}</div>
-                <div style={{fontSize:10,background:roleColors[currentUser.role],color:roleTextColors[currentUser.role],borderRadius:4,padding:"0 5px",fontWeight:600,textTransform:"uppercase",display:"inline-block"}}>{currentUser.role}</div>
-              </div>
-            </div>
+            )}
             {isAdmin&&(
               <button onClick={()=>setUserMgmtOpen(true)}
                 style={{padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.4)}`,background:"transparent",color:theme.heading}}
@@ -1496,16 +1502,18 @@ function MainApp({currentUser,onLogout}) {
                 </button>
               </>
             )}
-            <button onClick={()=>setWorkHoursOpen(true)}
-                  style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
-                  🕐 {workStart}–{workEnd}
-                </button>
-                <button onClick={onLogout} style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
+            {!isMobile&&(
+              <button onClick={()=>setWorkHoursOpen(true)}
+                    style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
+                    🕐 {workStart}–{workEnd}
+                  </button>
+            )}
+            <button onClick={onLogout} title="Sign Out" style={{padding:isMobile?"7px 10px":"7px 12px",borderRadius:8,fontSize:isMobile?14:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>{isMobile?"⏻":"Sign Out"}</button>
           </div>
         </div>
         <div style={{display:"flex"}}>
           {[["schedule","📅 Schedule"],["summary","📋 Job Summary"]].map(([key,label])=>(
-            <button key={key} onClick={()=>setTab(key)} style={{padding:"9px 22px",fontSize:14,fontWeight:500,cursor:"pointer",background:"none",border:"none",borderBottom:tab===key?`2.5px solid ${theme.heading}`:"2.5px solid transparent",color:tab===key?theme.heading:hexToRgba(theme.sub,0.55),transition:"all 0.15s"}}>{label}</button>
+            <button key={key} onClick={()=>setTab(key)} title={label} style={{padding:isMobile?"8px 14px":"9px 22px",fontSize:14,fontWeight:500,cursor:"pointer",background:"none",border:"none",borderBottom:tab===key?`2.5px solid ${theme.heading}`:"2.5px solid transparent",color:tab===key?theme.heading:hexToRgba(theme.sub,0.55),transition:"all 0.15s"}}>{isMobile?label.split(" ")[0]:label}</button>
           ))}
         </div>
       </div>
