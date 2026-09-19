@@ -56,17 +56,29 @@ function useIsMobile() {
 
 function useViewportHeight() {
   const getHeight = () => typeof window !== "undefined"
-    ? (window.visualViewport ? window.visualViewport.height : window.innerHeight)
+    ? Math.min(
+        window.visualViewport ? window.visualViewport.height : Infinity,
+        window.innerHeight || Infinity
+      )
     : 0;
   const [height, setHeight] = useState(getHeight);
   useEffect(() => {
     const update = () => setHeight(getHeight());
     update();
+    // iOS Safari sometimes reports a stale/too-tall value until its chrome
+    // (address bar, bottom toolbar) finishes settling after load - a couple
+    // of delayed re-checks catch that without needing a scroll/resize event.
+    const t1 = setTimeout(update, 300);
+    const t2 = setTimeout(update, 1000);
     window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
     return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
       window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
     };
@@ -413,9 +425,10 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {isMobile?(
         <>
-          <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo}</div>
-          <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>{subItem?subItem.name:job.name}</div>
-          <div style={{fontSize:12,fontWeight:700,color:isOver?"#EF4444":(conflict?"#EF4444":job.textColor),whiteSpace:"nowrap",lineHeight:1.3}}>{hoursLabel}</div>
+          <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
+          <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
+            {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
+          </div>
         </>
       ):(
         <>
@@ -1473,7 +1486,7 @@ function MainApp({currentUser,onLogout}) {
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh",...(isMobile?{height:viewportHeight||"100%",overflow:"hidden",display:"flex",flexDirection:"column"}:{})}}>
 
       {/* Header */}
-      <div ref={headerRef} style={{background:theme.header,padding:"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
+      <div ref={headerRef} style={{background:theme.header,padding:isMobile?"env(safe-area-inset-top, 0px) 24px 0":"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:10,paddingBottom:10,flexWrap:"wrap",rowGap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
             <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
