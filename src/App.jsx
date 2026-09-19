@@ -417,7 +417,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
   return (
     <div
-      draggable={canEdit&&!copyMode&&!moveMode}
+      draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
@@ -445,7 +445,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
 function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate}) {
   return (
     <div
-      draggable={canEdit&&!copyMode&&!moveMode}
+      draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
@@ -714,6 +714,18 @@ function MainApp({currentUser,onLogout}) {
     ro.observe(el);
     return()=>ro.disconnect();
   },[loading]);
+  const toolbarBlockRef=useRef(null);
+  const [toolbarBlockHeight,setToolbarBlockHeight]=useState(70);
+  useEffect(()=>{
+    if(!toolbarBlockRef.current)return;
+    const el=toolbarBlockRef.current;
+    const update=()=>setToolbarBlockHeight(el.getBoundingClientRect().height);
+    update();
+    const ro=new ResizeObserver(update);
+    ro.observe(el);
+    return()=>ro.disconnect();
+  },[loading]);
+  const mobileTableMaxHeight=Math.max(150,viewportHeight-headerHeight-toolbarBlockHeight-16);
 
   const [saving,setSaving]=useState(false);
   const [tab,setTab]=useState("schedule");
@@ -1483,7 +1495,7 @@ function MainApp({currentUser,onLogout}) {
   );
 
   return (
-    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh",...(isMobile?{height:viewportHeight||"100%",overflow:"hidden",display:"flex",flexDirection:"column"}:{})}}>
+    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh",...(isMobile?{height:viewportHeight||"100%",overflow:"hidden"}:{})}}>
 
       {/* Header */}
       <div ref={headerRef} style={{background:theme.header,padding:isMobile?"env(safe-area-inset-top, 0px) 24px 0":"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
@@ -1570,7 +1582,8 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Schedule Tab */}
       {tab==="schedule"&&(
-        <div style={{padding:"0 16px 16px",position:"relative",zIndex:1,...(isMobile?{flex:1,minHeight:0,display:"flex",flexDirection:"column",overflow:"hidden"}:{})}}>
+        <div style={{padding:"0 16px 16px",position:"relative",zIndex:1}}>
+          <div ref={toolbarBlockRef}>
           <div style={{position:isMobile?"relative":"sticky",top:isMobile?undefined:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isMobile?6:12,paddingBottom:isMobile?4:8,marginBottom:4,flexShrink:0}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?6:12,marginBottom:isMobile?4:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
@@ -1641,8 +1654,9 @@ function MainApp({currentUser,onLogout}) {
 
           </div>{/* end sticky controls */}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block",flexShrink:0}}>👁 View only — contact a manager to make changes</div>}
+          </div>{/* end toolbarBlockRef */}
 
-          <div style={{overflowX:"auto",overflowY:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch",...(isMobile?{flex:1,minHeight:0,paddingBottom:"env(safe-area-inset-bottom, 0px)"}:{maxHeight:"calc(100vh - 280px)"})}}>
+          <div style={{overflowX:"auto",overflowY:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch",...(isMobile?{maxHeight:mobileTableMaxHeight,paddingBottom:"env(safe-area-inset-bottom, 0px)"}:{maxHeight:"calc(100vh - 280px)"})}}>
             <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"auto"}}>
               <colgroup>
                 <col style={{width:staffColWidth}}/>
@@ -1658,12 +1672,12 @@ function MainApp({currentUser,onLogout}) {
                     const isFirstDayOfWeek=i%6===0;
                     return(
                       <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9,minWidth:isMobile?100:undefined}}>
-                        {!isMobile&&totalWeeks>1&&isFirstDayOfWeek&&(
+                        {totalWeeks>1&&isFirstDayOfWeek&&(
                           <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
                             Week of {formatDate(addDays(anchorDate,weekIdx*7))}
                           </div>
                         )}
-                        {!isMobile&&totalWeeks>1&&!isFirstDayOfWeek&&(
+                        {totalWeeks>1&&!isFirstDayOfWeek&&(
                           <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9"}}/>
                         )}
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
@@ -1680,7 +1694,7 @@ function MainApp({currentUser,onLogout}) {
                     <tr key={`${st.id}-${slot}`} style={{borderBottom:slot===1?'3px solid #94A3B8':'none',boxShadow:slot===1?'0 2px 0 0 #94A3B8':undefined}}>
                       {slot===0&&(
                         <td rowSpan={2}
-                          draggable={canEdit}
+                          draggable={!isMobile&&canEdit}
                           onDragStart={e=>handleStaffDragStart(e,st.id)}
                           onDragOver={e=>{e.preventDefault();}}
                           onDrop={e=>handleStaffDrop(e,st.id)}
