@@ -54,6 +54,38 @@ function useIsMobile() {
   return isMobile;
 }
 
+function useViewportHeight() {
+  const getHeight = () => typeof window !== "undefined"
+    ? Math.min(
+        window.visualViewport ? window.visualViewport.height : Infinity,
+        window.innerHeight || Infinity
+      )
+    : 0;
+  const [height, setHeight] = useState(getHeight);
+  useEffect(() => {
+    const update = () => setHeight(getHeight());
+    update();
+    // iOS Safari sometimes reports a stale/too-tall value until its chrome
+    // (address bar, bottom toolbar) finishes settling after load - a couple
+    // of delayed re-checks catch that without needing a scroll/resize event.
+    const t1 = setTimeout(update, 300);
+    const t2 = setTimeout(update, 1000);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+  return height;
+}
+
 const LOGO_MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5MB - just a sanity cap before we even try to process it
 const LOGO_MAX_HEIGHT = 200; // stored/display size - the logo never renders taller than ~48px in the app
 
@@ -379,23 +411,24 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver,isMobile}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver,isMobile,isPastDate}) {
   const hoursLabel=isLastEntry&&budgetRemaining!==null
     ?(isOver?`${Math.abs(budgetRemaining)}h OVER`:`${budgetRemaining}h`)
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
   return (
     <div
-      draggable={canEdit&&!copyMode&&!moveMode}
+      draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:canEdit?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",...(isMobile?{}:{overflow:"hidden"})}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:canEdit?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {isMobile?(
         <>
-          <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo}</div>
-          <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>{subItem?subItem.name:job.name}</div>
-          <div style={{fontSize:12,fontWeight:700,color:isOver?"#EF4444":(conflict?"#EF4444":job.textColor),whiteSpace:"nowrap",lineHeight:1.3}}>{hoursLabel}</div>
+          <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
+          <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
+            {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
+          </div>
         </>
       ):(
         <>
@@ -409,14 +442,14 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile}) {
+function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate}) {
   return (
     <div
-      draggable={canEdit&&!copyMode&&!moveMode}
+      draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative"}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
     </div>
@@ -667,6 +700,7 @@ function MainApp({currentUser,onLogout}) {
   const isManager=currentUser.role==="admin"||currentUser.role==="manager";
   const canEdit=isManager;
   const isMobile=useIsMobile();
+  const viewportHeight=useViewportHeight();
   const staffColWidth=isMobile?56:90;
   const headerRef=useRef(null);
   const [headerHeight,setHeaderHeight]=useState(115);
@@ -680,6 +714,18 @@ function MainApp({currentUser,onLogout}) {
     ro.observe(el);
     return()=>ro.disconnect();
   },[loading]);
+  const toolbarBlockRef=useRef(null);
+  const [toolbarBlockHeight,setToolbarBlockHeight]=useState(70);
+  useEffect(()=>{
+    if(!toolbarBlockRef.current)return;
+    const el=toolbarBlockRef.current;
+    const update=()=>setToolbarBlockHeight(el.getBoundingClientRect().height);
+    update();
+    const ro=new ResizeObserver(update);
+    ro.observe(el);
+    return()=>ro.disconnect();
+  },[loading]);
+  const mobileTableMaxHeight=Math.max(150,viewportHeight-headerHeight-toolbarBlockHeight-16);
 
   const [saving,setSaving]=useState(false);
   const [tab,setTab]=useState("schedule");
@@ -1449,10 +1495,10 @@ function MainApp({currentUser,onLogout}) {
   );
 
   return (
-    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh",...(isMobile?{height:"100%",overflow:"hidden",display:"flex",flexDirection:"column"}:{})}}>
+    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh",...(isMobile?{height:viewportHeight||"100%",overflow:"hidden"}:{})}}>
 
       {/* Header */}
-      <div ref={headerRef} style={{background:theme.header,padding:"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
+      <div ref={headerRef} style={{background:theme.header,padding:isMobile?"env(safe-area-inset-top, 0px) 24px 0":"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:10,paddingBottom:10,flexWrap:"wrap",rowGap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
             <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
@@ -1536,7 +1582,8 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Schedule Tab */}
       {tab==="schedule"&&(
-        <div style={{padding:"0 16px 16px",position:"relative",zIndex:1,...(isMobile?{flex:1,minHeight:0,display:"flex",flexDirection:"column",overflow:"hidden"}:{})}}>
+        <div style={{padding:"0 16px 16px",position:"relative",zIndex:1}}>
+          <div ref={toolbarBlockRef}>
           <div style={{position:isMobile?"relative":"sticky",top:isMobile?undefined:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isMobile?6:12,paddingBottom:isMobile?4:8,marginBottom:4,flexShrink:0}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?6:12,marginBottom:isMobile?4:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
@@ -1607,8 +1654,9 @@ function MainApp({currentUser,onLogout}) {
 
           </div>{/* end sticky controls */}
           {!canEdit&&<div style={{fontSize:11,color:"#94A3B8",marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:6,padding:"5px 10px",display:"inline-block",flexShrink:0}}>👁 View only — contact a manager to make changes</div>}
+          </div>{/* end toolbarBlockRef */}
 
-          <div style={{overflowX:"auto",overflowY:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch",...(isMobile?{flex:1,minHeight:0}:{maxHeight:"calc(100vh - 280px)"})}}>
+          <div style={{overflowX:"auto",overflowY:"auto",borderRadius:12,border:"1px solid #E2E8F0",background:"#fff",WebkitOverflowScrolling:"touch",...(isMobile?{maxHeight:mobileTableMaxHeight,paddingBottom:"env(safe-area-inset-bottom, 0px)"}:{maxHeight:"calc(100vh - 280px)"})}}>
             <table style={{borderCollapse:"separate",borderSpacing:0,minWidth:"100%",tableLayout:"auto"}}>
               <colgroup>
                 <col style={{width:staffColWidth}}/>
@@ -1623,13 +1671,13 @@ function MainApp({currentUser,onLogout}) {
                     const isSat=d.getDay()===6;
                     const isFirstDayOfWeek=i%6===0;
                     return(
-                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9}}>
-                        {!isMobile&&totalWeeks>1&&isFirstDayOfWeek&&(
+                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9,minWidth:isMobile?100:undefined}}>
+                        {totalWeeks>1&&isFirstDayOfWeek&&(
                           <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
                             Week of {formatDate(addDays(anchorDate,weekIdx*7))}
                           </div>
                         )}
-                        {!isMobile&&totalWeeks>1&&!isFirstDayOfWeek&&(
+                        {totalWeeks>1&&!isFirstDayOfWeek&&(
                           <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9"}}/>
                         )}
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
@@ -1646,7 +1694,7 @@ function MainApp({currentUser,onLogout}) {
                     <tr key={`${st.id}-${slot}`} style={{borderBottom:slot===1?'3px solid #94A3B8':'none',boxShadow:slot===1?'0 2px 0 0 #94A3B8':undefined}}>
                       {slot===0&&(
                         <td rowSpan={2}
-                          draggable={canEdit}
+                          draggable={!isMobile&&canEdit}
                           onDragStart={e=>handleStaffDragStart(e,st.id)}
                           onDragOver={e=>{e.preventDefault();}}
                           onDrop={e=>handleStaffDrop(e,st.id)}
@@ -1668,13 +1716,13 @@ function MainApp({currentUser,onLogout}) {
                         const isConflict=conflictKeys.has(k);
                         return(
                           <td key={di}
-                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA"}}
+                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
                             onDragOver={e=>handleDragOver(e,st.id,ds,slot)}
                             onDragLeave={handleDragLeave}
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)}/>
                                 : job
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
@@ -1684,7 +1732,7 @@ function MainApp({currentUser,onLogout}) {
                                       const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
                                       const totalBudget=si?.totalHours||null;
                                       const isOver=si&&isLastEntry&&budgetRemaining!==null&&budgetRemaining<0;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver} isMobile={isMobile}/>;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver} isMobile={isMobile} isPastDate={isPast(ds)}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
