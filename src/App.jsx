@@ -435,10 +435,11 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver,isMobile,isPastDate}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver,overAmount,isShort,shortAmount,isMobile,isPastDate}) {
   const hoursLabel=isLastEntry&&budgetRemaining!==null
-    ?(isOver?`${Math.abs(budgetRemaining)}h OVER`:`${budgetRemaining}h`)
+    ?(isOver?`${overAmount}h OVER`:isShort?`${shortAmount}h SHORT`:`${budgetRemaining}h`)
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
+  const flagColor=isOver?"#EF4444":isShort?"#D97706":undefined;
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
@@ -451,14 +452,14 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         <>
           <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
-            {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOver||isShort)?700:undefined}}>{hoursLabel}</span>
           </div>
         </>
       ):(
         <>
           <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
-            {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOver||isShort)?700:undefined}}>{hoursLabel}</span>
           </div>
         </>
       )}
@@ -1764,10 +1765,16 @@ function MainApp({currentUser,onLogout}) {
                                       const siEntries=si?entries.filter(e=>e.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
                                       const isLastEntry=si&&siEntries.length>0&&siEntries[siEntries.length-1].id===entry.id;
                                       const deductedBefore=si?siEntries.slice(0,-1).reduce((a,e)=>{const stf=staff.find(s=>s.id===e.staffId);return a+((e.hours/8)*(stf?.productiveHours||8));},0):0;
-                                      const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
+                                      const rawRemaining=si&&isLastEntry?si.totalHours-deductedBefore:null;
+                                      const budgetRemaining=rawRemaining!==null?Math.max(0,Math.round(rawRemaining*10)/10):null;
                                       const totalBudget=si?.totalHours||null;
-                                      const isOver=si&&isLastEntry&&budgetRemaining!==null&&budgetRemaining<0;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver} isMobile={isMobile} isPastDate={isPast(ds)}/>;
+                                      const lastEntryContribution=isLastEntry?(entry.hours/8)*(st.productiveHours||8):0;
+                                      const finalRemaining=isLastEntry&&rawRemaining!==null?Math.round((rawRemaining-lastEntryContribution)*10)/10:null;
+                                      const isOver=isLastEntry&&finalRemaining!==null&&finalRemaining<-0.05;
+                                      const isShort=isLastEntry&&finalRemaining!==null&&finalRemaining>0.05;
+                                      const overAmount=isOver?Math.abs(finalRemaining):null;
+                                      const shortAmount=isShort?finalRemaining:null;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver} overAmount={overAmount} isShort={isShort} shortAmount={shortAmount} isMobile={isMobile} isPastDate={isPast(ds)}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
