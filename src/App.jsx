@@ -450,12 +450,11 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isShort,shortAmount,isMobile,isPastDate,isOvercommitted}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isMobile,isPastDate,isOvercommitted}) {
   const hoursLabel=isOverRun?"over-run"
-    :isShort?`${shortAmount}h SHORT`
     :isCompletingEntry?`${budgetRemaining}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
-  const flagColor=isOverRun?"#EF4444":isShort?"#D97706":undefined;
+  const flagColor=isOverRun?"#EF4444":undefined;
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
@@ -468,7 +467,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         <>
           <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
-            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isShort)?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:isOverRun?700:undefined}}>{hoursLabel}</span>
           </div>
           {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
         </>
@@ -476,7 +475,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         <>
           <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
-            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isShort)?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:isOverRun?700:undefined}}>{hoursLabel}</span>
           </div>
           {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
         </>
@@ -1791,11 +1790,13 @@ function MainApp({currentUser,onLogout}) {
                                       const siEntries=si?entries.filter(e=>e.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
                                       const myIndex=si?siEntries.findIndex(e=>e.id===entry.id):-1;
                                       // Walk the sub-item's entries in date order and find the one that first
-                                      // reaches (or passes) the total budget - that's the "completing" entry,
-                                      // and it keeps showing the remaining-hours figure even if its own hours
-                                      // overshoot it. Anything scheduled after that point is pure surplus
-                                      // ("over-run"); if the budget is never reached, the true last entry
-                                      // shows how far short the schedule still is.
+                                      // reaches (or passes) the total budget - that's the "completing" entry.
+                                      // If nothing ever reaches it, the true last entry stands in for that role
+                                      // instead - same formula, same display, just using whatever's left as of
+                                      // walking into it rather than an amount that happens to close the budget.
+                                      // Either way it's totalHours minus everything scheduled BEFORE it; this
+                                      // entry's own hours never enter into what's displayed. Anything scheduled
+                                      // after the completing entry is pure surplus ("over-run").
                                       let completeIdx=-1,cumulative=0;
                                       const befores=[];
                                       if(si)for(let i=0;i<siEntries.length;i++){
@@ -1806,13 +1807,11 @@ function MainApp({currentUser,onLogout}) {
                                         if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
                                       }
                                       const totalBudget=si?.totalHours||null;
-                                      const isCompletingEntry=si&&myIndex===completeIdx;
+                                      const specialIdx=si?(completeIdx!==-1?completeIdx:siEntries.length-1):-1;
+                                      const isCompletingEntry=si&&myIndex===specialIdx;
                                       const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
-                                      const isFinalShortEntry=si&&completeIdx===-1&&myIndex===siEntries.length-1;
                                       const budgetRemaining=isCompletingEntry?Math.max(0,Math.round((si.totalHours-befores[myIndex])*10)/10):null;
-                                      const shortAmount=isFinalShortEntry?Math.round((si.totalHours-befores[myIndex])*10)/10:null;
-                                      const isShort=isFinalShortEntry&&shortAmount>0.05;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isShort={isShort} shortAmount={shortAmount} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
