@@ -974,27 +974,27 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>prev.filter(en=>en.id!==tempId));
       }
     } else if(last.type==="moveEntry") {
-      const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
+      const {id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt}=last.data;
       const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
-      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot}}]);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt}:e));
+      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt}}]);
       try{
-        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
+        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt},`?id=eq.${id}`);
       }catch(err){
         setError("Undo failed - reverted.");
         if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setRedoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveMultiple") {
-      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:e;}));
       setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
       try{
-        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot})=>
-          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`)
+        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt})=>
+          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Undo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt}:e;}));
         setRedoStack(prev=>prev.slice(0,-1));
       }
     } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
@@ -1054,27 +1054,27 @@ function MainApp({currentUser,onLogout}) {
         if(entry){setEntries(prev=>[...prev,entry]);setUndoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveEntry") {
-      const {id,staffId,dateStr,slot}=last.data;
+      const {id,staffId,dateStr,slot,createdAt}=last.data;
       const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot}:e));
-      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot}}]);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt}:e));
+      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt}}]);
       try{
-        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
+        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt},`?id=eq.${id}`);
       }catch(err){
         setError("Redo failed - reverted.");
         if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setUndoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveMultiple") {
-      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt}:e;}));
       setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
       try{
-        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot})=>
-          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`)
+        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot,createdAt})=>
+          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Redo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:e;}));
         setUndoStack(prev=>prev.slice(0,-1));
       }
     } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
@@ -1396,7 +1396,7 @@ function MainApp({currentUser,onLogout}) {
 
       const prevStates=idsToMove.map(id=>{
         const en=entries.find(x=>x.id===id);
-        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
+        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot,prevCreatedAt:en.createdAt};
       });
       pushUndo("moveMultiple",{prevStates});
       // Moving these entries makes them the newest arrivals wherever they
@@ -1421,7 +1421,7 @@ function MainApp({currentUser,onLogout}) {
         setError("Failed to move entries - reverted.");
         setEntries(prev=>prev.map(x=>{
           const ps=prevStates.find(p=>p.id===x.id);
-          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:x;
+          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:x;
         }));
         setUndoStack(s=>s.slice(0,-1));
       }
@@ -1515,8 +1515,8 @@ function MainApp({currentUser,onLogout}) {
     }
     // Single entry drag
     if(entry.staffId===toStaffId&&entry.dateStr===toDateStr&&entry.slot===toSlot){dragEntry.current=null;return;}
-    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot};
-    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot});
+    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt};
+    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt});
     // Dropping it here makes it the newest arrival at this day/slot for
     // capacity-conflict purposes - an old entry dragged into a fresh
     // conflict shouldn't still "win" on its original creation date.
