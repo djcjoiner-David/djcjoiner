@@ -558,12 +558,12 @@ function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,available}) {
   if (isPastDate||!canEdit) return <div style={{minHeight:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
   // A job that wrapped up without using this staff member's whole day
   // leaves the day's other slot free - flag that leftover capacity instead
-  // of showing a plain "+", with a pale blue fill (lighter than the blue
-  // used for selected/job entries) so it stays calm and reads as distinct
-  // from both an ordinary empty slot and a Misc entry's grey.
+  // of showing a plain "+", with the same pale grey used elsewhere in the
+  // app (e.g. Saturday columns). Misc entries carry their own solid border,
+  // so the shared grey tone doesn't need to compete with that for contrast.
   return (
     <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":available?"1.5px dashed #BFDBFE":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.2,padding:available?"2px 4px":0,background:available?"#EFF6FF":"transparent",transition:"all 0.12s"}}
+      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.2,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
       onMouseEnter={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
       onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
       {isDropTarget?"↓":available?"Available Hours":"+"}
@@ -1012,27 +1012,27 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>prev.filter(en=>en.id!==tempId));
       }
     } else if(last.type==="moveEntry") {
-      const {id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt}=last.data;
+      const {id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours}=last.data;
       const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt}:e));
-      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt}}]);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})}:e));
+      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt,hours:current.hours}}]);
       try{
-        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt},`?id=eq.${id}`);
+        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})},`?id=eq.${id}`);
       }catch(err){
         setError("Undo failed - reverted.");
         if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setRedoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveMultiple") {
-      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:e;}));
+      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt,hours:cur.hours}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,...(ps.prevHours!==undefined?{hours:ps.prevHours}:{})}:e;}));
       setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
       try{
-        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt})=>
-          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt},`?id=eq.${id}`)
+        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours})=>
+          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Undo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt}:e;}));
+        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,hours:s.hours}:e;}));
         setRedoStack(prev=>prev.slice(0,-1));
       }
     } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
@@ -1092,27 +1092,27 @@ function MainApp({currentUser,onLogout}) {
         if(entry){setEntries(prev=>[...prev,entry]);setUndoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveEntry") {
-      const {id,staffId,dateStr,slot,createdAt}=last.data;
+      const {id,staffId,dateStr,slot,createdAt,hours}=last.data;
       const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt}:e));
-      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt}}]);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt,...(hours!==undefined?{hours}:{})}:e));
+      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt,prevHours:current.hours}}]);
       try{
-        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt},`?id=eq.${id}`);
+        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt,...(hours!==undefined?{hours}:{})},`?id=eq.${id}`);
       }catch(err){
         setError("Redo failed - reverted.");
         if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setUndoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveMultiple") {
-      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt}:e;}));
+      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt,prevHours:cur.hours}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,...(s.hours!==undefined?{hours:s.hours}:{})}:e;}));
       setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
       try{
-        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot,createdAt})=>
-          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt},`?id=eq.${id}`)
+        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot,createdAt,hours})=>
+          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt,...(hours!==undefined?{hours}:{})},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Redo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:e;}));
+        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,hours:ps.prevHours}:e;}));
         setUndoStack(prev=>prev.slice(0,-1));
       }
     } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
@@ -1464,32 +1464,51 @@ function MainApp({currentUser,onLogout}) {
 
       const prevStates=idsToMove.map(id=>{
         const en=entries.find(x=>x.id===id);
-        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot,prevCreatedAt:en.createdAt};
+        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot,prevCreatedAt:en.createdAt,prevHours:en.hours};
       });
       pushUndo("moveMultiple",{prevStates});
       // Moving these entries makes them the newest arrivals wherever they
       // land, for capacity-conflict purposes - an old entry dragged into a
       // fresh conflict shouldn't still "win" on its original creation date.
       const movedAt=new Date().toISOString();
-      const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id]}));
+      // Same restoration as a single-entry drag (see handleDrop): if the one
+      // entry being moved was capped by a same-day sibling at its old spot,
+      // and its new spot has no sibling, give it the day back. Only applied
+      // for a single selected entry - a genuine multi-entry group move can
+      // shift several mutually-dependent entries together, where "was it
+      // capped" gets a lot less clear-cut, so those keep their hours as-is
+      // like before.
+      let newHoursById={};
+      if(idsToMove.length===1){
+        const id=idsToMove[0];
+        const en=entries.find(x=>x.id===id);
+        const newStaffId=idToStaff[id],newDate=idToDate[id],newSlot=idToSlot[id];
+        const oldSibling=entries.find(o=>o.id!==id&&o.staffId===en.staffId&&o.dateStr===en.dateStr&&o.slot!==en.slot);
+        const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,en);
+        const newSibling=entries.find(o=>o.id!==id&&o.staffId===newStaffId&&o.dateStr===newDate&&o.slot!==newSlot);
+        if(wasCappedByOldSibling&&!newSibling){
+          newHoursById[id]=Number(staff.find(s=>s.id===newStaffId)?.productiveHours)||8;
+        }
+      }
+      const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id],newHours:newHoursById[id]}));
       // Land the whole group immediately - don't make the user wait for every
       // PATCH to round-trip before the drop appears to take effect.
       setEntries(prev=>prev.map(x=>{
         const u=updates.find(u=>u.id===x.id);
-        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt}:x;
+        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt,...(u.newHours!==undefined?{hours:u.newHours}:{})}:x;
       }));
       setSelectedEntries(new Set());
       setSelectionMode(false);
       setMoveMode(false);
       try{
-        await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
-          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt},`?id=eq.${id}`)
+        await Promise.all(updates.map(({id,newDate,newStaffId,newSlot,newHours})=>
+          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt,...(newHours!==undefined?{hours:newHours}:{})},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Failed to move entries - reverted.");
         setEntries(prev=>prev.map(x=>{
           const ps=prevStates.find(p=>p.id===x.id);
-          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:x;
+          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,hours:ps.prevHours}:x;
         }));
         setUndoStack(s=>s.slice(0,-1));
       }
@@ -1612,18 +1631,29 @@ function MainApp({currentUser,onLogout}) {
       }
       return;
     }
-    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt};
-    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt});
+    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt,hours:entry.hours};
+    // If this entry's hours were being capped by a same-day sibling at its
+    // OLD spot, and the new spot has no sibling to share the day with, its
+    // stored hours should go back to using the whole day - otherwise a
+    // reduction caused by that old conflict survives long after the
+    // conflict itself is gone (e.g. dragged away to an empty day).
+    const oldSibling=entries.find(o=>o.id!==entry.id&&o.staffId===entry.staffId&&o.dateStr===entry.dateStr&&o.slot!==entry.slot);
+    const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,entry);
+    const newSibling=entries.find(o=>o.id!==entry.id&&o.staffId===toStaffId&&o.dateStr===toDateStr&&o.slot!==toSlot);
+    const newHours=(wasCappedByOldSibling&&!newSibling)
+      ?(Number(staff.find(s=>s.id===toStaffId)?.productiveHours)||8)
+      :entry.hours;
+    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt,prevHours:prevState.hours});
     // Dropping it here makes it the newest arrival at this day/slot for
     // capacity-conflict purposes - an old entry dragged into a fresh
     // conflict shouldn't still "win" on its original creation date.
     const movedAt=new Date().toISOString();
     // Move it on screen immediately - don't wait for the server round-trip to
     // show the drop landing. Roll back if the save actually fails.
-    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt}:en));
+    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt,hours:newHours}:en));
     dragEntry.current=null;
     try{
-      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot,created_at:movedAt},`?id=eq.${entry.id}`);
+      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot,created_at:movedAt,hours:newHours},`?id=eq.${entry.id}`);
     }catch(err){
       setError("Failed to move entry - change reverted.");
       setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,...prevState}:en));
