@@ -222,26 +222,33 @@ function isSaturday(d) { return d.getDay()===6; }
 function isPast(dateStr) { return dateStr < todayStr; }
 // No single entry can ever count for more than the staff member's daily cap
 // (their Productive Hours) - it's a hard ceiling on how much of a day one
-// person can be allocated, not just a cross-slot conflict check. Slot 1 is
-// capped against the cap on its own; slot 2 then only gets whatever capacity
-// slot 1's (already-capped) usage left over that day. It's this reduced
-// figure - not the raw scheduled hours - that counts toward the joinery
-// item's budget.
+// person can be allocated, not just a cross-slot conflict check. Whichever
+// entry (slot 1 or slot 2) was actually scheduled FIRST that day gets first
+// claim on the cap; whichever was scheduled SECOND only gets whatever
+// capacity the first one left over - regardless of which slot number either
+// one happens to sit in. It's this reduced figure - not the raw scheduled
+// hours - that counts toward the joinery item's budget.
+function wasScheduledFirst(a, b) {
+  const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+  const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+  if (ca !== cb) return ca < cb;
+  return String(a.id) < String(b.id);
+}
 function effectiveEntryHours(e, allEntries, staffList) {
   const myHours = Number(e.hours) || 0;
   const stf = staffList.find(s => s.id === e.staffId);
   const cap = Number(stf?.productiveHours) || 8;
-  if (e.slot !== 1) return Math.min(myHours, cap);
-  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot === 0);
-  const h0 = other ? Math.min(Number(other.hours) || 0, cap) : 0;
-  return Math.min(myHours, Math.max(0, cap - h0));
+  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
+  if (!other || wasScheduledFirst(e, other)) return Math.min(myHours, cap);
+  const otherHours = Math.min(Number(other.hours) || 0, cap);
+  return Math.min(myHours, Math.max(0, cap - otherHours));
 }
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
 
 // Shared between undo and redo: the row shape the API expects for an insert,
 // and the entry shape the app uses once that insert comes back with an id.
 function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}; }
-function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null}; }
+function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at}; }
 
 function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   if (!totalHours||totalHours<=0) return [];
@@ -310,7 +317,7 @@ function splitHoursByStaff(staffWithPh, totalHours) {
     const isLast=idx===staffWithPh.length-1;
     let hours;
     if(isLast){
-      hours=Math.round((totalHours-alloc)*10)/10;
+      hours=Math.round((totalHours-alloc)*2)/2;
     }else{
       const share=totalHours*(ph/totalPh);
       hours=Math.round(share*2)/2;
@@ -454,7 +461,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
   const hoursLabel=isOverRun?"over-run"
     :isCompletingEntry?`${budgetRemaining}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
-  const flagColor=isOverRun?"#EF4444":undefined;
+  const flagColor=isOverRun?"#D97706":undefined;
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
@@ -991,7 +998,7 @@ function MainApp({currentUser,onLogout}) {
     setRedoStack(prev=>prev.slice(0,-1));
     if(last.type==="addEntries") {
       const tempMap=last.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}`,row}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null}))]);
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString()}))]);
       const tempIds=tempMap.map(t=>t.tempId);
       try{
         const inserted=await db("POST","entries",last.data.rows);
@@ -1102,7 +1109,7 @@ function MainApp({currentUser,onLogout}) {
       }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
-      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null})));
+      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at})));
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -1169,7 +1176,7 @@ function MainApp({currentUser,onLogout}) {
             onConfirm:async()=>{
               setSaving(true);
               const inserted=await db("POST","entries",buildRows(valid));
-              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null}))]);
+              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at}))]);
               setConflictAlert(null);setEntryModal(null);setTab("schedule");setSaving(false);
             },
             onCancel:()=>setConflictAlert(null),
@@ -1177,7 +1184,7 @@ function MainApp({currentUser,onLogout}) {
           return;
         }
         const inserted=await db("POST","entries",buildRows(valid));
-        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null}));
+        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at}));
         pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
         setEntries(prev=>[...prev,...newMapped]);
       } else {
@@ -1441,7 +1448,7 @@ function MainApp({currentUser,onLogout}) {
       // real ones once the server confirms - removed again if the save fails.
       const tempEntries=toInsert.map(({en,newDate,newSlot,newStaffId},i)=>({
         id:`temp_copy_${Date.now()}_${i}`,staffId:newStaffId,jobId:en.jobId||null,subItemId:en.subItemId||null,
-        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null
+        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString()
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
@@ -1451,7 +1458,7 @@ function MainApp({currentUser,onLogout}) {
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
-        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null}));
+        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
       }catch(err){
@@ -1770,11 +1777,14 @@ function MainApp({currentUser,onLogout}) {
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
                         const isConflict=conflictKeys.has(k);
                         const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
-                        // Slot 2 is only "Overcommitted" when slot 1 has already used up the
-                        // person's entire daily cap, leaving nothing for slot 2 to draw on. If
-                        // slot 1 has any capacity left over, slot 2 silently absorbs it (via
-                        // effectiveEntryHours below) instead of showing a warning.
-                        const isOvercommitted=slot===1&&!!entry&&!!otherSlotEntry&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
+                        // Whichever entry was scheduled SECOND that day is only "Overcommitted"
+                        // when the one scheduled FIRST already used up the person's entire daily
+                        // cap, leaving nothing to draw on. If the first one has any capacity left
+                        // over, the second entry silently absorbs it (via effectiveEntryHours
+                        // below) instead of showing a warning. This isn't tied to slot number -
+                        // whichever slot was actually filled in later is the one that can be
+                        // "Overcommitted".
+                        const isOvercommitted=!!entry&&!!otherSlotEntry&&!wasScheduledFirst(entry,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
                         return(
                           <td key={di}
                             style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
@@ -1810,7 +1820,7 @@ function MainApp({currentUser,onLogout}) {
                                       const specialIdx=si?(completeIdx!==-1?completeIdx:siEntries.length-1):-1;
                                       const isCompletingEntry=si&&myIndex===specialIdx;
                                       const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
-                                      const budgetRemaining=isCompletingEntry?Math.max(0,Math.round((si.totalHours-befores[myIndex])*10)/10):null;
+                                      const budgetRemaining=isCompletingEntry?Math.max(0,Math.round((si.totalHours-befores[myIndex])*2)/2):null;
                       return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
@@ -1908,7 +1918,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                 <div style={{fontSize:16,fontWeight:700,color:job.textColor}}>{job.jobNo} — {job.name}</div>
                 <div style={{fontSize:12,color:job.textColor,opacity:0.8,marginTop:2}}>
                   {commDate?<>From {formatDateLong(commDate)} · Last {formatDateLong(lastDate)} · </>:"Not yet scheduled · "}
-                  <strong>{Math.round(totalDeducted*10)/10}h</strong> deducted {archived&&<em>(archived)</em>}
+                  <strong>{Math.round(totalDeducted*2)/2}h</strong> deducted {archived&&<em>(archived)</em>}
                 </div>
               </div>
               {canEdit&&setJobModal&&<button style={{padding:"6px 14px",borderRadius:8,fontSize:12,fontWeight:500,cursor:"pointer",border:`1px solid ${job.borderColor}`,background:"#fff",color:job.textColor}} onClick={()=>setJobModal({isNew:false,...job,subItems:jobSubs})}>Edit Job</button>}
@@ -1926,7 +1936,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                   const siEntries=jobEntries.filter(e=>e.subItemId===si.id);
                   const siDates=siEntries.map(e=>e.dateStr).sort();
                   const deductedHours=siEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0);
-                  const remaining=Math.round(((si.totalHours||0)-deductedHours)*10)/10;
+                  const remaining=Math.round(((si.totalHours||0)-deductedHours)*2)/2;
                   const assignedStaff=[...new Set(siEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ");
                   let dateDisplay;
                   if(!siDates.length)dateDisplay=<em style={{color:"#94A3B8"}}>Not yet scheduled</em>;
@@ -1936,8 +1946,8 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                     <tr key={si.id} style={{background:rowi%2===0?"#fff":"#FAFAFA",borderBottom:"1px solid #F1F5F9"}}>
                       <td style={{padding:"7px 12px",fontWeight:500,color:"#1E293B"}}>{si.name}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{si.totalHours?`${si.totalHours}h`:<em style={{color:"#94A3B8"}}>—</em>}</td>
-                      <td style={{padding:"7px 12px",color:"#475569"}}>{deductedHours>0?`${Math.round(deductedHours*10)/10}h`:"—"}</td>
-                      <td style={{padding:"7px 12px"}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${Math.round(remaining*10)/10}h left`:remaining===0?"✓ Done":`${Math.round(Math.abs(remaining)*10)/10}h over`}</span>:"—"}</td>
+                      <td style={{padding:"7px 12px",color:"#475569"}}>{deductedHours>0?`${Math.round(deductedHours*2)/2}h`:"—"}</td>
+                      <td style={{padding:"7px 12px"}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${remaining}h left`:remaining===0?"✓ Done":`${Math.abs(remaining)}h over`}</span>:"—"}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{dateDisplay}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{assignedStaff||<em style={{color:"#94A3B8"}}>—</em>}</td>
                       <td style={{padding:"7px 12px",display:"flex",gap:4}}>
@@ -1951,7 +1961,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                   <tr style={{background:"#FFF7ED",borderTop:"1px solid #FED7AA"}}>
                     <td style={{padding:"7px 12px",fontWeight:500,color:"#92400E"}}>General (no item)</td>
                     <td style={{padding:"7px 12px"}}>—</td>
-                    <td style={{padding:"7px 12px",color:"#92400E"}}>{Math.round(generalEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0)*10)/10}h</td>
+                    <td style={{padding:"7px 12px",color:"#92400E"}}>{Math.round(generalEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0)*2)/2}h</td>
                     <td>—</td>
                     <td style={{padding:"7px 12px",color:"#92400E"}}>{(()=>{const gd=generalEntries.map(e=>e.dateStr).sort();if(gd.length===1)return formatDate(parseISO(gd[0]));return `${formatDate(parseISO(gd[0]))} → ${formatDate(parseISO(gd[gd.length-1]))}`;})()}</td>
                     <td style={{padding:"7px 12px",color:"#92400E"}}>{[...new Set(generalEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ")}</td>
@@ -2140,7 +2150,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             <div>
               <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Deduct from Budget</div>
               <div style={{width:130}}>
-                <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+                <input type="number" min={0.5} max={999} step={0.5} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
               </div>
               {form.staffIds.length>1&&(()=>{
                 const staffWithPh=form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,name:sf?.name,ph:Number(sf?.productiveHours)||8};});
@@ -2295,7 +2305,7 @@ function JobModal({data,onSave,onDelete,onClose,saving}) {
             {form.subItems.map((si,i)=>(
               <div key={si.id} style={{display:"flex",gap:6,alignItems:"center"}}>
                 <input value={si.name} onChange={e=>setSubItem(i,"name",e.target.value)} placeholder="Item name" autoFocus={!!si.autoFocus} style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,outline:"none"}}/>
-                <input type="number" value={si.totalHours||""} onChange={e=>setSubItem(i,"totalHours",Number(e.target.value))} placeholder="Hrs" min={0} step={1} style={{width:60,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,outline:"none"}}/>
+                <input type="number" value={si.totalHours||""} onChange={e=>setSubItem(i,"totalHours",Number(e.target.value))} placeholder="Hrs" min={0} step={0.5} style={{width:60,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,outline:"none"}}/>
                 <button onClick={()=>removeSubItem(i)} style={{background:"none",border:"1px solid #FCA5A5",color:"#EF4444",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:13}}>×</button>
               </div>
             ))}
