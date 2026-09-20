@@ -243,6 +243,19 @@ function effectiveEntryHours(e, allEntries, staffList) {
   const otherHours = Math.min(Number(other.hours) || 0, cap);
   return Math.min(myHours, Math.max(0, cap - otherHours));
 }
+// The most this entry's slot could ever contribute that day, regardless of
+// what its own "hours" field actually says - same capacity rule as
+// effectiveEntryHours, just without clamping to the entry's own raw value.
+// Used to tell whether a day genuinely has enough room left to finish a
+// joinery item, or whether even a full day there wouldn't be enough.
+function maxPossibleHours(e, allEntries, staffList) {
+  const stf = staffList.find(s => s.id === e.staffId);
+  const cap = Number(stf?.productiveHours) || 8;
+  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
+  if (!other || wasScheduledFirst(e, other)) return cap;
+  const otherHours = Math.min(Number(other.hours) || 0, cap);
+  return Math.max(0, cap - otherHours);
+}
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
 
 // Shared between undo and redo: the row shape the API expects for an insert,
@@ -457,11 +470,12 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isMobile,isPastDate,isOvercommitted}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isMobile,isPastDate,isOvercommitted}) {
   const hoursLabel=isOverRun?"over-run"
+    :isUnderCap?`${underAmount}h under`
     :isCompletingEntry?`${budgetRemaining}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
-  const flagColor=isOverRun?"#D97706":undefined;
+  const flagColor=isOverRun||isUnderCap?"#D97706":undefined;
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
@@ -474,7 +488,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         <>
           <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
-            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:isOverRun?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
           {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
         </>
@@ -482,7 +496,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         <>
           <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
-            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:isOverRun?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
           {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
         </>
@@ -1505,16 +1519,78 @@ function MainApp({currentUser,onLogout}) {
   // already sitting in the database so every entry's stored hours matches
   // what it should have been all along, instead of only being caught by the
   // background calculation at display time.
+  //
+  // Two different corrections apply, matching exactly what the grid itself
+  // calculates and displays:
+  // - A normal entry's stored hours should never exceed what that person
+  //   could actually work that slot that day (the daily-cap rule).
+  // - The entry that finishes a joinery item's budget should have its hours
+  //   set to exactly what was left to finish it, not a full/capped day - the
+  //   same number the grid shows for it. If even a full day there wouldn't
+  //   be enough to finish it, it's treated as a normal (capacity-capped) day
+  //   instead, since it isn't really "the last entry" in that case.
+  // One full pass over a snapshot: work out every item's finishing entry and
+  // what its hours should be, then cap every other entry at what the person
+  // actually had left that day, checked against those finishing entries' NEW
+  // hours (not their old, possibly-inflated ones).
+  function oneCorrectionPass(working){
+    const bySubItem={};
+    working.forEach(e=>{
+      if(e.miscNote||!e.subItemId)return;
+      (bySubItem[e.subItemId]=bySubItem[e.subItemId]||[]).push(e);
+    });
+    const specialHours={}; // entryId -> newHours
+    Object.values(bySubItem).forEach(siEntries=>{
+      const si=subItems.find(s=>s.id===siEntries[0].subItemId);
+      if(!si)return;
+      const sorted=[...siEntries].sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+      let completeIdx=-1,cumulative=0;
+      const befores=[];
+      sorted.forEach((e,i)=>{
+        befores.push(cumulative);
+        cumulative+=effectiveEntryHours(e,working,staff);
+        if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
+      });
+      const specialIdx=completeIdx!==-1?completeIdx:sorted.length-1;
+      const special=sorted[specialIdx];
+      const remainingBefore=si.totalHours-befores[specialIdx];
+      const maxPossible=completeIdx===-1?maxPossibleHours(special,working,staff):Infinity;
+      specialHours[special.id]=(completeIdx===-1&&remainingBefore>maxPossible+0.05)
+        ?Math.round(maxPossible*2)/2
+        :Math.max(0,Math.round(remainingBefore*2)/2);
+    });
+    const afterSpecial=working.map(e=>specialHours[e.id]!==undefined?{...e,hours:specialHours[e.id]}:e);
+    return afterSpecial.map(e=>specialHours[e.id]!==undefined?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff)*2)/2});
+  }
+  // Correcting one item's finishing entry can change how much capacity a
+  // DIFFERENT item's entry has left that same day (when two items share a
+  // staff member's day), which can in turn change what that other item's own
+  // finishing entry should be. Repeat the pass until nothing moves anymore,
+  // rather than requiring the same button to be clicked several times to
+  // fully settle.
+  function computeHoursCorrections(){
+    let working=entries.map(e=>({...e,hours:Number(e.hours)}));
+    for(let i=0;i<8;i++){
+      const next=oneCorrectionPass(working);
+      const changed=next.some((e,idx)=>Math.abs(e.hours-working[idx].hours)>0.05);
+      working=next;
+      if(!changed)break;
+    }
+    const corrections=[];
+    entries.forEach((orig,idx)=>{
+      const fixed=working[idx];
+      if(Math.abs(Number(orig.hours)-fixed.hours)>0.05)corrections.push({id:orig.id,oldHours:Number(orig.hours),newHours:fixed.hours});
+    });
+    return corrections;
+  }
   async function runHoursCorrection(){
     if(!isAdmin)return;
-    const corrections=entries
-      .map(e=>({id:e.id,oldHours:Number(e.hours),newHours:Math.round(effectiveEntryHours(e,entries,staff)*2)/2}))
-      .filter(c=>Math.abs(c.oldHours-c.newHours)>0.05);
+    const corrections=computeHoursCorrections();
     if(corrections.length===0){
       window.alert("No entries needed correcting - every stored hours value already matches what it should be.");
       return;
     }
-    if(!window.confirm(`This will correct ${corrections.length} entr${corrections.length===1?"y":"ies"} whose stored hours exceed what that person could actually work that day, updating them to the correct value. This can't be undone with the Undo button. Continue?`))return;
+    if(!window.confirm(`This will correct ${corrections.length} entr${corrections.length===1?"y":"ies"} whose stored hours don't match what they should be (daily cap, or the exact remaining amount for the entry that finishes an item). This can't be undone with the Undo button. Continue?`))return;
     setSaving(true);
     try{
       await Promise.all(corrections.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)));
@@ -1838,7 +1914,12 @@ function MainApp({currentUser,onLogout}) {
                                       // walking into it rather than an amount that happens to close the budget.
                                       // Either way it's totalHours minus everything scheduled BEFORE it; this
                                       // entry's own hours never enter into what's displayed. Anything scheduled
-                                      // after the completing entry is pure surplus ("over-run").
+                                      // after the completing entry is pure surplus ("over-run"). But if what's
+                                      // left before the final entry is more than a single day could ever cover
+                                      // (its own hours can never make up the gap), showing that full remaining
+                                      // figure would be a physically impossible claim - so that case shows the
+                                      // real shortfall instead: how much would still be left over even after a
+                                      // full day here.
                                       let completeIdx=-1,cumulative=0;
                                       const befores=[];
                                       if(si)for(let i=0;i<siEntries.length;i++){
@@ -1850,10 +1931,21 @@ function MainApp({currentUser,onLogout}) {
                                       }
                                       const totalBudget=si?.totalHours||null;
                                       const specialIdx=si?(completeIdx!==-1?completeIdx:siEntries.length-1):-1;
-                                      const isCompletingEntry=si&&myIndex===specialIdx;
+                                      const isSpecialEntry=si&&myIndex===specialIdx;
                                       const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
-                                      const budgetRemaining=isCompletingEntry?Math.max(0,Math.round((si.totalHours-befores[myIndex])*2)/2):null;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
+                                      let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
+                                      if(isSpecialEntry){
+                                        const remainingBefore=si.totalHours-befores[myIndex];
+                                        const maxPossible=completeIdx===-1?maxPossibleHours(siEntries[myIndex],entries,staff):Infinity;
+                                        if(completeIdx===-1&&remainingBefore>maxPossible+0.05){
+                                          isUnderCap=true;
+                                          underAmount=Math.round((remainingBefore-maxPossible)*2)/2;
+                                        }else{
+                                          isCompletingEntry=true;
+                                          budgetRemaining=Math.max(0,Math.round(remainingBefore*2)/2);
+                                        }
+                                      }
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isUnderCap={isUnderCap} underAmount={underAmount} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
