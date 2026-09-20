@@ -545,7 +545,8 @@ function MiscBlock({note,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd
       onContextMenu={canEdit&&onContextMenu?onContextMenu:undefined}
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
-      <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
+      <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{note}</div>
+      <div style={{fontSize:isMobile?11:10,fontWeight:400,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",lineHeight:1.3}}>{hours}h</div>
       {isOvercommitted&&<div style={{fontSize:isMobile?10:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
     </div>
   );
@@ -2081,11 +2082,11 @@ function MainApp({currentUser,onLogout}) {
                           const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id;
                           return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry};
                         }
-                        // Once a job's completing entry finishes the item's budget without using
-                        // this staff member's whole day, the day's other slot sits empty with
-                        // leftover capacity - flag it instead of showing a plain "+".
-                        const otherEntryMeta=computeJobEntryMeta(otherSlotEntry);
-                        const showAvailableHours=!entry&&!!otherEntryMeta&&otherEntryMeta.isCompletingEntry&&(Number(otherSlotEntry.hours)||0)<(Number(st.productiveHours)||8)-0.05;
+                        // Whenever this staff member doesn't have every hour of their day
+                        // used/allocated - whatever sits in the other slot, job or misc, for
+                        // whichever staff member it is - the empty slot flags that leftover
+                        // capacity instead of showing a plain "+".
+                        const showAvailableHours=!entry&&!!otherSlotEntry&&(Number(otherSlotEntry.hours)||0)<(Number(st.productiveHours)||8)-0.05;
                         // Renders whichever entry sits in this staff/day/slot - factored out so a
                         // conflict (two entries mapped to the same slot) can render BOTH of them
                         // side by side at half width instead of only ever showing one.
