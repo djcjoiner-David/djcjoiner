@@ -220,12 +220,55 @@ function addWorkingDays(d, n) {
 }
 function isSaturday(d) { return d.getDay()===6; }
 function isPast(dateStr) { return dateStr < todayStr; }
+// No single entry can ever count for more than the staff member's daily cap
+// (their Productive Hours) - it's a hard ceiling on how much of a day one
+// person can be allocated, not just a cross-slot conflict check. Whichever
+// entry (slot 1 or slot 2) was actually scheduled FIRST that day gets first
+// claim on the cap; whichever was scheduled SECOND only gets whatever
+// capacity the first one left over - regardless of which slot number either
+// one happens to sit in. It's this reduced figure - not the raw scheduled
+// hours - that counts toward the joinery item's budget.
+function wasScheduledFirst(a, b) {
+  const ca = a.createdAt ? new Date(a.createdAt).getTime() : null;
+  const cb = b.createdAt ? new Date(b.createdAt).getTime() : null;
+  if (ca !== null && cb !== null && ca !== cb) return ca < cb;
+  // No reliable creation-order signal (missing or identical timestamps,
+  // which happens for older data) - comparing database ids here would be an
+  // arbitrary tie-break with no relation to real scheduling order, and can
+  // disagree with other checks that rely on the same "who's first" answer
+  // (e.g. a slot getting capped to 0 without the Overcommitted flag
+  // agreeing). Falling back to slot 1 always taking priority is at least
+  // deterministic and consistent everywhere this is checked.
+  return a.slot < b.slot;
+}
+function effectiveEntryHours(e, allEntries, staffList) {
+  const myHours = Number(e.hours) || 0;
+  const stf = staffList.find(s => s.id === e.staffId);
+  const cap = Number(stf?.productiveHours) || 8;
+  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
+  if (!other || wasScheduledFirst(e, other)) return Math.min(myHours, cap);
+  const otherHours = Math.min(Number(other.hours) || 0, cap);
+  return Math.min(myHours, Math.max(0, cap - otherHours));
+}
+// The most this entry's slot could ever contribute that day, regardless of
+// what its own "hours" field actually says - same capacity rule as
+// effectiveEntryHours, just without clamping to the entry's own raw value.
+// Used to tell whether a day genuinely has enough room left to finish a
+// joinery item, or whether even a full day there wouldn't be enough.
+function maxPossibleHours(e, allEntries, staffList) {
+  const stf = staffList.find(s => s.id === e.staffId);
+  const cap = Number(stf?.productiveHours) || 8;
+  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
+  if (!other || wasScheduledFirst(e, other)) return cap;
+  const otherHours = Math.min(Number(other.hours) || 0, cap);
+  return Math.max(0, cap - otherHours);
+}
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
 
 // Shared between undo and redo: the row shape the API expects for an insert,
 // and the entry shape the app uses once that insert comes back with an id.
 function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}; }
-function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}; }
+function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at}; }
 
 function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   if (!totalHours||totalHours<=0) return [];
@@ -234,8 +277,7 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   while (remaining>0) {
     if (!isWeekend(cur)) {
       const deducted=Math.min(ph,remaining);
-      const hours=Math.round((8*(deducted/ph))*10)/10;
-      days.push({dateStr:isoDate(cur),hours,deducted});
+      days.push({dateStr:isoDate(cur),hours:deducted,deducted});
       remaining-=ph;
     }
     cur=addDays(cur,1);
@@ -295,7 +337,7 @@ function splitHoursByStaff(staffWithPh, totalHours) {
     const isLast=idx===staffWithPh.length-1;
     let hours;
     if(isLast){
-      hours=Math.round((totalHours-alloc)*10)/10;
+      hours=Math.round((totalHours-alloc)*2)/2;
     }else{
       const share=totalHours*(ph/totalPh);
       hours=Math.round(share*2)/2;
@@ -435,10 +477,13 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver,isMobile,isPastDate}) {
-  const hoursLabel=isLastEntry&&budgetRemaining!==null
-    ?(isOver?`${Math.abs(budgetRemaining)}h OVER`:`${budgetRemaining}h`)
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
+  const hoursLabel=isOverRun?"over-run"
+    :isUnderCap?`${underAmount}h under`
+    :isCompletingEntry?`${budgetRemaining}h`
+    :isPersonalLastEntry?`${hours}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
+  const flagColor=isOverRun||isUnderCap?"#D97706":undefined;
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
@@ -451,22 +496,24 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         <>
           <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
-            {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
+          {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
         </>
       ):(
         <>
           <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
-            {subItem?subItem.name:"General"} · <span style={{color:isOver?"#EF4444":undefined,fontWeight:isOver?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
+          {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
         </>
       )}
     </div>
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate}) {
+function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
@@ -476,6 +523,7 @@ function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canE
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
+      {isOvercommitted&&<div style={{fontSize:isMobile?10:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
     </div>
   );
 }
@@ -926,27 +974,27 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>prev.filter(en=>en.id!==tempId));
       }
     } else if(last.type==="moveEntry") {
-      const {id,prevStaffId,prevDateStr,prevSlot}=last.data;
+      const {id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt}=last.data;
       const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot}:e));
-      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot}}]);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt}:e));
+      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt}}]);
       try{
-        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`);
+        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt},`?id=eq.${id}`);
       }catch(err){
         setError("Undo failed - reverted.");
         if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setRedoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveMultiple") {
-      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:e;}));
       setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
       try{
-        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot})=>
-          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot},`?id=eq.${id}`)
+        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt})=>
+          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Undo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt}:e;}));
         setRedoStack(prev=>prev.slice(0,-1));
       }
     } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
@@ -972,7 +1020,7 @@ function MainApp({currentUser,onLogout}) {
     setRedoStack(prev=>prev.slice(0,-1));
     if(last.type==="addEntries") {
       const tempMap=last.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}`,row}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:row.hours,miscNote:row.misc_note||null}))]);
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString()}))]);
       const tempIds=tempMap.map(t=>t.tempId);
       try{
         const inserted=await db("POST","entries",last.data.rows);
@@ -1006,27 +1054,27 @@ function MainApp({currentUser,onLogout}) {
         if(entry){setEntries(prev=>[...prev,entry]);setUndoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveEntry") {
-      const {id,staffId,dateStr,slot}=last.data;
+      const {id,staffId,dateStr,slot,createdAt}=last.data;
       const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot}:e));
-      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot}}]);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt}:e));
+      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt}}]);
       try{
-        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`);
+        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt},`?id=eq.${id}`);
       }catch(err){
         setError("Redo failed - reverted.");
         if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setUndoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveMultiple") {
-      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot}:e;}));
+      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt}:e;}));
       setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
       try{
-        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot})=>
-          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot},`?id=eq.${id}`)
+        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot,createdAt})=>
+          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Redo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:e;}));
+        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:e;}));
         setUndoStack(prev=>prev.slice(0,-1));
       }
     } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
@@ -1051,7 +1099,8 @@ function MainApp({currentUser,onLogout}) {
 
   useEffect(()=>{
     function onKeyDown(e){
-      if(e.key==="Escape"){
+      const isFormField=["INPUT","TEXTAREA","SELECT"].includes(e.target.tagName);
+      if(e.key==="Escape"||(e.key==="Enter"&&!isFormField)){
         setSelectedEntries(new Set());
         setSelectionMode(false);
         setMoveMode(false);
@@ -1082,7 +1131,7 @@ function MainApp({currentUser,onLogout}) {
       }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
-      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null})));
+      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at})));
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -1149,7 +1198,7 @@ function MainApp({currentUser,onLogout}) {
             onConfirm:async()=>{
               setSaving(true);
               const inserted=await db("POST","entries",buildRows(valid));
-              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null}))]);
+              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at}))]);
               setConflictAlert(null);setEntryModal(null);setTab("schedule");setSaving(false);
             },
             onCancel:()=>setConflictAlert(null),
@@ -1157,20 +1206,27 @@ function MainApp({currentUser,onLogout}) {
           return;
         }
         const inserted=await db("POST","entries",buildRows(valid));
-        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null}));
+        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at}));
         pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
         setEntries(prev=>[...prev,...newMapped]);
       } else {
         const prevEntry=entries.find(e=>e.id===data.id);
+        // Moving an entry to a new day/slot makes it the newest arrival there
+        // for capacity-conflict purposes - otherwise an old entry dragged into
+        // a fresh conflict would still "win" on its original creation date,
+        // even though it's the one that just showed up.
+        const relocated=prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.slot!==data.slot);
+        const newCreatedAt=relocated?new Date().toISOString():undefined;
         await db("PATCH","entries",{
           staff_id:data.staffId,
           job_id:data.entryType==="misc"?null:data.jobId,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:data.dateStr,slot:data.slot,hours:data.hours,
-          misc_note:data.entryType==="misc"?data.miscNote:null
+          misc_note:data.entryType==="misc"?data.miscNote:null,
+          ...(newCreatedAt?{created_at:newCreatedAt}:{})
         },`?id=eq.${data.id}`);
         if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
-        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null}:e));
+        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
       }
       setEntryModal(null);setTab("schedule");
     }catch(e){setError("Failed to save entry.");}
@@ -1340,28 +1396,32 @@ function MainApp({currentUser,onLogout}) {
 
       const prevStates=idsToMove.map(id=>{
         const en=entries.find(x=>x.id===id);
-        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
+        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot,prevCreatedAt:en.createdAt};
       });
       pushUndo("moveMultiple",{prevStates});
+      // Moving these entries makes them the newest arrivals wherever they
+      // land, for capacity-conflict purposes - an old entry dragged into a
+      // fresh conflict shouldn't still "win" on its original creation date.
+      const movedAt=new Date().toISOString();
       const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id]}));
       // Land the whole group immediately - don't make the user wait for every
       // PATCH to round-trip before the drop appears to take effect.
       setEntries(prev=>prev.map(x=>{
         const u=updates.find(u=>u.id===x.id);
-        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot}:x;
+        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt}:x;
       }));
       setSelectedEntries(new Set());
       setSelectionMode(false);
       setMoveMode(false);
       try{
         await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
-          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot},`?id=eq.${id}`)
+          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Failed to move entries - reverted.");
         setEntries(prev=>prev.map(x=>{
           const ps=prevStates.find(p=>p.id===x.id);
-          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot}:x;
+          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:x;
         }));
         setUndoStack(s=>s.slice(0,-1));
       }
@@ -1421,17 +1481,17 @@ function MainApp({currentUser,onLogout}) {
       // real ones once the server confirms - removed again if the save fails.
       const tempEntries=toInsert.map(({en,newDate,newSlot,newStaffId},i)=>({
         id:`temp_copy_${Date.now()}_${i}`,staffId:newStaffId,jobId:en.jobId||null,subItemId:en.subItemId||null,
-        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null
+        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString()
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
-      setSelectedEntries(new Set());
-      setSelectionMode(false);
-      setCopyMode(false);
+      // Stay in copy mode with the same selection - paste keeps the source group
+      // copied so it can be pasted again at another spot without re-selecting,
+      // until Copy is toggled off or a new selection is made.
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
-        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:i.hours,miscNote:i.misc_note||null}));
+        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
       }catch(err){
@@ -1455,14 +1515,18 @@ function MainApp({currentUser,onLogout}) {
     }
     // Single entry drag
     if(entry.staffId===toStaffId&&entry.dateStr===toDateStr&&entry.slot===toSlot){dragEntry.current=null;return;}
-    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot};
-    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot});
+    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt};
+    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt});
+    // Dropping it here makes it the newest arrival at this day/slot for
+    // capacity-conflict purposes - an old entry dragged into a fresh
+    // conflict shouldn't still "win" on its original creation date.
+    const movedAt=new Date().toISOString();
     // Move it on screen immediately - don't wait for the server round-trip to
     // show the drop landing. Roll back if the save actually fails.
-    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot}:en));
+    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt}:en));
     dragEntry.current=null;
     try{
-      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot},`?id=eq.${entry.id}`);
+      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot,created_at:movedAt},`?id=eq.${entry.id}`);
     }catch(err){
       setError("Failed to move entry - change reverted.");
       setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,...prevState}:en));
@@ -1470,6 +1534,110 @@ function MainApp({currentUser,onLogout}) {
     }
   }
   function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
+
+  // One-time cleanup for entries whose stored Hours predate the daily-cap
+  // fix - back when Auto-fill could write a raw value (like "8" for someone
+  // capped at 6.5) bigger than the person could actually work that day. New
+  // entries can no longer be saved that way, but this corrects what's
+  // already sitting in the database so every entry's stored hours matches
+  // what it should have been all along, instead of only being caught by the
+  // background calculation at display time.
+  //
+  // Two different corrections apply, matching exactly what the grid itself
+  // calculates and displays:
+  // - A normal entry's stored hours should never exceed what that person
+  //   could actually work that slot that day (the daily-cap rule).
+  // - The entry that finishes a joinery item's budget should have its hours
+  //   set to exactly what was left to finish it, not a full/capped day - the
+  //   same number the grid shows for it. If even a full day there wouldn't
+  //   be enough to finish it, it's treated as a normal (capacity-capped) day
+  //   instead, since it isn't really "the last entry" in that case.
+  // One full pass over a snapshot: work out every item's finishing entry and
+  // what its hours should be, then cap every other entry at what the person
+  // actually had left that day, checked against those finishing entries' NEW
+  // hours (not their old, possibly-inflated ones).
+  function oneCorrectionPass(working){
+    const bySubItem={};
+    working.forEach(e=>{
+      if(e.miscNote||!e.subItemId)return;
+      (bySubItem[e.subItemId]=bySubItem[e.subItemId]||[]).push(e);
+    });
+    const specialHours={}; // entryId -> newHours
+    Object.values(bySubItem).forEach(siEntries=>{
+      const si=subItems.find(s=>s.id===siEntries[0].subItemId);
+      if(!si)return;
+      const sorted=[...siEntries].sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+      let completeIdx=-1,cumulative=0;
+      const befores=[];
+      sorted.forEach((e,i)=>{
+        befores.push(cumulative);
+        cumulative+=effectiveEntryHours(e,working,staff);
+        if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
+      });
+      const specialIdx=completeIdx!==-1?completeIdx:sorted.length-1;
+      const special=sorted[specialIdx];
+      const remainingBefore=si.totalHours-befores[specialIdx];
+      const maxPossible=completeIdx===-1?maxPossibleHours(special,working,staff):Infinity;
+      specialHours[special.id]=(completeIdx===-1&&remainingBefore>maxPossible+0.05)
+        ?Math.round(maxPossible*2)/2
+        :Math.max(0,Math.round(remainingBefore*2)/2);
+    });
+    const afterSpecial=working.map(e=>specialHours[e.id]!==undefined?{...e,hours:specialHours[e.id]}:e);
+    return afterSpecial.map(e=>specialHours[e.id]!==undefined?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff)*2)/2});
+  }
+  // Correcting one item's finishing entry can change how much capacity a
+  // DIFFERENT item's entry has left that same day (when two items share a
+  // staff member's day), which can in turn change what that other item's own
+  // finishing entry should be. Repeat the pass until nothing moves anymore,
+  // rather than requiring the same button to be clicked several times to
+  // fully settle.
+  function computeHoursCorrections(){
+    let working=entries.map(e=>({...e,hours:Number(e.hours)}));
+    for(let i=0;i<8;i++){
+      const next=oneCorrectionPass(working);
+      const changed=next.some((e,idx)=>Math.abs(e.hours-working[idx].hours)>0.05);
+      working=next;
+      if(!changed)break;
+    }
+    const corrections=[];
+    entries.forEach((orig,idx)=>{
+      const fixed=working[idx];
+      if(Math.abs(Number(orig.hours)-fixed.hours)>0.05)corrections.push({id:orig.id,oldHours:Number(orig.hours),newHours:fixed.hours});
+    });
+    return corrections;
+  }
+  // Stored hours must stay correct on their own, not just at the moment
+  // someone happens to run a cleanup - a drag, move, copy, delete or new
+  // entry can change what a DIFFERENT entry's correct hours should be (a
+  // capacity conflict appearing or disappearing, a joinery item's finishing
+  // entry shifting to a different day), and that entry's own stored value
+  // needs to follow automatically. This runs after every schedule change and
+  // silently applies whatever corrections are needed, the same way the grid
+  // display itself is always recalculated from current data - the stored
+  // Hours field is just another thing that has to stay in sync, not a
+  // one-off cleanup a person has to remember to trigger.
+  const correctingRef=useRef(false);
+  useEffect(()=>{
+    if(!canEdit||correctingRef.current)return;
+    const corrections=computeHoursCorrections();
+    if(corrections.length===0)return;
+    correctingRef.current=true;
+    (async()=>{
+      try{
+        await Promise.all(corrections.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)));
+        setEntries(prev=>prev.map(e=>{
+          const c=corrections.find(x=>x.id===e.id);
+          return c?{...e,hours:c.newHours}:e;
+        }));
+      }catch(err){
+        // Silent - the grid's own display still recalculates correctly from
+        // whatever's stored, so a failed background correction here isn't
+        // shown as a user-facing error. It'll be retried on the next change.
+      }
+      correctingRef.current=false;
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[entries,staff,subItems,canEdit]);
 
   function toggleSelectEntry(id){
     setSelectedEntries(prev=>{
@@ -1649,11 +1817,11 @@ function MainApp({currentUser,onLogout}) {
                         Delete {selectedEntries.size}
                       </button>
                       <button onClick={()=>{setMoveMode(m=>!m);setCopyMode(false);}}
-                        style={{padding:"5px 12px",border:"1px solid #93C5FD",borderRadius:7,background:moveMode?"#3B82F6":"#EFF6FF",cursor:"pointer",fontSize:12,color:moveMode?"#fff":"#1D4ED8",fontWeight:600}}>
+                        style={{padding:"5px 12px",border:"1px solid #BBF7D0",borderRadius:7,background:moveMode?"#15803D":"#F0FDF4",cursor:"pointer",fontSize:12,color:moveMode?"#fff":"#15803D",fontWeight:600}}>
                         {moveMode?"Tap destination…":`Move ${selectedEntries.size}`}
                       </button>
                       <button onClick={()=>{setCopyMode(c=>!c);setMoveMode(false);}}
-                        style={{padding:"5px 12px",border:"1px solid #BBF7D0",borderRadius:7,background:copyMode?"#15803D":"#F0FDF4",cursor:"pointer",fontSize:12,color:copyMode?"#fff":"#15803D",fontWeight:600}}>
+                        style={{padding:"5px 12px",border:"1px solid #93C5FD",borderRadius:7,background:copyMode?"#3B82F6":"#EFF6FF",cursor:"pointer",fontSize:12,color:copyMode?"#fff":"#1D4ED8",fontWeight:600}}>
                         {copyMode?"Tap destination…":`Copy ${selectedEntries.size}`}
                       </button>
                     </>
@@ -1749,6 +1917,15 @@ function MainApp({currentUser,onLogout}) {
                         const subItem=entry&&entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
                         const isConflict=conflictKeys.has(k);
+                        const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
+                        // Whichever entry was scheduled SECOND that day is only "Overcommitted"
+                        // when the one scheduled FIRST already used up the person's entire daily
+                        // cap, leaving nothing to draw on. If the first one has any capacity left
+                        // over, the second entry silently absorbs it (via effectiveEntryHours
+                        // below) instead of showing a warning. This isn't tied to slot number -
+                        // whichever slot was actually filled in later is the one that can be
+                        // "Overcommitted".
+                        const isOvercommitted=!!entry&&!!otherSlotEntry&&!wasScheduledFirst(entry,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
                         return(
                           <td key={di}
                             style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
@@ -1757,17 +1934,60 @@ function MainApp({currentUser,onLogout}) {
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>
                                 : job
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
                                       const siEntries=si?entries.filter(e=>e.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
-                                      const isLastEntry=si&&siEntries.length>0&&siEntries[siEntries.length-1].id===entry.id;
-                                      const deductedBefore=si?siEntries.slice(0,-1).reduce((a,e)=>{const stf=staff.find(s=>s.id===e.staffId);return a+((e.hours/8)*(stf?.productiveHours||8));},0):0;
-                                      const budgetRemaining=si&&isLastEntry?Math.max(0,Math.round((si.totalHours-deductedBefore)*10)/10):null;
+                                      const myIndex=si?siEntries.findIndex(e=>e.id===entry.id):-1;
+                                      // Walk the sub-item's entries in date order and find the one that first
+                                      // reaches (or passes) the total budget - that's the "completing" entry.
+                                      // If nothing ever reaches it, the true last entry stands in for that role
+                                      // instead - same formula, same display, just using whatever's left as of
+                                      // walking into it rather than an amount that happens to close the budget.
+                                      // Either way it's totalHours minus everything scheduled BEFORE it; this
+                                      // entry's own hours never enter into what's displayed. Anything scheduled
+                                      // after the completing entry is pure surplus ("over-run"). But if what's
+                                      // left before the final entry is more than a single day could ever cover
+                                      // (its own hours can never make up the gap), showing that full remaining
+                                      // figure would be a physically impossible claim - so that case shows the
+                                      // real shortfall instead: how much would still be left over even after a
+                                      // full day here.
+                                      let completeIdx=-1,cumulative=0;
+                                      const befores=[];
+                                      if(si)for(let i=0;i<siEntries.length;i++){
+                                        befores.push(cumulative);
+                                        const e=siEntries[i];
+                                        const effHours=effectiveEntryHours(e,entries,staff);
+                                        cumulative+=effHours;
+                                        if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
+                                      }
                                       const totalBudget=si?.totalHours||null;
-                                      const isOver=si&&isLastEntry&&budgetRemaining!==null&&budgetRemaining<0;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver} isMobile={isMobile} isPastDate={isPast(ds)}/>;
+                                      const specialIdx=si?(completeIdx!==-1?completeIdx:siEntries.length-1):-1;
+                                      const isSpecialEntry=si&&myIndex===specialIdx;
+                                      const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
+                                      let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
+                                      if(isSpecialEntry){
+                                        const remainingBefore=si.totalHours-befores[myIndex];
+                                        const maxPossible=completeIdx===-1?maxPossibleHours(siEntries[myIndex],entries,staff):Infinity;
+                                        if(completeIdx===-1&&remainingBefore>maxPossible+0.05){
+                                          isUnderCap=true;
+                                          underAmount=Math.round((remainingBefore-maxPossible)*2)/2;
+                                        }else{
+                                          isCompletingEntry=true;
+                                          budgetRemaining=Math.max(0,Math.round(remainingBefore*2)/2);
+                                        }
+                                      }
+                                      // When more than one person is scheduled against the same item, each of
+                                      // them has their OWN last entry for it - not just whichever one entry the
+                                      // walk above picks as the single item-wide completing/under one. Every
+                                      // other staff member's own final entry should show their real, actual
+                                      // stored hours instead of the flat total-budget placeholder, the same way
+                                      // the one "special" entry does.
+                                      const myStaffEntries=si?siEntries.filter(e=>e.staffId===entry.staffId):[];
+                                      const myLastEntry=myStaffEntries[myStaffEntries.length-1];
+                                      const isPersonalLastEntry=si&&!isSpecialEntry&&!isOverRun&&myLastEntry?.id===entry.id;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isUnderCap={isUnderCap} underAmount={underAmount} isPersonalLastEntry={isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
@@ -1853,12 +2073,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
           return a.name.localeCompare(b.name);
         });
         const dates=jobEntries.map(e=>e.dateStr).sort();
-        const totalDeducted=jobEntries.reduce((a,e)=>{
-          const st=staff.find(s=>s.id===e.staffId);
-          const ph=st?.productiveHours||8;
-          const days=e.hours/8;
-          return a+(days*ph);
-        },0);
+        const totalDeducted=jobEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0);
         const commDate=dates[0]?parseISO(dates[0]):null;
         const lastDate=dates[dates.length-1]?parseISO(dates[dates.length-1]):null;
         const generalEntries=jobEntries.filter(e=>!e.subItemId);
@@ -1869,7 +2084,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                 <div style={{fontSize:16,fontWeight:700,color:job.textColor}}>{job.jobNo} — {job.name}</div>
                 <div style={{fontSize:12,color:job.textColor,opacity:0.8,marginTop:2}}>
                   {commDate?<>From {formatDateLong(commDate)} · Last {formatDateLong(lastDate)} · </>:"Not yet scheduled · "}
-                  <strong>{Math.round(totalDeducted*10)/10}h</strong> deducted {archived&&<em>(archived)</em>}
+                  <strong>{Math.round(totalDeducted*2)/2}h</strong> deducted {archived&&<em>(archived)</em>}
                 </div>
               </div>
               {canEdit&&setJobModal&&<button style={{padding:"6px 14px",borderRadius:8,fontSize:12,fontWeight:500,cursor:"pointer",border:`1px solid ${job.borderColor}`,background:"#fff",color:job.textColor}} onClick={()=>setJobModal({isNew:false,...job,subItems:jobSubs})}>Edit Job</button>}
@@ -1886,13 +2101,8 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                 {jobSubs.map((si,rowi)=>{
                   const siEntries=jobEntries.filter(e=>e.subItemId===si.id);
                   const siDates=siEntries.map(e=>e.dateStr).sort();
-                  const deductedHours=siEntries.reduce((a,e)=>{
-                    const st=staff.find(s=>s.id===e.staffId);
-                    const ph=st?.productiveHours||8;
-                    const days=e.hours/8;
-                    return a+(days*ph);
-                  },0);
-                  const remaining=Math.round(((si.totalHours||0)-deductedHours)*10)/10;
+                  const deductedHours=siEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0);
+                  const remaining=Math.round(((si.totalHours||0)-deductedHours)*2)/2;
                   const assignedStaff=[...new Set(siEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ");
                   let dateDisplay;
                   if(!siDates.length)dateDisplay=<em style={{color:"#94A3B8"}}>Not yet scheduled</em>;
@@ -1902,8 +2112,8 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                     <tr key={si.id} style={{background:rowi%2===0?"#fff":"#FAFAFA",borderBottom:"1px solid #F1F5F9"}}>
                       <td style={{padding:"7px 12px",fontWeight:500,color:"#1E293B"}}>{si.name}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{si.totalHours?`${si.totalHours}h`:<em style={{color:"#94A3B8"}}>—</em>}</td>
-                      <td style={{padding:"7px 12px",color:"#475569"}}>{deductedHours>0?`${Math.round(deductedHours*10)/10}h`:"—"}</td>
-                      <td style={{padding:"7px 12px"}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${Math.round(remaining*10)/10}h left`:remaining===0?"✓ Done":`${Math.round(Math.abs(remaining)*10)/10}h over`}</span>:"—"}</td>
+                      <td style={{padding:"7px 12px",color:"#475569"}}>{deductedHours>0?`${Math.round(deductedHours*2)/2}h`:"—"}</td>
+                      <td style={{padding:"7px 12px"}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${remaining}h left`:remaining===0?"✓ Done":`${Math.abs(remaining)}h over`}</span>:"—"}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{dateDisplay}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{assignedStaff||<em style={{color:"#94A3B8"}}>—</em>}</td>
                       <td style={{padding:"7px 12px",display:"flex",gap:4}}>
@@ -1917,7 +2127,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                   <tr style={{background:"#FFF7ED",borderTop:"1px solid #FED7AA"}}>
                     <td style={{padding:"7px 12px",fontWeight:500,color:"#92400E"}}>General (no item)</td>
                     <td style={{padding:"7px 12px"}}>—</td>
-                    <td style={{padding:"7px 12px",color:"#92400E"}}>{Math.round(generalEntries.reduce((a,e)=>{const st=staff.find(s=>s.id===e.staffId);return a+((e.hours/8)*(st?.productiveHours||8));},0)*10)/10}h</td>
+                    <td style={{padding:"7px 12px",color:"#92400E"}}>{Math.round(generalEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0)*2)/2}h</td>
                     <td>—</td>
                     <td style={{padding:"7px 12px",color:"#92400E"}}>{(()=>{const gd=generalEntries.map(e=>e.dateStr).sort();if(gd.length===1)return formatDate(parseISO(gd[0]));return `${formatDate(parseISO(gd[0]))} → ${formatDate(parseISO(gd[gd.length-1]))}`;})()}</td>
                     <td style={{padding:"7px 12px",color:"#92400E"}}>{[...new Set(generalEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ")}</td>
@@ -1952,6 +2162,31 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
   function handleJobChange(jobId){const subs=subItems.filter(s=>s.jobId===jobId);const first=subs[0];setForm(f=>({...f,jobId,subItemId:first?.id||"",totalHours:first?.totalHours||0}));}
   function handleSubChange(subItemId){const sub=jobSubs.find(s=>s.id===subItemId);setForm(f=>({...f,subItemId,totalHours:sub?.totalHours||f.totalHours}));}
+
+  // An entry can never actually use more of a day than the staff member has
+  // left - so the Hours field itself must be capped at that, not just the
+  // background calculation. If there's already an entry in the other slot
+  // that day, whichever of the two was scheduled first gets the full cap;
+  // a brand-new entry (this one) is always the one scheduled second against
+  // whatever's already there.
+  const sameDayStaffId=form.staffIds[0]||form.staffId;
+  const otherSlotEntry=entries.find(e=>e.staffId===sameDayStaffId&&e.dateStr===form.dateStr&&e.slot===(form.slot===0?1:0)&&e.id!==form.id);
+  const maxHours=(()=>{
+    if(!otherSlotEntry)return productiveHours;
+    if(form.mode==="edit"){
+      const mine=entries.find(e=>e.id===form.id);
+      if(mine&&wasScheduledFirst(mine,otherSlotEntry))return productiveHours;
+    }
+    const otherEff=Math.min(Number(otherSlotEntry.hours)||0,productiveHours);
+    return Math.max(0,Math.round((productiveHours-otherEff)*2)/2);
+  })();
+  // Keep the field itself honest if the cap changes underneath it (staff,
+  // date or slot picked after Hours was already typed in) rather than
+  // silently letting a now-too-high value sit there unnoticed.
+  useEffect(()=>{
+    if(form.entryType!=="misc"&&autoFill)return;
+    if(form.hours>maxHours)set("hours",maxHours);
+  },[maxHours]);
 
   const preview=useMemo(()=>{
     if(!autoFill||!form.dateStr||!totalHours||form.entryType==="misc")return[];
@@ -2060,7 +2295,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
               {form.mode==="new"&&(
                 <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155",marginTop:8}}>
                   <input type="checkbox" checked={autoFill} onChange={e=>setAutoFill(e.target.checked)} style={{width:15,height:15}}/>
-                  Auto-fill consecutive days at 8h/day
+                  Auto-fill consecutive days at each person's daily cap
                 </label>
               )}
             </>
@@ -2100,13 +2335,14 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
           {form.entryType==="misc"?(
             <div style={{width:130}}>
-              <Inp label="Hours" type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e=>set("hours",Number(e.target.value))}/>
+              <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
+              {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
             </div>
           ):autoFill&&form.mode==="new"?(
             <div>
               <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Deduct from Budget</div>
               <div style={{width:130}}>
-                <input type="number" min={1} max={999} step={1} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+                <input type="number" min={0.5} max={999} step={0.5} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
               </div>
               {form.staffIds.length>1&&(()=>{
                 const staffWithPh=form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,name:sf?.name,ph:Number(sf?.productiveHours)||8};});
@@ -2118,19 +2354,20 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                   ))}
                 </div>;
               })()}
-              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
+              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s daily cap is {productiveHours}h</div>}
               {form.staffIds.length<=1&&preview.length>0&&(
                 <div style={{marginTop:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px"}}>
-                  <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted · {productiveHours}h/day rate</div>
+                  <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted · {productiveHours}h/day cap</div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-                    {preview.map((p,i)=><span key={i} style={{fontSize:11,background:"#DCFCE7",color:"#166534",borderRadius:4,padding:"2px 6px"}}>{formatDate(parseISO(p.dateStr))} · 8h slot · {p.deducted}h eff</span>)}
+                    {preview.map((p,i)=><span key={i} style={{fontSize:11,background:"#DCFCE7",color:"#166534",borderRadius:4,padding:"2px 6px"}}>{formatDate(parseISO(p.dateStr))} · {p.hours}h</span>)}
                   </div>
                 </div>
               )}
             </div>
           ):(
             <div style={{width:130}}>
-              <Inp label="Hours" type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e=>set("hours",Number(e.target.value))}/>
+              <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
+              {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
             </div>
           )}
         </div>
@@ -2261,7 +2498,7 @@ function JobModal({data,onSave,onDelete,onClose,saving}) {
             {form.subItems.map((si,i)=>(
               <div key={si.id} style={{display:"flex",gap:6,alignItems:"center"}}>
                 <input value={si.name} onChange={e=>setSubItem(i,"name",e.target.value)} placeholder="Item name" autoFocus={!!si.autoFocus} style={{flex:2,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,outline:"none"}}/>
-                <input type="number" value={si.totalHours||""} onChange={e=>setSubItem(i,"totalHours",Number(e.target.value))} placeholder="Hrs" min={0} step={1} style={{width:60,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,outline:"none"}}/>
+                <input type="number" value={si.totalHours||""} onChange={e=>setSubItem(i,"totalHours",Number(e.target.value))} placeholder="Hrs" min={0} step={0.5} style={{width:60,padding:"6px 8px",border:"1px solid #CBD5E1",borderRadius:7,fontSize:16,outline:"none"}}/>
                 <button onClick={()=>removeSubItem(i)} style={{background:"none",border:"1px solid #FCA5A5",color:"#EF4444",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:13}}>×</button>
               </div>
             ))}
@@ -2316,14 +2553,14 @@ function StaffModal({data,onSave,onRemove,onClose,onMove,isFirst,isLast,saving})
         </div>
       )}
       <div style={{marginBottom:12}}>
-        <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Productive hours per 8h day</div>
+        <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Daily hour cap</div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <input type="range" min={1} max={8} step={0.5} value={form.productiveHours}
             onChange={e=>setForm(f=>({...f,productiveHours:Number(e.target.value)}))}
             style={{flex:1,accentColor:"#3B82F6"}}/>
           <div style={{minWidth:44,textAlign:"center",fontWeight:700,fontSize:16,color:"#1E293B"}}>{form.productiveHours}h</div>
         </div>
-        <div style={{fontSize:11,color:"#94A3B8",marginTop:4}}>Slot shows 8h · deducts {form.productiveHours}h from job budget</div>
+        <div style={{fontSize:11,color:"#94A3B8",marginTop:4}}>Maximum hours this person can be allocated per day, across both slots</div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
         <div>{!form.isNew&&<Btn variant="danger" disabled={saving} onClick={()=>onRemove(form.id)}>Remove Staff</Btn>}</div>
