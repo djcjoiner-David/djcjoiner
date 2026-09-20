@@ -226,12 +226,13 @@ function isPast(dateStr) { return dateStr < todayStr; }
 // to what's left over, and it's that reduced figure - not its raw scheduled
 // hours - that should count toward its own joinery item's budget.
 function effectiveEntryHours(e, allEntries, staffList) {
-  if (e.slot !== 1) return e.hours;
+  const myHours = Number(e.hours) || 0;
+  if (e.slot !== 1) return myHours;
   const stf = staffList.find(s => s.id === e.staffId);
-  const cap = stf?.productiveHours || 8;
+  const cap = Number(stf?.productiveHours) || 8;
   const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot === 0);
-  const h0 = other?.hours || 0;
-  if (h0 + e.hours <= cap + 0.05) return e.hours;
+  const h0 = Number(other?.hours) || 0;
+  if (h0 + myHours <= cap + 0.05) return myHours;
   return Math.max(0, cap - h0);
 }
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
@@ -239,7 +240,7 @@ function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); re
 // Shared between undo and redo: the row shape the API expects for an insert,
 // and the entry shape the app uses once that insert comes back with an id.
 function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}; }
-function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:inserted.hours,miscNote:inserted.misc_note||null}; }
+function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null}; }
 
 function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   if (!totalHours||totalHours<=0) return [];
@@ -991,7 +992,7 @@ function MainApp({currentUser,onLogout}) {
     setRedoStack(prev=>prev.slice(0,-1));
     if(last.type==="addEntries") {
       const tempMap=last.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}`,row}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:row.hours,miscNote:row.misc_note||null}))]);
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null}))]);
       const tempIds=tempMap.map(t=>t.tempId);
       try{
         const inserted=await db("POST","entries",last.data.rows);
@@ -1101,7 +1102,7 @@ function MainApp({currentUser,onLogout}) {
       }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
-      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null})));
+      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null})));
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -1168,7 +1169,7 @@ function MainApp({currentUser,onLogout}) {
             onConfirm:async()=>{
               setSaving(true);
               const inserted=await db("POST","entries",buildRows(valid));
-              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null}))]);
+              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null}))]);
               setConflictAlert(null);setEntryModal(null);setTab("schedule");setSaving(false);
             },
             onCancel:()=>setConflictAlert(null),
@@ -1176,7 +1177,7 @@ function MainApp({currentUser,onLogout}) {
           return;
         }
         const inserted=await db("POST","entries",buildRows(valid));
-        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:e.hours,miscNote:e.misc_note||null}));
+        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null}));
         pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
         setEntries(prev=>[...prev,...newMapped]);
       } else {
@@ -1450,7 +1451,7 @@ function MainApp({currentUser,onLogout}) {
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
-        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:i.hours,miscNote:i.misc_note||null}));
+        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
       }catch(err){
@@ -1769,7 +1770,7 @@ function MainApp({currentUser,onLogout}) {
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
                         const isConflict=conflictKeys.has(k);
                         const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
-                        const isOvercommitted=slot===1&&!!entry&&((entry.hours||0)+(otherSlotEntry?.hours||0))>(st.productiveHours||8);
+                        const isOvercommitted=slot===1&&!!entry&&((Number(entry.hours)||0)+(Number(otherSlotEntry?.hours)||0))>(Number(st.productiveHours)||8);
                         return(
                           <td key={di}
                             style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
