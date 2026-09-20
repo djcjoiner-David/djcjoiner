@@ -558,10 +558,11 @@ function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,available}) {
   if (isPastDate||!canEdit) return <div style={{minHeight:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
   // A job that wrapped up without using this staff member's whole day
   // leaves the day's other slot free - flag that leftover capacity instead
-  // of showing a plain "+", with a pale, low-opacity amber fill.
+  // of showing a plain "+", with a solid pale grey fill so it stays calm
+  // but still reads as distinct from an ordinary empty slot.
   return (
     <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":available?"1.5px dashed #F59E0B":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.2,padding:available?"2px 4px":0,background:available?"rgba(245,158,11,0.12)":"transparent",transition:"all 0.12s"}}
+      style={{border:isDropTarget?"2px dashed #3B82F6":available?"1.5px dashed #CBD5E1":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.2,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
       onMouseEnter={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
       onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
       {isDropTarget?"↓":available?"Available Hours":"+"}
