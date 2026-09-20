@@ -1997,6 +1997,31 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   function handleJobChange(jobId){const subs=subItems.filter(s=>s.jobId===jobId);const first=subs[0];setForm(f=>({...f,jobId,subItemId:first?.id||"",totalHours:first?.totalHours||0}));}
   function handleSubChange(subItemId){const sub=jobSubs.find(s=>s.id===subItemId);setForm(f=>({...f,subItemId,totalHours:sub?.totalHours||f.totalHours}));}
 
+  // An entry can never actually use more of a day than the staff member has
+  // left - so the Hours field itself must be capped at that, not just the
+  // background calculation. If there's already an entry in the other slot
+  // that day, whichever of the two was scheduled first gets the full cap;
+  // a brand-new entry (this one) is always the one scheduled second against
+  // whatever's already there.
+  const sameDayStaffId=form.staffIds[0]||form.staffId;
+  const otherSlotEntry=entries.find(e=>e.staffId===sameDayStaffId&&e.dateStr===form.dateStr&&e.slot===(form.slot===0?1:0)&&e.id!==form.id);
+  const maxHours=(()=>{
+    if(!otherSlotEntry)return productiveHours;
+    if(form.mode==="edit"){
+      const mine=entries.find(e=>e.id===form.id);
+      if(mine&&wasScheduledFirst(mine,otherSlotEntry))return productiveHours;
+    }
+    const otherEff=Math.min(Number(otherSlotEntry.hours)||0,productiveHours);
+    return Math.max(0,Math.round((productiveHours-otherEff)*2)/2);
+  })();
+  // Keep the field itself honest if the cap changes underneath it (staff,
+  // date or slot picked after Hours was already typed in) rather than
+  // silently letting a now-too-high value sit there unnoticed.
+  useEffect(()=>{
+    if(form.entryType!=="misc"&&autoFill)return;
+    if(form.hours>maxHours)set("hours",maxHours);
+  },[maxHours]);
+
   const preview=useMemo(()=>{
     if(!autoFill||!form.dateStr||!totalHours||form.entryType==="misc")return[];
     return buildAutoFill(form.dateStr,totalHours,productiveHours);
@@ -2144,7 +2169,8 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
           {form.entryType==="misc"?(
             <div style={{width:130}}>
-              <Inp label="Hours" type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e=>set("hours",Number(e.target.value))}/>
+              <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
+              {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
             </div>
           ):autoFill&&form.mode==="new"?(
             <div>
@@ -2174,7 +2200,8 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             </div>
           ):(
             <div style={{width:130}}>
-              <Inp label="Hours" type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e=>set("hours",Number(e.target.value))}/>
+              <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
+              {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
             </div>
           )}
         </div>
