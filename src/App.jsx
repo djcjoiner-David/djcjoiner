@@ -435,9 +435,10 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isShort,shortAmount,isMobile,isPastDate,isOvercommitted}) {
-  const hoursLabel=isLastEntry&&budgetRemaining!==null
-    ?(isOverRun?"over-run":isShort?`${shortAmount}h SHORT`:`${budgetRemaining}h`)
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isShort,shortAmount,isMobile,isPastDate,isOvercommitted}) {
+  const hoursLabel=isOverRun?"over-run"
+    :isShort?`${shortAmount}h SHORT`
+    :isCompletingEntry?`${budgetRemaining}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
   const flagColor=isOverRun?"#EF4444":isShort?"#D97706":undefined;
   return (
@@ -1768,17 +1769,30 @@ function MainApp({currentUser,onLogout}) {
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
                                       const siEntries=si?entries.filter(e=>e.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
-                                      const isLastEntry=si&&siEntries.length>0&&siEntries[siEntries.length-1].id===entry.id;
-                                      const deductedBefore=si?siEntries.slice(0,-1).reduce((a,e)=>{const stf=staff.find(s=>s.id===e.staffId);return a+((e.hours/8)*(stf?.productiveHours||8));},0):0;
-                                      const rawRemaining=si&&isLastEntry?si.totalHours-deductedBefore:null;
-                                      const budgetRemaining=rawRemaining!==null?Math.max(0,Math.round(rawRemaining*10)/10):null;
+                                      const myIndex=si?siEntries.findIndex(e=>e.id===entry.id):-1;
+                                      // Walk the sub-item's entries in date order and find the one that first
+                                      // reaches (or passes) the total budget - that's the "completing" entry,
+                                      // and it keeps showing the remaining-hours figure even if its own hours
+                                      // overshoot it. Anything scheduled after that point is pure surplus
+                                      // ("over-run"); if the budget is never reached, the true last entry
+                                      // shows how far short the schedule still is.
+                                      let completeIdx=-1,cumulative=0;
+                                      const befores=[];
+                                      if(si)for(let i=0;i<siEntries.length;i++){
+                                        befores.push(cumulative);
+                                        const e=siEntries[i];
+                                        const stf=staff.find(s=>s.id===e.staffId);
+                                        cumulative+=(e.hours/8)*(stf?.productiveHours||8);
+                                        if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
+                                      }
                                       const totalBudget=si?.totalHours||null;
-                                      const lastEntryContribution=isLastEntry?(entry.hours/8)*(st.productiveHours||8):0;
-                                      const finalRemaining=isLastEntry&&rawRemaining!==null?Math.round((rawRemaining-lastEntryContribution)*10)/10:null;
-                                      const isOverRun=isLastEntry&&finalRemaining!==null&&finalRemaining<-0.05;
-                                      const isShort=isLastEntry&&finalRemaining!==null&&finalRemaining>0.05;
-                                      const shortAmount=isShort?finalRemaining:null;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isShort={isShort} shortAmount={shortAmount} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
+                                      const isCompletingEntry=si&&myIndex===completeIdx;
+                                      const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
+                                      const isFinalShortEntry=si&&completeIdx===-1&&myIndex===siEntries.length-1;
+                                      const budgetRemaining=isCompletingEntry?Math.max(0,Math.round((si.totalHours-befores[myIndex])*10)/10):null;
+                                      const shortAmount=isFinalShortEntry?Math.round((si.totalHours-cumulative)*10)/10:null;
+                                      const isShort=isFinalShortEntry&&shortAmount>0.05;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isShort={isShort} shortAmount={shortAmount} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
