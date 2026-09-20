@@ -433,6 +433,25 @@ function Modal({title,onClose,children,wide,small}) {
   );
 }
 
+// A centered, app-styled stand-in for window.confirm/alert - those render
+// as a generic browser dialog wherever the browser decides to put it,
+// instead of looking like part of the app.
+function ConfirmModal({title="Confirm",message,confirmLabel="Confirm",cancelLabel="Cancel",danger,onConfirm,onCancel}) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+      onClick={e=>{if(e.target===e.currentTarget)onCancel();}}>
+      <div style={{background:"#fff",borderRadius:14,maxWidth:420,width:"100%",padding:24,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+        <div style={{fontSize:16,fontWeight:600,color:"#1E293B",marginBottom:12}}>{title}</div>
+        <div style={{fontSize:14,color:"#475569",marginBottom:20,lineHeight:1.6}}>{message}</div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn variant="ghost" onClick={onCancel}>{cancelLabel}</Btn>
+          <Btn variant={danger?"danger":"primary"} onClick={onConfirm}>{confirmLabel}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Inp({label,...props}) {
   return (
     <div style={{marginBottom:10}}>
@@ -465,6 +484,8 @@ function Btn({variant="default",style:s,loading,disabled,children,...props}) {
   );
 }
 
+const contextMenuItemStyle={display:"block",width:"100%",textAlign:"left",padding:"7px 10px",border:"none",background:"none",cursor:"pointer",fontSize:13,color:"#334155",borderRadius:5};
+
 function Spinner({text="Loading..."}) {
   return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh",flexDirection:"column",gap:16}}>
@@ -477,7 +498,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
   const hoursLabel=isOverRun?"over-run"
     :isUnderCap?`${underAmount}h under`
     :isCompletingEntry?`${budgetRemaining}h`
@@ -490,6 +511,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
+      onContextMenu={canEdit&&onContextMenu?onContextMenu:undefined}
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:canEdit?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       {isMobile?(
@@ -513,13 +535,14 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
+function MiscBlock({note,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
+      onContextMenu={canEdit&&onContextMenu?onContextMenu:undefined}
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
@@ -621,6 +644,7 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
   const [logoUploading,setLogoUploading]=useState(false);
   const [nameInput,setNameInput]=useState(companyName);
   const [taglineInput,setTaglineInput]=useState(companyTagline);
+  const [confirmDialog,setConfirmDialog]=useState(null);
 
   async function handleLogoFile(e){
     const file=e.target.files[0];
@@ -647,10 +671,12 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
     setSaving(false);
   }
 
-  async function removeUser(id) {
-    if (!window.confirm("Remove this user?")) return;
-    await db("DELETE","user_roles",null,`?id=eq.${id}`);
-    setUsers(prev=>prev.filter(u=>u.id!==id));
+  function removeUser(id) {
+    setConfirmDialog({message:"Remove this user?",danger:true,confirmLabel:"Remove",onConfirm:async()=>{
+      setConfirmDialog(null);
+      await db("DELETE","user_roles",null,`?id=eq.${id}`);
+      setUsers(prev=>prev.filter(u=>u.id!==id));
+    }});
   }
 
   async function changeRole(id,role) {
@@ -661,6 +687,7 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
   const roleColors={admin:{bg:"#FEF3C7",color:"#92400E"},manager:{bg:"#DBEAFE",color:"#1D4ED8"},staff:{bg:"#F0FDF4",color:"#15803D"}};
 
   return (
+    <>
     <Modal title="👥 User Management" wide onClose={onClose}>
       {loading?<Spinner text="Loading users..."/>:(
         <>
@@ -743,6 +770,8 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
         </>
       )}
     </Modal>
+    {confirmDialog&&<ConfirmModal {...confirmDialog} onCancel={()=>setConfirmDialog(null)}/>}
+    </>
   );
 }
 
@@ -866,6 +895,7 @@ function MainApp({currentUser,onLogout}) {
   const [entryModal,setEntryModal]=useState(null);
   const [staffModal,setStaffModal]=useState(null);
   const [conflictAlert,setConflictAlert]=useState(null);
+  const [confirmDialog,setConfirmDialog]=useState(null);
   const [userMgmtOpen,setUserMgmtOpen]=useState(false);
   const [workHoursOpen,setWorkHoursOpen]=useState(false);
   const [workStart,setWorkStart]=useState("07:00");
@@ -1096,6 +1126,7 @@ function MainApp({currentUser,onLogout}) {
   const [selectionMode,setSelectionMode]=useState(false);
   const [moveMode,setMoveMode]=useState(false); // tap-to-move, for touch devices where drag-and-drop can't fire
   const [dropTarget,setDropTarget]=useState(null);
+  const [contextMenu,setContextMenu]=useState(null); // {x,y,entry} - right-click quick actions
 
   useEffect(()=>{
     function onKeyDown(e){
@@ -1105,11 +1136,36 @@ function MainApp({currentUser,onLogout}) {
         setSelectionMode(false);
         setMoveMode(false);
         setCopyMode(false);
+        setContextMenu(null);
+        return;
+      }
+      if((e.key==="Delete"||e.key==="Backspace")&&!isFormField&&selectionMode&&selectedEntries.size>0){
+        e.preventDefault();
+        deleteSelectedEntries();
       }
     }
     window.addEventListener("keydown",onKeyDown);
     return ()=>window.removeEventListener("keydown",onKeyDown);
-  },[]);
+  },[selectionMode,selectedEntries]);
+
+  // Right-click quick-action menu on an entry - dismiss on any left click or
+  // scroll elsewhere, the same way a native context menu would behave.
+  useEffect(()=>{
+    if(!contextMenu)return;
+    function close(){setContextMenu(null);}
+    window.addEventListener("click",close);
+    window.addEventListener("scroll",close,true);
+    return ()=>{
+      window.removeEventListener("click",close);
+      window.removeEventListener("scroll",close,true);
+    };
+  },[contextMenu]);
+
+  function openContextMenu(e,entry){
+    if(!canEdit)return;
+    e.preventDefault();
+    setContextMenu({x:e.clientX,y:e.clientY,entry});
+  }
 
   const loadAll=useCallback(async()=>{
     try {
@@ -1159,10 +1215,10 @@ function MainApp({currentUser,onLogout}) {
   const totalWeeks=viewMode==="month"?4:viewWeeks;
   const weekStarts=Array.from({length:totalWeeks},(_,i)=>addDays(anchorDate,i*7));
 
-  const {entryMap,conflictKeys}=useMemo(()=>{
-    const map={},counts={};
-    for(const e of entries){const k=`${e.staffId}|${e.dateStr}|${e.slot}`;counts[k]=(counts[k]||0)+1;map[k]=e;}
-    return {entryMap:map,conflictKeys:new Set(Object.keys(counts).filter(k=>counts[k]>1))};
+  const {entryMap,conflictKeys,entriesByKey}=useMemo(()=>{
+    const map={},counts={},byKey={};
+    for(const e of entries){const k=`${e.staffId}|${e.dateStr}|${e.slot}`;counts[k]=(counts[k]||0)+1;map[k]=e;(byKey[k]=byKey[k]||[]).push(e);}
+    return {entryMap:map,conflictKeys:new Set(Object.keys(counts).filter(k=>counts[k]>1)),entriesByKey:byKey};
   },[entries]);
 
   function navigate(dir){const w=viewMode==="month"?4:viewWeeks;setAnchorDate(d=>addDays(d,dir*w*7));}
@@ -1283,31 +1339,33 @@ function MainApp({currentUser,onLogout}) {
     setSaving(false);
   }
 
-  async function deleteJob(id){
+  function deleteJob(id){
     const job=jobs.find(j=>j.id===id);
     const entryCount=entries.filter(e=>e.jobId===id).length;
     const msg=entryCount>0
       ?`Delete "${job?.jobNo} ${job?.name}"? This will permanently delete it and all ${entryCount} scheduled entries against it. This cannot be undone.`
       :`Delete "${job?.jobNo} ${job?.name}"? This cannot be undone.`;
-    if(!window.confirm(msg))return;
-    setSaving(true);
-    try{
-      const jobEntryIds=entries.filter(e=>e.jobId===id).map(e=>e.id);
-      const jobSubIds=subItems.filter(s=>s.jobId===id).map(s=>s.id);
-      // Delete children explicitly first - don't rely on the DB having
-      // ON DELETE CASCADE set up, since deleting the job row while entries/
-      // sub_items still reference it would otherwise fail with a foreign
-      // key violation and silently do nothing.
-      if(jobEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${jobEntryIds.join(",")})`);
-      if(jobSubIds.length>0)await db("DELETE","sub_items",null,`?id=in.(${jobSubIds.join(",")})`);
-      await db("DELETE","jobs",null,`?id=eq.${id}`);
-      setJobs(prev=>prev.filter(j=>j.id!==id));
-      setSubItems(prev=>prev.filter(s=>s.jobId!==id));
-      setEntries(prev=>prev.filter(e=>e.jobId!==id));
-      setJobModal(null);
-    }
-    catch(e){setError("Failed to delete job.");}
-    setSaving(false);
+    setConfirmDialog({message:msg,danger:true,confirmLabel:"Delete",onConfirm:async()=>{
+      setConfirmDialog(null);
+      setSaving(true);
+      try{
+        const jobEntryIds=entries.filter(e=>e.jobId===id).map(e=>e.id);
+        const jobSubIds=subItems.filter(s=>s.jobId===id).map(s=>s.id);
+        // Delete children explicitly first - don't rely on the DB having
+        // ON DELETE CASCADE set up, since deleting the job row while entries/
+        // sub_items still reference it would otherwise fail with a foreign
+        // key violation and silently do nothing.
+        if(jobEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${jobEntryIds.join(",")})`);
+        if(jobSubIds.length>0)await db("DELETE","sub_items",null,`?id=in.(${jobSubIds.join(",")})`);
+        await db("DELETE","jobs",null,`?id=eq.${id}`);
+        setJobs(prev=>prev.filter(j=>j.id!==id));
+        setSubItems(prev=>prev.filter(s=>s.jobId!==id));
+        setEntries(prev=>prev.filter(e=>e.jobId!==id));
+        setJobModal(null);
+      }
+      catch(e){setError("Failed to delete job.");}
+      setSaving(false);
+    }});
   }
 
   async function saveStaff(data){
@@ -1325,24 +1383,26 @@ function MainApp({currentUser,onLogout}) {
     setSaving(false);
   }
 
-  async function removeStaff(id){
+  function removeStaff(id){
     const s=staff.find(x=>x.id===id);
     const entryCount=entries.filter(e=>e.staffId===id).length;
     const msg=entryCount>0
       ?`Remove ${s?.name}? This will permanently delete them and all ${entryCount} of their scheduled entries. This cannot be undone.`
       :`Remove ${s?.name}? This cannot be undone.`;
-    if(!window.confirm(msg))return;
-    setSaving(true);
-    try{
-      const staffEntryIds=entries.filter(e=>e.staffId===id).map(e=>e.id);
-      if(staffEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${staffEntryIds.join(",")})`);
-      await db("DELETE","staff",null,`?id=eq.${id}`);
-      setStaff(prev=>prev.filter(s=>s.id!==id));
-      setEntries(prev=>prev.filter(e=>e.staffId!==id));
-      setStaffModal(null);
-    }
-    catch(e){setError("Failed to remove staff.");}
-    setSaving(false);
+    setConfirmDialog({message:msg,danger:true,confirmLabel:"Remove",onConfirm:async()=>{
+      setConfirmDialog(null);
+      setSaving(true);
+      try{
+        const staffEntryIds=entries.filter(e=>e.staffId===id).map(e=>e.id);
+        if(staffEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${staffEntryIds.join(",")})`);
+        await db("DELETE","staff",null,`?id=eq.${id}`);
+        setStaff(prev=>prev.filter(s=>s.id!==id));
+        setEntries(prev=>prev.filter(e=>e.staffId!==id));
+        setStaffModal(null);
+      }
+      catch(e){setError("Failed to remove staff.");}
+      setSaving(false);
+    }});
   }
 
   async function performGroupMove(anchorEntry,toStaffId,toDateStr,toSlot){
@@ -1501,20 +1561,47 @@ function MainApp({currentUser,onLogout}) {
     }catch(err){setError("Failed to copy entries.");}
   }
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
-  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
+  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect=(e.ctrlKey||e.altKey||e.metaKey)?"copy":"move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
   async function handleDrop(e,toStaffId,toDateStr,toSlot){
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
     if(isPast(toDateStr))return;
+    // Holding Ctrl/Option while dropping copies instead of moves - the
+    // standard desktop drag convention, and a one-step alternative to the
+    // Select > Copy > tap-destination flow for a single entry.
+    const isCopyDrag=e.ctrlKey||e.altKey||e.metaKey;
     // Multi-select: shift all entries by same date offset, preserve relative staff rows
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
-      await performGroupMove(entry,toStaffId,toDateStr,toSlot);
+      if(isCopyDrag) await performGroupCopy(entry,toStaffId,toDateStr,toSlot);
+      else await performGroupMove(entry,toStaffId,toDateStr,toSlot);
       dragEntry.current=null;
       return;
     }
     // Single entry drag
     if(entry.staffId===toStaffId&&entry.dateStr===toDateStr&&entry.slot===toSlot){dragEntry.current=null;return;}
+    if(isCopyDrag){
+      if(entryMap[`${toStaffId}|${toDateStr}|${toSlot}`]){
+        setError("Couldn't copy - that slot is already occupied.");
+        dragEntry.current=null;
+        return;
+      }
+      const tempId=`temp_copy_${Date.now()}`;
+      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString()};
+      setEntries(prev=>[...prev,tempEntry]);
+      dragEntry.current=null;
+      try{
+        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null}]);
+        const i=inserted[0];
+        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at};
+        setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
+        pushUndo("addEntries",{ids:[newEntry.id]});
+      }catch(err){
+        setError("Failed to copy entry.");
+        setEntries(prev=>prev.filter(en=>en.id!==tempId));
+      }
+      return;
+    }
     const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt};
     pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt});
     // Dropping it here makes it the newest arrival at this day/slot for
@@ -1647,14 +1734,14 @@ function MainApp({currentUser,onLogout}) {
     });
   }
 
-  async function deleteSelectedEntries(){
-    if(selectedEntries.size===0)return;
-    const ids=[...selectedEntries];
+  async function deleteEntriesByIds(ids){
+    if(ids.length===0)return;
     const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);
     // Clear them immediately - don't make the user wait on the delete to
     // round-trip before the selection disappears.
     pushUndo("deleteMultiple",{deletedEntries});
-    setEntries(prev=>prev.filter(e=>!selectedEntries.has(e.id)));
+    const idSet=new Set(ids);
+    setEntries(prev=>prev.filter(e=>!idSet.has(e.id)));
     setSelectedEntries(new Set());
     setSelectionMode(false);
     setMoveMode(false);
@@ -1666,6 +1753,9 @@ function MainApp({currentUser,onLogout}) {
       setEntries(prev=>[...prev,...deletedEntries]);
       setUndoStack(s=>s.slice(0,-1));
     }
+  }
+  function deleteSelectedEntries(){
+    return deleteEntriesByIds([...selectedEntries]);
   }
 
   function nextPreset(){return JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length];}
@@ -1913,8 +2003,6 @@ function MainApp({currentUser,onLogout}) {
                         const isSat=d.getDay()===6;
                         const k=`${st.id}|${ds}|${slot}`;
                         const entry=entryMap[k];
-                        const job=entry&&!entry.miscNote?jobs.find(j=>j.id===entry.jobId):null;
-                        const subItem=entry&&entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
                         const isConflict=conflictKeys.has(k);
                         const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
@@ -1925,7 +2013,76 @@ function MainApp({currentUser,onLogout}) {
                         // below) instead of showing a warning. This isn't tied to slot number -
                         // whichever slot was actually filled in later is the one that can be
                         // "Overcommitted".
-                        const isOvercommitted=!!entry&&!!otherSlotEntry&&!wasScheduledFirst(entry,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
+                        function computeIsOvercommitted(e){
+                          return !!e&&!!otherSlotEntry&&!wasScheduledFirst(e,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
+                        }
+                        // Renders whichever entry sits in this staff/day/slot - factored out so a
+                        // conflict (two entries mapped to the same slot) can render BOTH of them
+                        // side by side at half width instead of only ever showing one.
+                        function renderEntryBlock(e,forceConflict){
+                          const eJob=e&&!e.miscNote?jobs.find(j=>j.id===e.jobId):null;
+                          const eSubItem=e&&e.subItemId?subItems.find(s=>s.id===e.subItemId):null;
+                          const eIsOvercommitted=computeIsOvercommitted(e);
+                          const blockOnClick=copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(e.id):()=>openEditEntry(e);
+                          const blockOnContextMenu=canEdit?ev=>openContextMenu(ev,e):undefined;
+                          if(e.miscNote){
+                            return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                          }
+                          if(!eJob){
+                            return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>;
+                          }
+                          const si=e.subItemId?subItems.find(s=>s.id===e.subItemId):null;
+                          const siEntries=si?entries.filter(x=>x.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
+                          const myIndex=si?siEntries.findIndex(x=>x.id===e.id):-1;
+                          // Walk the sub-item's entries in date order and find the one that first
+                          // reaches (or passes) the total budget - that's the "completing" entry.
+                          // If nothing ever reaches it, the true last entry stands in for that role
+                          // instead - same formula, same display, just using whatever's left as of
+                          // walking into it rather than an amount that happens to close the budget.
+                          // Either way it's totalHours minus everything scheduled BEFORE it; this
+                          // entry's own hours never enter into what's displayed. Anything scheduled
+                          // after the completing entry is pure surplus ("over-run"). But if what's
+                          // left before the final entry is more than a single day could ever cover
+                          // (its own hours can never make up the gap), showing that full remaining
+                          // figure would be a physically impossible claim - so that case shows the
+                          // real shortfall instead: how much would still be left over even after a
+                          // full day here.
+                          let completeIdx=-1,cumulative=0;
+                          const befores=[];
+                          if(si)for(let i=0;i<siEntries.length;i++){
+                            befores.push(cumulative);
+                            const en=siEntries[i];
+                            const effHours=effectiveEntryHours(en,entries,staff);
+                            cumulative+=effHours;
+                            if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
+                          }
+                          const totalBudget=si?.totalHours||null;
+                          const specialIdx=si?(completeIdx!==-1?completeIdx:siEntries.length-1):-1;
+                          const isSpecialEntry=si&&myIndex===specialIdx;
+                          const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
+                          let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
+                          if(isSpecialEntry){
+                            const remainingBefore=si.totalHours-befores[myIndex];
+                            const maxPossible=completeIdx===-1?maxPossibleHours(siEntries[myIndex],entries,staff):Infinity;
+                            if(completeIdx===-1&&remainingBefore>maxPossible+0.05){
+                              isUnderCap=true;
+                              underAmount=Math.round((remainingBefore-maxPossible)*2)/2;
+                            }else{
+                              isCompletingEntry=true;
+                              budgetRemaining=Math.max(0,Math.round(remainingBefore*2)/2);
+                            }
+                          }
+                          // When more than one person is scheduled against the same item, each of
+                          // them has their OWN last entry for it - not just whichever one entry the
+                          // walk above picks as the single item-wide completing/under one. Every
+                          // other staff member's own final entry should show their real, actual
+                          // stored hours instead of the flat total-budget placeholder, the same way
+                          // the one "special" entry does.
+                          const myStaffEntries=si?siEntries.filter(x=>x.staffId===e.staffId):[];
+                          const myLastEntry=myStaffEntries[myStaffEntries.length-1];
+                          const isPersonalLastEntry=si&&!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id;
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={isOverRun} isUnderCap={isUnderCap} underAmount={underAmount} isPersonalLastEntry={isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                        }
                         return(
                           <td key={di}
                             style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
@@ -1933,63 +2090,13 @@ function MainApp({currentUser,onLogout}) {
                             onDragLeave={handleDragLeave}
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
-                              ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>
-                                : job
-                                  ? (()=>{
-                                      const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
-                                      const siEntries=si?entries.filter(e=>e.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
-                                      const myIndex=si?siEntries.findIndex(e=>e.id===entry.id):-1;
-                                      // Walk the sub-item's entries in date order and find the one that first
-                                      // reaches (or passes) the total budget - that's the "completing" entry.
-                                      // If nothing ever reaches it, the true last entry stands in for that role
-                                      // instead - same formula, same display, just using whatever's left as of
-                                      // walking into it rather than an amount that happens to close the budget.
-                                      // Either way it's totalHours minus everything scheduled BEFORE it; this
-                                      // entry's own hours never enter into what's displayed. Anything scheduled
-                                      // after the completing entry is pure surplus ("over-run"). But if what's
-                                      // left before the final entry is more than a single day could ever cover
-                                      // (its own hours can never make up the gap), showing that full remaining
-                                      // figure would be a physically impossible claim - so that case shows the
-                                      // real shortfall instead: how much would still be left over even after a
-                                      // full day here.
-                                      let completeIdx=-1,cumulative=0;
-                                      const befores=[];
-                                      if(si)for(let i=0;i<siEntries.length;i++){
-                                        befores.push(cumulative);
-                                        const e=siEntries[i];
-                                        const effHours=effectiveEntryHours(e,entries,staff);
-                                        cumulative+=effHours;
-                                        if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
-                                      }
-                                      const totalBudget=si?.totalHours||null;
-                                      const specialIdx=si?(completeIdx!==-1?completeIdx:siEntries.length-1):-1;
-                                      const isSpecialEntry=si&&myIndex===specialIdx;
-                                      const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
-                                      let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
-                                      if(isSpecialEntry){
-                                        const remainingBefore=si.totalHours-befores[myIndex];
-                                        const maxPossible=completeIdx===-1?maxPossibleHours(siEntries[myIndex],entries,staff):Infinity;
-                                        if(completeIdx===-1&&remainingBefore>maxPossible+0.05){
-                                          isUnderCap=true;
-                                          underAmount=Math.round((remainingBefore-maxPossible)*2)/2;
-                                        }else{
-                                          isCompletingEntry=true;
-                                          budgetRemaining=Math.max(0,Math.round(remainingBefore*2)/2);
-                                        }
-                                      }
-                                      // When more than one person is scheduled against the same item, each of
-                                      // them has their OWN last entry for it - not just whichever one entry the
-                                      // walk above picks as the single item-wide completing/under one. Every
-                                      // other staff member's own final entry should show their real, actual
-                                      // stored hours instead of the flat total-budget placeholder, the same way
-                                      // the one "special" entry does.
-                                      const myStaffEntries=si?siEntries.filter(e=>e.staffId===entry.staffId):[];
-                                      const myLastEntry=myStaffEntries[myStaffEntries.length-1];
-                                      const isPersonalLastEntry=si&&!isSpecialEntry&&!isOverRun&&myLastEntry?.id===entry.id;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isUnderCap={isUnderCap} underAmount={underAmount} isPersonalLastEntry={isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
-                                    })()
-                                  : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
+                              ? isConflict
+                                ? <div style={{display:"flex",gap:2}}>
+                                    {(entriesByKey[k]||[entry]).slice(0,2).map(ce=>(
+                                      <div key={ce.id} style={{flex:1,minWidth:0}}>{renderEntryBlock(ce,true)}</div>
+                                    ))}
+                                  </div>
+                                : renderEntryBlock(entry,false)
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                             }
                           </td>
@@ -2043,16 +2150,16 @@ function MainApp({currentUser,onLogout}) {
           </div>
         </Modal>
       )}
-      {conflictAlert&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-          <div style={{background:"#fff",borderRadius:14,maxWidth:420,width:"100%",padding:24,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
-            <div style={{fontSize:16,fontWeight:600,color:"#1E293B",marginBottom:12}}>⚠ Scheduling Conflict</div>
-            <div style={{fontSize:14,color:"#475569",marginBottom:20,lineHeight:1.6}}>{conflictAlert.message}</div>
-            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-              <Btn variant="ghost" onClick={conflictAlert.onCancel}>Go Back</Btn>
-              <Btn variant="danger" onClick={conflictAlert.onConfirm}>Schedule Anyway</Btn>
-            </div>
-          </div>
+      {conflictAlert&&<ConfirmModal title="⚠ Scheduling Conflict" message={conflictAlert.message} cancelLabel="Go Back" confirmLabel="Schedule Anyway" danger onConfirm={conflictAlert.onConfirm} onCancel={conflictAlert.onCancel}/>}
+      {confirmDialog&&<ConfirmModal {...confirmDialog} onCancel={()=>setConfirmDialog(null)}/>}
+      {contextMenu&&(
+        <div onClick={e=>e.stopPropagation()}
+          style={{position:"fixed",left:Math.min(contextMenu.x,window.innerWidth-160),top:Math.min(contextMenu.y,window.innerHeight-180),zIndex:1200,background:"#fff",borderRadius:8,border:"1px solid #E2E8F0",boxShadow:"0 8px 24px rgba(0,0,0,0.18)",padding:4,minWidth:140}}>
+          <button onClick={()=>{openEditEntry(contextMenu.entry);setContextMenu(null);}} style={contextMenuItemStyle}>✎ Edit</button>
+          <button onClick={()=>{const id=contextMenu.entry.id;setSelectedEntries(new Set([id]));setSelectionMode(true);setCopyMode(true);setMoveMode(false);setContextMenu(null);}} style={contextMenuItemStyle}>⧉ Copy</button>
+          <button onClick={()=>{const id=contextMenu.entry.id;setSelectedEntries(new Set([id]));setSelectionMode(true);setMoveMode(true);setCopyMode(false);setContextMenu(null);}} style={contextMenuItemStyle}>↕ Move</button>
+          <div style={{height:1,background:"#F1F5F9",margin:"3px 0"}}/>
+          <button onClick={()=>{deleteEntriesByIds([contextMenu.entry.id]);setContextMenu(null);}} style={{...contextMenuItemStyle,color:"#EF4444"}}>🗑 Delete</button>
         </div>
       )}
     </div>
@@ -2062,6 +2169,7 @@ function MainApp({currentUser,onLogout}) {
 // ── Summary Section ───────────────────────────────────────────
 
 function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,setTab,archived,canEdit,onUnschedule}) {
+  const [confirmDialog,setConfirmDialog]=useState(null);
   return (
     <>
       {jobs.map(job=>{
@@ -2118,7 +2226,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                       <td style={{padding:"7px 12px",color:"#475569"}}>{assignedStaff||<em style={{color:"#94A3B8"}}>—</em>}</td>
                       <td style={{padding:"7px 12px",display:"flex",gap:4}}>
                         {canEdit&&!archived&&setEntryModal&&<button style={{fontSize:11,color:"#3B82F6",background:"none",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{setEntryModal({mode:"new",staffId:"",dateStr:todayStr,slot:0,jobId:job.id,subItemId:si.id,hours:8,autoFill:remaining>0,totalHours:remaining>0?remaining:8,entryType:"job",miscNote:""});setTab("schedule");}}>+ Schedule</button>}
-                        {canEdit&&!archived&&siEntries.length>0&&onUnschedule&&<button style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{if(window.confirm(`Remove all ${siEntries.length} scheduled entries for "${si.name}"?`))onUnschedule(siEntries.map(e=>e.id));}}>Unschedule</button>}
+                        {canEdit&&!archived&&siEntries.length>0&&onUnschedule&&<button style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>setConfirmDialog({message:`Remove all ${siEntries.length} scheduled entries for "${si.name}"?`,danger:true,confirmLabel:"Remove",onConfirm:()=>{setConfirmDialog(null);onUnschedule(siEntries.map(e=>e.id));}})}>Unschedule</button>}
                       </td>
                     </tr>
                   );
@@ -2139,6 +2247,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
           </div>
         );
       })}
+      {confirmDialog&&<ConfirmModal {...confirmDialog} onCancel={()=>setConfirmDialog(null)}/>}
     </>
   );
 }
