@@ -220,6 +220,20 @@ function addWorkingDays(d, n) {
 }
 function isSaturday(d) { return d.getDay()===6; }
 function isPast(dateStr) { return dateStr < todayStr; }
+// A slot 2 entry can only actually draw on whatever capacity slot 1 hasn't
+// already used that day - if the two combined exceed the staff member's daily
+// capacity (their Productive Hours), slot 2's real, usable hours are capped
+// to what's left over, and it's that reduced figure - not its raw scheduled
+// hours - that should count toward its own joinery item's budget.
+function effectiveEntryHours(e, allEntries, staffList) {
+  if (e.slot !== 1) return e.hours;
+  const stf = staffList.find(s => s.id === e.staffId);
+  const cap = stf?.productiveHours || 8;
+  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot === 0);
+  const h0 = other?.hours || 0;
+  if (h0 + e.hours <= cap + 0.05) return e.hours;
+  return Math.max(0, cap - h0);
+}
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
 
 // Shared between undo and redo: the row shape the API expects for an insert,
@@ -1782,7 +1796,8 @@ function MainApp({currentUser,onLogout}) {
                                         befores.push(cumulative);
                                         const e=siEntries[i];
                                         const stf=staff.find(s=>s.id===e.staffId);
-                                        cumulative+=(e.hours/8)*(stf?.productiveHours||8);
+                                        const effHours=effectiveEntryHours(e,entries,staff);
+                                        cumulative+=(effHours/8)*(stf?.productiveHours||8);
                                         if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
                                       }
                                       const totalBudget=si?.totalHours||null;
