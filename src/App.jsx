@@ -41,17 +41,35 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+// A phone's narrow side never really exceeds 640px in either orientation,
+// so checking both queries (not just width) keeps a rotated phone
+// classified as mobile instead of quietly falling back to the desktop layout.
 function useIsMobile() {
+  const query = "(max-width: 640px), (max-height: 640px) and (orientation: landscape)";
   const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)").matches : false
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
   );
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 640px)");
+    const mq = window.matchMedia(query);
     const onChange = () => setIsMobile(mq.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
   return isMobile;
+}
+
+function useIsLandscapePhone() {
+  const query = "(max-height: 640px) and (orientation: landscape)";
+  const [isLandscape, setIsLandscape] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = () => setIsLandscape(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return isLandscape;
 }
 
 function useViewportHeight() {
@@ -393,10 +411,16 @@ function Sel({label,children,...props}) {
   );
 }
 
-function Btn({variant="default",style:s,...props}) {
-  const base={padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:500,cursor:"pointer",border:"none",transition:"all 0.15s"};
+function Btn({variant="default",style:s,loading,disabled,children,...props}) {
+  const base={padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:500,cursor:"pointer",border:"none",transition:"all 0.15s",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:8};
   const v={default:{background:"#F1F5F9",color:"#334155"},primary:{background:"#3B82F6",color:"#fff"},danger:{background:"#EF4444",color:"#fff"},ghost:{background:"none",border:"1px solid #CBD5E1",color:"#475569"}};
-  return <button style={{...base,...v[variant],...s}} {...props}/>;
+  return (
+    <button disabled={disabled||loading} style={{...base,...v[variant],...(loading?{cursor:"not-allowed",opacity:0.75}:{}),...s}} {...props}>
+      {loading&&<span style={{width:13,height:13,border:"2px solid currentColor",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite",opacity:0.8,flexShrink:0}}/>}
+      {children}
+      {loading&&<style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>}
+    </button>
+  );
 }
 
 function Spinner({text="Loading..."}) {
@@ -607,9 +631,11 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
                 <img src={logoSrc} alt="Current logo" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/>
               </div>
               <div>
-                <label style={{display:"inline-block",padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:logoUploading?"not-allowed":"pointer",border:"1px solid #CBD5E1",background:"#fff",color:"#475569"}}>
+                <label style={{display:"inline-flex",alignItems:"center",gap:8,padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:logoUploading?"not-allowed":"pointer",border:"1px solid #CBD5E1",background:"#fff",color:"#475569",opacity:logoUploading?0.75:1}}>
+                  {logoUploading&&<span style={{width:13,height:13,border:"2px solid currentColor",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/>}
                   {logoUploading?"Uploading...":"Upload New Logo"}
                   <input type="file" accept="image/*" onChange={handleLogoFile} disabled={logoUploading} style={{display:"none"}}/>
+                  {logoUploading&&<style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>}
                 </label>
                 <button onClick={onResetLogo} style={{marginLeft:8,padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid #E2E8F0",background:"none",color:"#94A3B8"}}>Reset to default</button>
                 <div style={{fontSize:11,color:"#94A3B8",marginTop:6}}>PNG, JPG, or similar - up to 5MB.</div>
@@ -661,7 +687,7 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
               </Sel>
             </div>
             {error&&<div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#DC2626",marginBottom:10}}>{error}</div>}
-            <Btn variant="primary" onClick={addUser} style={{marginTop:4}}>{saving?"Adding...":"Add User"}</Btn>
+            <Btn variant="primary" onClick={addUser} loading={saving} style={{marginTop:4}}>{saving?"Adding...":"Add User"}</Btn>
           </div>
           <div style={{marginTop:16,padding:12,background:"#FFFBEB",border:"1px solid #FDE68A",borderRadius:8,fontSize:12,color:"#92400E"}}>
             <strong>Role permissions:</strong> Admin = full access · Manager = add/edit jobs & entries · Staff = view only
@@ -700,6 +726,7 @@ function MainApp({currentUser,onLogout}) {
   const isManager=currentUser.role==="admin"||currentUser.role==="manager";
   const canEdit=isManager;
   const isMobile=useIsMobile();
+  const isLandscapePhone=useIsLandscapePhone();
   const viewportHeight=useViewportHeight();
   const staffColWidth=isMobile?56:90;
   const headerRef=useRef(null);
@@ -1484,6 +1511,14 @@ function MainApp({currentUser,onLogout}) {
   const roleColors={admin:"#FEF3C7",manager:"#DBEAFE",staff:"#F0FDF4"};
   const roleTextColors={admin:"#92400E",manager:"#1D4ED8",staff:"#15803D"};
 
+  if(isLandscapePhone) return (
+    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#0F172A",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:24,textAlign:"center"}}>
+      <div style={{fontSize:40,transform:"rotate(90deg)"}}>📱</div>
+      <div style={{color:"#fff",fontSize:16,fontWeight:600}}>Please rotate your device</div>
+      <div style={{color:"#94A3B8",fontSize:13,maxWidth:280}}>This app is designed for portrait mode on a phone. Turn your phone upright to keep using it.</div>
+    </div>
+  );
+
   if(loading) return (
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
       <div style={{background:BRAND_HEADER_BG,padding:"14px 24px",display:"flex",alignItems:"center",gap:14}}>
@@ -1767,8 +1802,8 @@ function MainApp({currentUser,onLogout}) {
       )}
 
       {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
-      {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)}/>}
-      {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id}/>}
+      {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)} saving={saving}/>}
+      {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id} saving={saving}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline}/>}
       {workHoursOpen&&(
         <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
@@ -2105,20 +2140,18 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         <div>{form.mode==="edit"&&<Btn variant="danger" onClick={()=>onRemove(form.id)} disabled={saving}>Remove</Btn>}</div>
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onClose} disabled={saving}>Cancel</Btn>
-          <Btn variant="primary" onClick={handleSave} disabled={saving} style={{display:"flex",alignItems:"center",gap:8,cursor:saving?"not-allowed":"pointer",opacity:saving?0.75:1}}>
-            {saving&&<span style={{width:13,height:13,border:"2px solid rgba(255,255,255,0.4)",borderTop:"2px solid #fff",borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block"}}/>}
+          <Btn variant="primary" onClick={handleSave} loading={saving}>
             {saving?"Scheduling...":(autoFill&&form.entryType!=="misc"&&form.staffIds.length>1?`Schedule ${form.staffIds.length} staff`:autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save")}
           </Btn>
         </div>
       </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </Modal>
   );
 }
 
 // ── Job Modal ─────────────────────────────────────────────────
 
-function JobModal({data,onSave,onDelete,onClose}) {
+function JobModal({data,onSave,onDelete,onClose,saving}) {
   const [form,setForm]=useState({...data,subItems:data.subItems.map(s=>({...s}))});
   const [importMsg,setImportMsg]=useState(null);
   const fileInputRef=useRef(null);
@@ -2250,10 +2283,10 @@ function JobModal({data,onSave,onDelete,onClose}) {
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",marginTop:20,borderTop:"1px solid #F1F5F9",paddingTop:16}}>
-        <div>{!form.isNew&&<Btn variant="danger" onClick={()=>onDelete(form.id)}>Delete Job</Btn>}</div>
+        <div>{!form.isNew&&<Btn variant="danger" disabled={saving} onClick={()=>onDelete(form.id)}>Delete Job</Btn>}</div>
         <div style={{display:"flex",gap:8}}>
-          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={()=>{if(!form.jobNo||!form.name)return;onSave(form);}}>Save Job</Btn>
+          <Btn variant="ghost" disabled={saving} onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" loading={saving} onClick={()=>{if(!form.jobNo||!form.name)return;onSave(form);}}>{saving?"Saving...":"Save Job"}</Btn>
         </div>
       </div>
     </Modal>
@@ -2262,7 +2295,7 @@ function JobModal({data,onSave,onDelete,onClose}) {
 
 // ── Staff Modal ───────────────────────────────────────────────
 
-function StaffModal({data,onSave,onRemove,onClose,onMove,isFirst,isLast}) {
+function StaffModal({data,onSave,onRemove,onClose,onMove,isFirst,isLast,saving}) {
   const [form,setForm]=useState({...data,productiveHours:data.productiveHours||8});
   return(
     <Modal title={form.isNew?"New Staff Member":"Edit Staff Member"} onClose={onClose} small>
@@ -2293,10 +2326,10 @@ function StaffModal({data,onSave,onRemove,onClose,onMove,isFirst,isLast}) {
         <div style={{fontSize:11,color:"#94A3B8",marginTop:4}}>Slot shows 8h · deducts {form.productiveHours}h from job budget</div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
-        <div>{!form.isNew&&<Btn variant="danger" onClick={()=>onRemove(form.id)}>Remove Staff</Btn>}</div>
+        <div>{!form.isNew&&<Btn variant="danger" disabled={saving} onClick={()=>onRemove(form.id)}>Remove Staff</Btn>}</div>
         <div style={{display:"flex",gap:8}}>
-          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={()=>{if(form.name.trim())onSave(form);}}>Save</Btn>
+          <Btn variant="ghost" disabled={saving} onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" loading={saving} onClick={()=>{if(form.name.trim())onSave(form);}}>{saving?"Saving...":"Save"}</Btn>
         </div>
       </div>
     </Modal>
