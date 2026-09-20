@@ -1498,6 +1498,37 @@ function MainApp({currentUser,onLogout}) {
   }
   function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
 
+  // One-time cleanup for entries whose stored Hours predate the daily-cap
+  // fix - back when Auto-fill could write a raw value (like "8" for someone
+  // capped at 6.5) bigger than the person could actually work that day. New
+  // entries can no longer be saved that way, but this corrects what's
+  // already sitting in the database so every entry's stored hours matches
+  // what it should have been all along, instead of only being caught by the
+  // background calculation at display time.
+  async function runHoursCorrection(){
+    if(!isAdmin)return;
+    const corrections=entries
+      .map(e=>({id:e.id,oldHours:Number(e.hours),newHours:Math.round(effectiveEntryHours(e,entries,staff)*2)/2}))
+      .filter(c=>Math.abs(c.oldHours-c.newHours)>0.05);
+    if(corrections.length===0){
+      window.alert("No entries needed correcting - every stored hours value already matches what it should be.");
+      return;
+    }
+    if(!window.confirm(`This will correct ${corrections.length} entr${corrections.length===1?"y":"ies"} whose stored hours exceed what that person could actually work that day, updating them to the correct value. This can't be undone with the Undo button. Continue?`))return;
+    setSaving(true);
+    try{
+      await Promise.all(corrections.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)));
+      setEntries(prev=>prev.map(e=>{
+        const c=corrections.find(x=>x.id===e.id);
+        return c?{...e,hours:c.newHours}:e;
+      }));
+      window.alert(`Corrected ${corrections.length} entr${corrections.length===1?"y":"ies"}.`);
+    }catch(err){
+      setError("Failed to correct some entries - please try again.");
+    }
+    setSaving(false);
+  }
+
   function toggleSelectEntry(id){
     setSelectedEntries(prev=>{
       const next=new Set(prev);
@@ -1700,6 +1731,7 @@ function MainApp({currentUser,onLogout}) {
                 </>
               )}
               <button onClick={loadAll} style={{padding:isMobile?"3px 8px":"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?11:12,color:"#64748B"}}>↻ Refresh</button>
+              {isAdmin&&!isMobile&&<button onClick={runHoursCorrection} title="One-time cleanup: corrects any entry's stored hours that are higher than the person could actually work that day" style={{padding:"5px 12px",border:"1px solid #FCD34D",borderRadius:7,background:"#FFFBEB",cursor:"pointer",fontSize:12,color:"#92400E"}}>🔧 Fix Hours</button>}
             </div>
           </div>
 
