@@ -228,10 +228,11 @@ function isPast(dateStr) { return dateStr < todayStr; }
 function effectiveEntryHours(e, allEntries, staffList) {
   const myHours = Number(e.hours) || 0;
   if (e.slot !== 1) return myHours;
+  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot === 0);
+  if (!other) return myHours; // nothing in slot 1 that day - no capacity conflict to account for
   const stf = staffList.find(s => s.id === e.staffId);
   const cap = Number(stf?.productiveHours) || 8;
-  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot === 0);
-  const h0 = Number(other?.hours) || 0;
+  const h0 = Number(other.hours) || 0;
   if (h0 + myHours <= cap + 0.05) return myHours;
   return Math.max(0, cap - h0);
 }
@@ -1071,7 +1072,8 @@ function MainApp({currentUser,onLogout}) {
 
   useEffect(()=>{
     function onKeyDown(e){
-      if(e.key==="Escape"){
+      const isFormField=["INPUT","TEXTAREA","SELECT"].includes(e.target.tagName);
+      if(e.key==="Escape"||(e.key==="Enter"&&!isFormField)){
         setSelectedEntries(new Set());
         setSelectionMode(false);
         setMoveMode(false);
@@ -1770,7 +1772,7 @@ function MainApp({currentUser,onLogout}) {
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
                         const isConflict=conflictKeys.has(k);
                         const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
-                        const isOvercommitted=slot===1&&!!entry&&((Number(entry.hours)||0)+(Number(otherSlotEntry?.hours)||0))>(Number(st.productiveHours)||8);
+                        const isOvercommitted=slot===1&&!!entry&&!!otherSlotEntry&&((Number(entry.hours)||0)+(Number(otherSlotEntry.hours)||0))>(Number(st.productiveHours)||8);
                         return(
                           <td key={di}
                             style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
