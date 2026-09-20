@@ -551,16 +551,19 @@ function MiscBlock({note,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd
   );
 }
 
-function EmptySlot({onClick,isDropTarget,isPastDate,canEdit}) {
+function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,available}) {
   // Copy and Move both just arm a plain click-to-target on an empty slot -
   // no special "Paste here" fill, so they look and behave identically.
   if (isPastDate||!canEdit) return <div style={{minHeight:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
+  // A job that wrapped up without using this staff member's whole day
+  // leaves the day's other slot free - flag that leftover capacity instead
+  // of showing a plain "+", with a pale, low-opacity amber fill.
   return (
     <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":"#CBD5E1",fontSize:16,fontWeight:400,background:"transparent",transition:"all 0.12s"}}
-      onMouseEnter={e=>{if(!isDropTarget){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
-      onMouseLeave={e=>{if(!isDropTarget){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
-      {isDropTarget?"↓":"+"}
+      style={{border:isDropTarget?"2px dashed #3B82F6":available?"1.5px dashed #F59E0B":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.2,padding:available?"2px 4px":0,background:available?"rgba(245,158,11,0.12)":"transparent",transition:"all 0.12s"}}
+      onMouseEnter={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
+      onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
+      {isDropTarget?"↓":available?"Available Hours":"+"}
     </div>
   );
 }
@@ -1547,9 +1550,11 @@ function MainApp({currentUser,onLogout}) {
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
-      // Stay in copy mode with the same selection - paste keeps the source group
-      // copied so it can be pasted again at another spot without re-selecting,
-      // until Copy is toggled off or a new selection is made.
+      // A single destination click lands the paste and exits Copy mode, the
+      // same as Move - it shouldn't take an extra Enter/click to settle.
+      setSelectedEntries(new Set());
+      setSelectionMode(false);
+      setCopyMode(false);
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
@@ -2018,24 +2023,15 @@ function MainApp({currentUser,onLogout}) {
                         function computeIsOvercommitted(e){
                           return !!e&&!!otherSlotEntry&&!wasScheduledFirst(e,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
                         }
-                        // Renders whichever entry sits in this staff/day/slot - factored out so a
-                        // conflict (two entries mapped to the same slot) can render BOTH of them
-                        // side by side at half width instead of only ever showing one.
-                        function renderEntryBlock(e,forceConflict){
-                          const eJob=e&&!e.miscNote?jobs.find(j=>j.id===e.jobId):null;
-                          const eSubItem=e&&e.subItemId?subItems.find(s=>s.id===e.subItemId):null;
-                          const eIsOvercommitted=computeIsOvercommitted(e);
-                          const blockOnClick=copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(e.id):()=>openEditEntry(e);
-                          const blockOnContextMenu=canEdit?ev=>openContextMenu(ev,e):undefined;
-                          if(e.miscNote){
-                            return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
-                          }
-                          if(!eJob){
-                            return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
-                          }
-                          const si=e.subItemId?subItems.find(s=>s.id===e.subItemId):null;
-                          const siEntries=si?entries.filter(x=>x.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
-                          const myIndex=si?siEntries.findIndex(x=>x.id===e.id):-1;
+                        // Works out a job entry's place in its sub-item's budget - factored out
+                        // so both the entry's own block AND a companion empty slot (to flag
+                        // leftover capacity once a job wraps up early) can use it.
+                        function computeJobEntryMeta(e){
+                          if(!e||e.miscNote||!e.subItemId)return null;
+                          const si=subItems.find(s=>s.id===e.subItemId);
+                          if(!si)return null;
+                          const siEntries=entries.filter(x=>x.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+                          const myIndex=siEntries.findIndex(x=>x.id===e.id);
                           // Walk the sub-item's entries in date order and find the one that first
                           // reaches (or passes) the total budget - that's the "completing" entry.
                           // If nothing ever reaches it, the true last entry stands in for that role
@@ -2051,17 +2047,17 @@ function MainApp({currentUser,onLogout}) {
                           // full day here.
                           let completeIdx=-1,cumulative=0;
                           const befores=[];
-                          if(si)for(let i=0;i<siEntries.length;i++){
+                          for(let i=0;i<siEntries.length;i++){
                             befores.push(cumulative);
                             const en=siEntries[i];
                             const effHours=effectiveEntryHours(en,entries,staff);
                             cumulative+=effHours;
                             if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
                           }
-                          const totalBudget=si?.totalHours||null;
-                          const specialIdx=si?(completeIdx!==-1?completeIdx:siEntries.length-1):-1;
-                          const isSpecialEntry=si&&myIndex===specialIdx;
-                          const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
+                          const totalBudget=si.totalHours||null;
+                          const specialIdx=completeIdx!==-1?completeIdx:siEntries.length-1;
+                          const isSpecialEntry=myIndex===specialIdx;
+                          const isOverRun=completeIdx!==-1&&myIndex>completeIdx;
                           let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
                           if(isSpecialEntry){
                             const remainingBefore=si.totalHours-befores[myIndex];
@@ -2080,10 +2076,33 @@ function MainApp({currentUser,onLogout}) {
                           // other staff member's own final entry should show their real, actual
                           // stored hours instead of the flat total-budget placeholder, the same way
                           // the one "special" entry does.
-                          const myStaffEntries=si?siEntries.filter(x=>x.staffId===e.staffId):[];
+                          const myStaffEntries=siEntries.filter(x=>x.staffId===e.staffId);
                           const myLastEntry=myStaffEntries[myStaffEntries.length-1];
-                          const isPersonalLastEntry=si&&!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id;
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={isOverRun} isUnderCap={isUnderCap} underAmount={underAmount} isPersonalLastEntry={isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                          const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id;
+                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry};
+                        }
+                        // Once a job's completing entry finishes the item's budget without using
+                        // this staff member's whole day, the day's other slot sits empty with
+                        // leftover capacity - flag it instead of showing a plain "+".
+                        const otherEntryMeta=computeJobEntryMeta(otherSlotEntry);
+                        const showAvailableHours=!entry&&!!otherEntryMeta&&otherEntryMeta.isCompletingEntry&&(Number(otherSlotEntry.hours)||0)<(Number(st.productiveHours)||8)-0.05;
+                        // Renders whichever entry sits in this staff/day/slot - factored out so a
+                        // conflict (two entries mapped to the same slot) can render BOTH of them
+                        // side by side at half width instead of only ever showing one.
+                        function renderEntryBlock(e,forceConflict){
+                          const eJob=e&&!e.miscNote?jobs.find(j=>j.id===e.jobId):null;
+                          const eSubItem=e&&e.subItemId?subItems.find(s=>s.id===e.subItemId):null;
+                          const eIsOvercommitted=computeIsOvercommitted(e);
+                          const blockOnClick=copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(e.id):()=>openEditEntry(e);
+                          const blockOnContextMenu=canEdit?ev=>openContextMenu(ev,e):undefined;
+                          if(e.miscNote){
+                            return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                          }
+                          if(!eJob){
+                            return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
+                          }
+                          const meta=computeJobEntryMeta(e)||{};
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
                         }
                         return(
                           <td key={di}
@@ -2099,7 +2118,7 @@ function MainApp({currentUser,onLogout}) {
                                     ))}
                                   </div>
                                 : renderEntryBlock(entry,false)
-                              : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit}/>
+                              : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} available={showAvailableHours}/>
                             }
                           </td>
                         );
