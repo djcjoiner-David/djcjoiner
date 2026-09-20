@@ -1810,7 +1810,7 @@ function MainApp({currentUser,onLogout}) {
                                       const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
                                       const isFinalShortEntry=si&&completeIdx===-1&&myIndex===siEntries.length-1;
                                       const budgetRemaining=isCompletingEntry?Math.max(0,Math.round((si.totalHours-befores[myIndex])*10)/10):null;
-                                      const shortAmount=isFinalShortEntry?Math.round((si.totalHours-cumulative)*10)/10:null;
+                                      const shortAmount=isFinalShortEntry?Math.round((si.totalHours-befores[myIndex])*10)/10:null;
                                       const isShort=isFinalShortEntry&&shortAmount>0.05;
                       return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isShort={isShort} shortAmount={shortAmount} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
                                     })()
