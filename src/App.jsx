@@ -220,21 +220,21 @@ function addWorkingDays(d, n) {
 }
 function isSaturday(d) { return d.getDay()===6; }
 function isPast(dateStr) { return dateStr < todayStr; }
-// A slot 2 entry can only actually draw on whatever capacity slot 1 hasn't
-// already used that day - if the two combined exceed the staff member's daily
-// capacity (their Productive Hours), slot 2's real, usable hours are capped
-// to what's left over, and it's that reduced figure - not its raw scheduled
-// hours - that should count toward its own joinery item's budget.
+// No single entry can ever count for more than the staff member's daily cap
+// (their Productive Hours) - it's a hard ceiling on how much of a day one
+// person can be allocated, not just a cross-slot conflict check. Slot 1 is
+// capped against the cap on its own; slot 2 then only gets whatever capacity
+// slot 1's (already-capped) usage left over that day. It's this reduced
+// figure - not the raw scheduled hours - that counts toward the joinery
+// item's budget.
 function effectiveEntryHours(e, allEntries, staffList) {
   const myHours = Number(e.hours) || 0;
-  if (e.slot !== 1) return myHours;
-  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot === 0);
-  if (!other) return myHours; // nothing in slot 1 that day - no capacity conflict to account for
   const stf = staffList.find(s => s.id === e.staffId);
   const cap = Number(stf?.productiveHours) || 8;
-  const h0 = Number(other.hours) || 0;
-  if (h0 + myHours <= cap + 0.05) return myHours;
-  return Math.max(0, cap - h0);
+  if (e.slot !== 1) return Math.min(myHours, cap);
+  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot === 0);
+  const h0 = other ? Math.min(Number(other.hours) || 0, cap) : 0;
+  return Math.min(myHours, Math.max(0, cap - h0));
 }
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
 
