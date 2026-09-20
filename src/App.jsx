@@ -1430,9 +1430,9 @@ function MainApp({currentUser,onLogout}) {
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
-      setSelectedEntries(new Set());
-      setSelectionMode(false);
-      setCopyMode(false);
+      // Stay in copy mode with the same selection - paste keeps the source group
+      // copied so it can be pasted again at another spot without re-selecting,
+      // until Copy is toggled off or a new selection is made.
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
@@ -1654,11 +1654,11 @@ function MainApp({currentUser,onLogout}) {
                         Delete {selectedEntries.size}
                       </button>
                       <button onClick={()=>{setMoveMode(m=>!m);setCopyMode(false);}}
-                        style={{padding:"5px 12px",border:"1px solid #93C5FD",borderRadius:7,background:moveMode?"#3B82F6":"#EFF6FF",cursor:"pointer",fontSize:12,color:moveMode?"#fff":"#1D4ED8",fontWeight:600}}>
+                        style={{padding:"5px 12px",border:"1px solid #BBF7D0",borderRadius:7,background:moveMode?"#15803D":"#F0FDF4",cursor:"pointer",fontSize:12,color:moveMode?"#fff":"#15803D",fontWeight:600}}>
                         {moveMode?"Tap destination…":`Move ${selectedEntries.size}`}
                       </button>
                       <button onClick={()=>{setCopyMode(c=>!c);setMoveMode(false);}}
-                        style={{padding:"5px 12px",border:"1px solid #BBF7D0",borderRadius:7,background:copyMode?"#15803D":"#F0FDF4",cursor:"pointer",fontSize:12,color:copyMode?"#fff":"#15803D",fontWeight:600}}>
+                        style={{padding:"5px 12px",border:"1px solid #93C5FD",borderRadius:7,background:copyMode?"#3B82F6":"#EFF6FF",cursor:"pointer",fontSize:12,color:copyMode?"#fff":"#1D4ED8",fontWeight:600}}>
                         {copyMode?"Tap destination…":`Copy ${selectedEntries.size}`}
                       </button>
                     </>
