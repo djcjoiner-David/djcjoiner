@@ -435,11 +435,11 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOver,overAmount,isShort,shortAmount,isMobile,isPastDate}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isLastEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isShort,shortAmount,isMobile,isPastDate,isOvercommitted}) {
   const hoursLabel=isLastEntry&&budgetRemaining!==null
-    ?(isOver?`${overAmount}h OVER`:isShort?`${shortAmount}h SHORT`:`${budgetRemaining}h`)
+    ?(isOverRun?"over-run":isShort?`${shortAmount}h SHORT`:`${budgetRemaining}h`)
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
-  const flagColor=isOver?"#EF4444":isShort?"#D97706":undefined;
+  const flagColor=isOverRun?"#EF4444":isShort?"#D97706":undefined;
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
@@ -452,22 +452,24 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
         <>
           <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
-            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOver||isShort)?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isShort)?700:undefined}}>{hoursLabel}</span>
           </div>
+          {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
         </>
       ):(
         <>
           <div style={{fontSize:10,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
-            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOver||isShort)?700:undefined}}>{hoursLabel}</span>
+            {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isShort)?700:undefined}}>{hoursLabel}</span>
           </div>
+          {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
         </>
       )}
     </div>
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate}) {
+function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
@@ -477,6 +479,7 @@ function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canE
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
+      {isOvercommitted&&<div style={{fontSize:isMobile?10:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
     </div>
   );
 }
@@ -1750,6 +1753,8 @@ function MainApp({currentUser,onLogout}) {
                         const subItem=entry&&entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
                         const isConflict=conflictKeys.has(k);
+                        const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
+                        const isOvercommitted=slot===1&&!!entry&&((entry.hours||0)+(otherSlotEntry?.hours||0))>(st.productiveHours||8);
                         return(
                           <td key={di}
                             style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
@@ -1758,7 +1763,7 @@ function MainApp({currentUser,onLogout}) {
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
                               ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)}/>
+                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>
                                 : job
                                   ? (()=>{
                                       const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
@@ -1770,11 +1775,10 @@ function MainApp({currentUser,onLogout}) {
                                       const totalBudget=si?.totalHours||null;
                                       const lastEntryContribution=isLastEntry?(entry.hours/8)*(st.productiveHours||8):0;
                                       const finalRemaining=isLastEntry&&rawRemaining!==null?Math.round((rawRemaining-lastEntryContribution)*10)/10:null;
-                                      const isOver=isLastEntry&&finalRemaining!==null&&finalRemaining<-0.05;
+                                      const isOverRun=isLastEntry&&finalRemaining!==null&&finalRemaining<-0.05;
                                       const isShort=isLastEntry&&finalRemaining!==null&&finalRemaining>0.05;
-                                      const overAmount=isOver?Math.abs(finalRemaining):null;
                                       const shortAmount=isShort?finalRemaining:null;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOver={isOver} overAmount={overAmount} isShort={isShort} shortAmount={shortAmount} isMobile={isMobile} isPastDate={isPast(ds)}/>;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isLastEntry={isLastEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isShort={isShort} shortAmount={shortAmount} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
