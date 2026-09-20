@@ -1211,15 +1211,22 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>[...prev,...newMapped]);
       } else {
         const prevEntry=entries.find(e=>e.id===data.id);
+        // Moving an entry to a new day/slot makes it the newest arrival there
+        // for capacity-conflict purposes - otherwise an old entry dragged into
+        // a fresh conflict would still "win" on its original creation date,
+        // even though it's the one that just showed up.
+        const relocated=prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.slot!==data.slot);
+        const newCreatedAt=relocated?new Date().toISOString():undefined;
         await db("PATCH","entries",{
           staff_id:data.staffId,
           job_id:data.entryType==="misc"?null:data.jobId,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:data.dateStr,slot:data.slot,hours:data.hours,
-          misc_note:data.entryType==="misc"?data.miscNote:null
+          misc_note:data.entryType==="misc"?data.miscNote:null,
+          ...(newCreatedAt?{created_at:newCreatedAt}:{})
         },`?id=eq.${data.id}`);
         if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
-        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null}:e));
+        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
       }
       setEntryModal(null);setTab("schedule");
     }catch(e){setError("Failed to save entry.");}
@@ -1392,19 +1399,23 @@ function MainApp({currentUser,onLogout}) {
         return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot};
       });
       pushUndo("moveMultiple",{prevStates});
+      // Moving these entries makes them the newest arrivals wherever they
+      // land, for capacity-conflict purposes - an old entry dragged into a
+      // fresh conflict shouldn't still "win" on its original creation date.
+      const movedAt=new Date().toISOString();
       const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id]}));
       // Land the whole group immediately - don't make the user wait for every
       // PATCH to round-trip before the drop appears to take effect.
       setEntries(prev=>prev.map(x=>{
         const u=updates.find(u=>u.id===x.id);
-        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot}:x;
+        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt}:x;
       }));
       setSelectedEntries(new Set());
       setSelectionMode(false);
       setMoveMode(false);
       try{
         await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
-          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot},`?id=eq.${id}`)
+          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Failed to move entries - reverted.");
@@ -1506,12 +1517,16 @@ function MainApp({currentUser,onLogout}) {
     if(entry.staffId===toStaffId&&entry.dateStr===toDateStr&&entry.slot===toSlot){dragEntry.current=null;return;}
     const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot};
     pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot});
+    // Dropping it here makes it the newest arrival at this day/slot for
+    // capacity-conflict purposes - an old entry dragged into a fresh
+    // conflict shouldn't still "win" on its original creation date.
+    const movedAt=new Date().toISOString();
     // Move it on screen immediately - don't wait for the server round-trip to
     // show the drop landing. Roll back if the save actually fails.
-    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot}:en));
+    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt}:en));
     dragEntry.current=null;
     try{
-      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot},`?id=eq.${entry.id}`);
+      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot,created_at:movedAt},`?id=eq.${entry.id}`);
     }catch(err){
       setError("Failed to move entry - change reverted.");
       setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,...prevState}:en));
