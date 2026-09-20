@@ -1771,7 +1771,11 @@ function MainApp({currentUser,onLogout}) {
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
                         const isConflict=conflictKeys.has(k);
                         const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
-                        const isOvercommitted=slot===1&&!!entry&&!!otherSlotEntry&&((Number(entry.hours)||0)+(Number(otherSlotEntry.hours)||0))>(Number(st.productiveHours)||8);
+                        // Slot 2 is only "Overcommitted" when slot 1 has already used up the
+                        // person's entire daily cap, leaving nothing for slot 2 to draw on. If
+                        // slot 1 has any capacity left over, slot 2 silently absorbs it (via
+                        // effectiveEntryHours below) instead of showing a warning.
+                        const isOvercommitted=slot===1&&!!entry&&!!otherSlotEntry&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
                         return(
                           <td key={di}
                             style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
