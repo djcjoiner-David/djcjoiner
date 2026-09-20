@@ -477,10 +477,11 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isMobile,isPastDate,isOvercommitted}) {
+function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
   const hoursLabel=isOverRun?"over-run"
     :isUnderCap?`${underAmount}h under`
     :isCompletingEntry?`${budgetRemaining}h`
+    :isPersonalLastEntry?`${hours}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
   const flagColor=isOverRun||isUnderCap?"#D97706":undefined;
   return (
@@ -1962,7 +1963,16 @@ function MainApp({currentUser,onLogout}) {
                                           budgetRemaining=Math.max(0,Math.round(remainingBefore*2)/2);
                                         }
                                       }
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isUnderCap={isUnderCap} underAmount={underAmount} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
+                                      // When more than one person is scheduled against the same item, each of
+                                      // them has their OWN last entry for it - not just whichever one entry the
+                                      // walk above picks as the single item-wide completing/under one. Every
+                                      // other staff member's own final entry should show their real, actual
+                                      // stored hours instead of the flat total-budget placeholder, the same way
+                                      // the one "special" entry does.
+                                      const myStaffEntries=si?siEntries.filter(e=>e.staffId===entry.staffId):[];
+                                      const myLastEntry=myStaffEntries[myStaffEntries.length-1];
+                                      const isPersonalLastEntry=si&&!isSpecialEntry&&!isOverRun&&myLastEntry?.id===entry.id;
+                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isUnderCap={isUnderCap} underAmount={underAmount} isPersonalLastEntry={isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
                                     })()
                                   : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
