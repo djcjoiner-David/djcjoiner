@@ -250,8 +250,7 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   while (remaining>0) {
     if (!isWeekend(cur)) {
       const deducted=Math.min(ph,remaining);
-      const hours=Math.round((8*(deducted/ph))*10)/10;
-      days.push({dateStr:isoDate(cur),hours,deducted});
+      days.push({dateStr:isoDate(cur),hours:deducted,deducted});
       remaining-=ph;
     }
     cur=addDays(cur,1);
@@ -1798,9 +1797,8 @@ function MainApp({currentUser,onLogout}) {
                                       if(si)for(let i=0;i<siEntries.length;i++){
                                         befores.push(cumulative);
                                         const e=siEntries[i];
-                                        const stf=staff.find(s=>s.id===e.staffId);
                                         const effHours=effectiveEntryHours(e,entries,staff);
-                                        cumulative+=(effHours/8)*(stf?.productiveHours||8);
+                                        cumulative+=effHours;
                                         if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
                                       }
                                       const totalBudget=si?.totalHours||null;
@@ -1896,12 +1894,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
           return a.name.localeCompare(b.name);
         });
         const dates=jobEntries.map(e=>e.dateStr).sort();
-        const totalDeducted=jobEntries.reduce((a,e)=>{
-          const st=staff.find(s=>s.id===e.staffId);
-          const ph=st?.productiveHours||8;
-          const days=e.hours/8;
-          return a+(days*ph);
-        },0);
+        const totalDeducted=jobEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0);
         const commDate=dates[0]?parseISO(dates[0]):null;
         const lastDate=dates[dates.length-1]?parseISO(dates[dates.length-1]):null;
         const generalEntries=jobEntries.filter(e=>!e.subItemId);
@@ -1929,12 +1922,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                 {jobSubs.map((si,rowi)=>{
                   const siEntries=jobEntries.filter(e=>e.subItemId===si.id);
                   const siDates=siEntries.map(e=>e.dateStr).sort();
-                  const deductedHours=siEntries.reduce((a,e)=>{
-                    const st=staff.find(s=>s.id===e.staffId);
-                    const ph=st?.productiveHours||8;
-                    const days=e.hours/8;
-                    return a+(days*ph);
-                  },0);
+                  const deductedHours=siEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0);
                   const remaining=Math.round(((si.totalHours||0)-deductedHours)*10)/10;
                   const assignedStaff=[...new Set(siEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ");
                   let dateDisplay;
@@ -1960,7 +1948,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                   <tr style={{background:"#FFF7ED",borderTop:"1px solid #FED7AA"}}>
                     <td style={{padding:"7px 12px",fontWeight:500,color:"#92400E"}}>General (no item)</td>
                     <td style={{padding:"7px 12px"}}>—</td>
-                    <td style={{padding:"7px 12px",color:"#92400E"}}>{Math.round(generalEntries.reduce((a,e)=>{const st=staff.find(s=>s.id===e.staffId);return a+((e.hours/8)*(st?.productiveHours||8));},0)*10)/10}h</td>
+                    <td style={{padding:"7px 12px",color:"#92400E"}}>{Math.round(generalEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0)*10)/10}h</td>
                     <td>—</td>
                     <td style={{padding:"7px 12px",color:"#92400E"}}>{(()=>{const gd=generalEntries.map(e=>e.dateStr).sort();if(gd.length===1)return formatDate(parseISO(gd[0]));return `${formatDate(parseISO(gd[0]))} → ${formatDate(parseISO(gd[gd.length-1]))}`;})()}</td>
                     <td style={{padding:"7px 12px",color:"#92400E"}}>{[...new Set(generalEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ")}</td>
@@ -2103,7 +2091,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
               {form.mode==="new"&&(
                 <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155",marginTop:8}}>
                   <input type="checkbox" checked={autoFill} onChange={e=>setAutoFill(e.target.checked)} style={{width:15,height:15}}/>
-                  Auto-fill consecutive days at 8h/day
+                  Auto-fill consecutive days at each person's daily cap
                 </label>
               )}
             </>
@@ -2161,12 +2149,12 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                   ))}
                 </div>;
               })()}
-              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name} is at {productiveHours}h/day productive rate</div>}
+              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s daily cap is {productiveHours}h</div>}
               {form.staffIds.length<=1&&preview.length>0&&(
                 <div style={{marginTop:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px"}}>
-                  <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted · {productiveHours}h/day rate</div>
+                  <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted · {productiveHours}h/day cap</div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-                    {preview.map((p,i)=><span key={i} style={{fontSize:11,background:"#DCFCE7",color:"#166534",borderRadius:4,padding:"2px 6px"}}>{formatDate(parseISO(p.dateStr))} · 8h slot · {p.deducted}h eff</span>)}
+                    {preview.map((p,i)=><span key={i} style={{fontSize:11,background:"#DCFCE7",color:"#166534",borderRadius:4,padding:"2px 6px"}}>{formatDate(parseISO(p.dateStr))} · {p.hours}h</span>)}
                   </div>
                 </div>
               )}
@@ -2359,14 +2347,14 @@ function StaffModal({data,onSave,onRemove,onClose,onMove,isFirst,isLast,saving})
         </div>
       )}
       <div style={{marginBottom:12}}>
-        <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Productive hours per 8h day</div>
+        <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Daily hour cap</div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <input type="range" min={1} max={8} step={0.5} value={form.productiveHours}
             onChange={e=>setForm(f=>({...f,productiveHours:Number(e.target.value)}))}
             style={{flex:1,accentColor:"#3B82F6"}}/>
           <div style={{minWidth:44,textAlign:"center",fontWeight:700,fontSize:16,color:"#1E293B"}}>{form.productiveHours}h</div>
         </div>
-        <div style={{fontSize:11,color:"#94A3B8",marginTop:4}}>Slot shows 8h · deducts {form.productiveHours}h from job budget</div>
+        <div style={{fontSize:11,color:"#94A3B8",marginTop:4}}>Maximum hours this person can be allocated per day, across both slots</div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
         <div>{!form.isNew&&<Btn variant="danger" disabled={saving} onClick={()=>onRemove(form.id)}>Remove Staff</Btn>}</div>
