@@ -229,10 +229,17 @@ function isPast(dateStr) { return dateStr < todayStr; }
 // one happens to sit in. It's this reduced figure - not the raw scheduled
 // hours - that counts toward the joinery item's budget.
 function wasScheduledFirst(a, b) {
-  const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-  const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  if (ca !== cb) return ca < cb;
-  return String(a.id) < String(b.id);
+  const ca = a.createdAt ? new Date(a.createdAt).getTime() : null;
+  const cb = b.createdAt ? new Date(b.createdAt).getTime() : null;
+  if (ca !== null && cb !== null && ca !== cb) return ca < cb;
+  // No reliable creation-order signal (missing or identical timestamps,
+  // which happens for older data) - comparing database ids here would be an
+  // arbitrary tie-break with no relation to real scheduling order, and can
+  // disagree with other checks that rely on the same "who's first" answer
+  // (e.g. a slot getting capped to 0 without the Overcommitted flag
+  // agreeing). Falling back to slot 1 always taking priority is at least
+  // deterministic and consistent everywhere this is checked.
+  return a.slot < b.slot;
 }
 function effectiveEntryHours(e, allEntries, staffList) {
   const myHours = Number(e.hours) || 0;
@@ -490,7 +497,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
           <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
             {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
-          {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
+          {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
         </>
       ):(
         <>
@@ -498,7 +505,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
             {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
-          {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
+          {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
         </>
       )}
     </div>
@@ -515,7 +522,7 @@ function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canE
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
       <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
-      {isOvercommitted&&<div style={{fontSize:isMobile?10:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3}}>⚠ Overcommitted</div>}
+      {isOvercommitted&&<div style={{fontSize:isMobile?10:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
     </div>
   );
 }
@@ -1583,27 +1590,38 @@ function MainApp({currentUser,onLogout}) {
     });
     return corrections;
   }
-  async function runHoursCorrection(){
-    if(!isAdmin)return;
+  // Stored hours must stay correct on their own, not just at the moment
+  // someone happens to run a cleanup - a drag, move, copy, delete or new
+  // entry can change what a DIFFERENT entry's correct hours should be (a
+  // capacity conflict appearing or disappearing, a joinery item's finishing
+  // entry shifting to a different day), and that entry's own stored value
+  // needs to follow automatically. This runs after every schedule change and
+  // silently applies whatever corrections are needed, the same way the grid
+  // display itself is always recalculated from current data - the stored
+  // Hours field is just another thing that has to stay in sync, not a
+  // one-off cleanup a person has to remember to trigger.
+  const correctingRef=useRef(false);
+  useEffect(()=>{
+    if(!canEdit||correctingRef.current)return;
     const corrections=computeHoursCorrections();
-    if(corrections.length===0){
-      window.alert("No entries needed correcting - every stored hours value already matches what it should be.");
-      return;
-    }
-    if(!window.confirm(`This will correct ${corrections.length} entr${corrections.length===1?"y":"ies"} whose stored hours don't match what they should be (daily cap, or the exact remaining amount for the entry that finishes an item). This can't be undone with the Undo button. Continue?`))return;
-    setSaving(true);
-    try{
-      await Promise.all(corrections.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)));
-      setEntries(prev=>prev.map(e=>{
-        const c=corrections.find(x=>x.id===e.id);
-        return c?{...e,hours:c.newHours}:e;
-      }));
-      window.alert(`Corrected ${corrections.length} entr${corrections.length===1?"y":"ies"}.`);
-    }catch(err){
-      setError("Failed to correct some entries - please try again.");
-    }
-    setSaving(false);
-  }
+    if(corrections.length===0)return;
+    correctingRef.current=true;
+    (async()=>{
+      try{
+        await Promise.all(corrections.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)));
+        setEntries(prev=>prev.map(e=>{
+          const c=corrections.find(x=>x.id===e.id);
+          return c?{...e,hours:c.newHours}:e;
+        }));
+      }catch(err){
+        // Silent - the grid's own display still recalculates correctly from
+        // whatever's stored, so a failed background correction here isn't
+        // shown as a user-facing error. It'll be retried on the next change.
+      }
+      correctingRef.current=false;
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[entries,staff,subItems,canEdit]);
 
   function toggleSelectEntry(id){
     setSelectedEntries(prev=>{
@@ -1807,7 +1825,6 @@ function MainApp({currentUser,onLogout}) {
                 </>
               )}
               <button onClick={loadAll} style={{padding:isMobile?"3px 8px":"5px 12px",border:"1px solid #CBD5E1",borderRadius:7,background:"#fff",cursor:"pointer",fontSize:isMobile?11:12,color:"#64748B"}}>↻ Refresh</button>
-              {isAdmin&&!isMobile&&<button onClick={runHoursCorrection} title="One-time cleanup: corrects any entry's stored hours that are higher than the person could actually work that day" style={{padding:"5px 12px",border:"1px solid #FCD34D",borderRadius:7,background:"#FFFBEB",cursor:"pointer",fontSize:12,color:"#92400E"}}>🔧 Fix Hours</button>}
             </div>
           </div>
 
