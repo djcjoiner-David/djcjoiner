@@ -1193,7 +1193,7 @@ function MainApp({currentUser,onLogout}) {
         staffSorted.forEach((s,i)=>db("PATCH","staff",{sort_order:i},`?id=eq.${s.id}`).catch(()=>{}));
         setStaffOrder(staffSorted.map(s=>s.id));
       }
-      setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color})));
+      setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color,completed:!!j.completed})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
       setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at})));
     } catch(e){setError("Could not connect to database.");}
@@ -1203,15 +1203,22 @@ function MainApp({currentUser,onLogout}) {
   useEffect(()=>{loadAll();},[loadAll]);
 
   const threshold=oneMonthAgo();
-  const {activeJobs,archivedJobs}=useMemo(()=>{
-    const active=[],archived=[];
+  // A job someone has manually marked complete never lands in either bucket
+  // here - it's a closed job, not just a quiet/stale one. That single filter
+  // is what pulls it out of Job Summary, the quick-edit pill row above the
+  // calendar, and the "new entry" job picker all at once, since each of
+  // those already draws from activeJobs/archivedJobs rather than the raw
+  // jobs list. It never touches entries or the grid itself.
+  const {activeJobs,archivedJobs,completedJobs}=useMemo(()=>{
+    const active=[],archived=[],completed=[];
     for (const job of jobs){
+      if(job.completed){completed.push(job);continue;}
       const je=entries.filter(e=>e.jobId===job.id);
       if(!je.length){active.push(job);continue;}
       const maxDate=je.map(e=>e.dateStr).sort().reverse()[0];
       if(maxDate<threshold)archived.push(job);else active.push(job);
     }
-    return {activeJobs:active,archivedJobs:archived};
+    return {activeJobs:active,archivedJobs:archived,completedJobs:completed};
   },[jobs,entries,threshold]);
 
   const visibleDays=useMemo(()=>{
@@ -1319,7 +1326,7 @@ function MainApp({currentUser,onLogout}) {
     try{
       if(data.isNew){
         const [newJob]=await db("POST","jobs",[{job_no:data.jobNo,name:data.name,bg_color:data.bgColor,border_color:data.borderColor,text_color:data.textColor}]);
-        setJobs(prev=>[...prev,{id:newJob.id,jobNo:newJob.job_no,name:newJob.name,bgColor:newJob.bg_color,borderColor:newJob.border_color,textColor:newJob.text_color}]);
+        setJobs(prev=>[...prev,{id:newJob.id,jobNo:newJob.job_no,name:newJob.name,bgColor:newJob.bg_color,borderColor:newJob.border_color,textColor:newJob.text_color,completed:!!newJob.completed}]);
         const validSubs=data.subItems.filter(s=>s.name.trim());
         if(validSubs.length>0){const inserted=await db("POST","sub_items",validSubs.map(s=>({job_id:newJob.id,name:s.name,total_hours:s.totalHours||0})));setSubItems(prev=>[...prev,...inserted.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0}))]);}
       }else{
@@ -1374,6 +1381,21 @@ function MainApp({currentUser,onLogout}) {
       catch(e){setError("Failed to delete job.");}
       setSaving(false);
     }});
+  }
+
+  // Marking a job complete only pulls it out of the Job Summary tab (and, as
+  // a side effect, the quick-edit pill row and the "new entry" job picker,
+  // since those already draw from the same active-jobs bucket) - it never
+  // touches any entry, so the Schedule tab keeps showing its history exactly
+  // as before. Reopening just flips the same flag back.
+  async function toggleJobCompleted(id,completed){
+    setSaving(true);
+    try{
+      await db("PATCH","jobs",{completed},`?id=eq.${id}`);
+      setJobs(prev=>prev.map(j=>j.id===id?{...j,completed}:j));
+      setJobModal(null);
+    }catch(e){setError("Failed to update job.");}
+    setSaving(false);
   }
 
   async function saveStaff(data){
@@ -2179,11 +2201,28 @@ function MainApp({currentUser,onLogout}) {
               <SummarySection jobs={archivedJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={true} canEdit={canEdit} onUnschedule={null}/>
             </>
           )}
+          {/* Completed jobs are deliberately left out of the sections above -
+              this is just a way back to one if it was closed by mistake, not
+              a third section to browse day-to-day. */}
+          {canEdit&&completedJobs.length>0&&(
+            <details style={{marginTop:8}}>
+              <summary style={{cursor:"pointer",fontSize:12,color:"#94A3B8",fontWeight:500}}>Completed jobs ({completedJobs.length})</summary>
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:10}}>
+                {completedJobs.map(job=>(
+                  <div key={job.id} onClick={()=>setJobModal({isNew:false,...job,subItems:subItems.filter(s=>s.jobId===job.id)})}
+                    style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",border:`1.5px solid ${job.borderColor}`,borderRadius:8,background:job.bgColor,cursor:"pointer"}}>
+                    <span style={{fontSize:13,fontWeight:600,color:job.textColor}}>{job.jobNo} — {job.name}</span>
+                    <span style={{fontSize:11,color:job.textColor,opacity:0.75}}>completed · tap to reopen</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
 
-      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
-      {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)} saving={saving}/>}
+      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={jobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
+      {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onToggleComplete={toggleJobCompleted} onClose={()=>setJobModal(null)} saving={saving}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id} saving={saving}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline}/>}
       {workHoursOpen&&(
@@ -2447,7 +2486,11 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             <>
               <Sel label="Job" value={form.jobId} onChange={e=>handleJobChange(e.target.value)}>
                 <option value="">— Select job —</option>
-                {jobs.map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}</option>)}
+                {/* A completed job is hidden from new entries - but if this
+                    entry already points at one (marked complete after the
+                    fact), keep it in the list so the dropdown still shows
+                    the entry's real job instead of going blank. */}
+                {jobs.filter(j=>!j.completed||j.id===form.jobId).map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}{j.completed?" (completed)":""}</option>)}
               </Sel>
               {form.jobId&&(
                 <Sel label="Joinery Item" value={form.subItemId||""} onChange={e=>handleSubChange(e.target.value)}>
@@ -2551,7 +2594,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
 // ── Job Modal ─────────────────────────────────────────────────
 
-function JobModal({data,onSave,onDelete,onClose,saving}) {
+function JobModal({data,onSave,onDelete,onToggleComplete,onClose,saving}) {
   const [form,setForm]=useState({...data,subItems:data.subItems.map(s=>({...s}))});
   const [importMsg,setImportMsg]=useState(null);
   const fileInputRef=useRef(null);
@@ -2683,7 +2726,14 @@ function JobModal({data,onSave,onDelete,onClose,saving}) {
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",marginTop:20,borderTop:"1px solid #F1F5F9",paddingTop:16}}>
-        <div>{!form.isNew&&<Btn variant="danger" disabled={saving} onClick={()=>onDelete(form.id)}>Delete Job</Btn>}</div>
+        <div style={{display:"flex",gap:8}}>
+          {!form.isNew&&<Btn variant="danger" disabled={saving} onClick={()=>onDelete(form.id)}>Delete Job</Btn>}
+          {!form.isNew&&onToggleComplete&&(
+            <Btn variant="ghost" disabled={saving} onClick={()=>onToggleComplete(form.id,!form.completed)}>
+              {form.completed?"↺ Reopen Job":"✓ Mark Complete"}
+            </Btn>
+          )}
+        </div>
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" disabled={saving} onClick={onClose}>Cancel</Btn>
           <Btn variant="primary" loading={saving} onClick={()=>{if(!form.jobNo||!form.name)return;onSave(form);}}>{saving?"Saving...":"Save Job"}</Btn>
