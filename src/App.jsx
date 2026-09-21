@@ -433,6 +433,25 @@ function Modal({title,onClose,children,wide,small}) {
   );
 }
 
+// A centered, app-styled stand-in for window.confirm/alert - those render
+// as a generic browser dialog wherever the browser decides to put it,
+// instead of looking like part of the app.
+function ConfirmModal({title="Confirm",message,confirmLabel="Confirm",cancelLabel="Cancel",danger,onConfirm,onCancel}) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+      onClick={e=>{if(e.target===e.currentTarget)onCancel();}}>
+      <div style={{background:"#fff",borderRadius:14,maxWidth:420,width:"100%",padding:24,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+        <div style={{fontSize:16,fontWeight:600,color:"#1E293B",marginBottom:12}}>{title}</div>
+        <div style={{fontSize:14,color:"#475569",marginBottom:20,lineHeight:1.6}}>{message}</div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn variant="ghost" onClick={onCancel}>{cancelLabel}</Btn>
+          <Btn variant={danger?"danger":"primary"} onClick={onConfirm}>{confirmLabel}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Inp({label,...props}) {
   return (
     <div style={{marginBottom:10}}>
@@ -465,6 +484,8 @@ function Btn({variant="default",style:s,loading,disabled,children,...props}) {
   );
 }
 
+const contextMenuItemStyle={display:"block",width:"100%",textAlign:"left",padding:"7px 10px",border:"none",background:"none",cursor:"pointer",fontSize:13,color:"#334155",borderRadius:5};
+
 function Spinner({text="Loading..."}) {
   return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh",flexDirection:"column",gap:16}}>
@@ -477,7 +498,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
   const hoursLabel=isOverRun?"over-run"
     :isUnderCap?`${underAmount}h under`
     :isCompletingEntry?`${budgetRemaining}h`
@@ -490,8 +511,9 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
+      onContextMenu={canEdit&&onContextMenu?onContextMenu:undefined}
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:canEdit?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
-      {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
+      {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {isMobile?(
         <>
           <div style={{fontSize:12,fontWeight:700,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{job.jobNo} {job.name}</div>
@@ -513,29 +535,38 @@ function JobBlock({job,subItem,hours,entry,onClick,onDragStart,onDragEnd,conflic
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
+function MiscBlock({note,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
   return (
     <div
       draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
       onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
       onDragEnd={canEdit?onDragEnd:undefined}
       onClick={canEdit?onClick:undefined}
+      onContextMenu={canEdit&&onContextMenu?onContextMenu:undefined}
       style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
-      {conflict&&<div style={{position:"absolute",top:2,right:4,fontSize:10,color:"#EF4444",fontWeight:700}}>⚠ CONFLICT</div>}
-      <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
+      {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
+      <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{note}</div>
+      <div style={{fontSize:isMobile?11:10,fontWeight:400,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",lineHeight:1.3}}>{hours}h</div>
       {isOvercommitted&&<div style={{fontSize:isMobile?10:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
     </div>
   );
 }
 
-function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,copyMode}) {
+function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,available}) {
+  // Copy and Move both just arm a plain click-to-target on an empty slot -
+  // no special "Paste here" fill, so they look and behave identically.
   if (isPastDate||!canEdit) return <div style={{minHeight:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
+  // A job that wrapped up without using this staff member's whole day
+  // leaves the day's other slot free - flag that leftover capacity instead
+  // of showing a plain "+", with the same pale grey used elsewhere in the
+  // app (e.g. Saturday columns). Misc entries carry their own solid border,
+  // so the shared grey tone doesn't need to compete with that for contrast.
   return (
     <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":copyMode?"1.5px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget||copyMode?"#3B82F6":"#CBD5E1",fontSize:copyMode?11:16,fontWeight:copyMode?600:400,background:copyMode?"rgba(59,130,246,0.06)":"transparent",transition:"all 0.12s"}}
-      onMouseEnter={e=>{if(!isDropTarget&&!copyMode){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
-      onMouseLeave={e=>{if(!isDropTarget&&!copyMode){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
-      {copyMode?"Paste here":isDropTarget?"↓":"+"}
+      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.2,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
+      onMouseEnter={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
+      onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
+      {isDropTarget?"↓":available?"Available Hours":"+"}
     </div>
   );
 }
@@ -621,6 +652,7 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
   const [logoUploading,setLogoUploading]=useState(false);
   const [nameInput,setNameInput]=useState(companyName);
   const [taglineInput,setTaglineInput]=useState(companyTagline);
+  const [confirmDialog,setConfirmDialog]=useState(null);
 
   async function handleLogoFile(e){
     const file=e.target.files[0];
@@ -647,10 +679,12 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
     setSaving(false);
   }
 
-  async function removeUser(id) {
-    if (!window.confirm("Remove this user?")) return;
-    await db("DELETE","user_roles",null,`?id=eq.${id}`);
-    setUsers(prev=>prev.filter(u=>u.id!==id));
+  function removeUser(id) {
+    setConfirmDialog({message:"Remove this user?",danger:true,confirmLabel:"Remove",onConfirm:async()=>{
+      setConfirmDialog(null);
+      await db("DELETE","user_roles",null,`?id=eq.${id}`);
+      setUsers(prev=>prev.filter(u=>u.id!==id));
+    }});
   }
 
   async function changeRole(id,role) {
@@ -661,6 +695,7 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
   const roleColors={admin:{bg:"#FEF3C7",color:"#92400E"},manager:{bg:"#DBEAFE",color:"#1D4ED8"},staff:{bg:"#F0FDF4",color:"#15803D"}};
 
   return (
+    <>
     <Modal title="👥 User Management" wide onClose={onClose}>
       {loading?<Spinner text="Loading users..."/>:(
         <>
@@ -743,6 +778,8 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
         </>
       )}
     </Modal>
+    {confirmDialog&&<ConfirmModal {...confirmDialog} onCancel={()=>setConfirmDialog(null)}/>}
+    </>
   );
 }
 
@@ -866,6 +903,7 @@ function MainApp({currentUser,onLogout}) {
   const [entryModal,setEntryModal]=useState(null);
   const [staffModal,setStaffModal]=useState(null);
   const [conflictAlert,setConflictAlert]=useState(null);
+  const [confirmDialog,setConfirmDialog]=useState(null);
   const [userMgmtOpen,setUserMgmtOpen]=useState(false);
   const [workHoursOpen,setWorkHoursOpen]=useState(false);
   const [workStart,setWorkStart]=useState("07:00");
@@ -974,27 +1012,27 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>prev.filter(en=>en.id!==tempId));
       }
     } else if(last.type==="moveEntry") {
-      const {id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt}=last.data;
+      const {id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours}=last.data;
       const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt}:e));
-      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt}}]);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})}:e));
+      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt,hours:current.hours}}]);
       try{
-        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt},`?id=eq.${id}`);
+        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})},`?id=eq.${id}`);
       }catch(err){
         setError("Undo failed - reverted.");
         if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setRedoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveMultiple") {
-      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:e;}));
+      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt,hours:cur.hours}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,...(ps.prevHours!==undefined?{hours:ps.prevHours}:{})}:e;}));
       setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
       try{
-        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt})=>
-          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt},`?id=eq.${id}`)
+        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours})=>
+          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Undo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt}:e;}));
+        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,hours:s.hours}:e;}));
         setRedoStack(prev=>prev.slice(0,-1));
       }
     } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
@@ -1054,27 +1092,27 @@ function MainApp({currentUser,onLogout}) {
         if(entry){setEntries(prev=>[...prev,entry]);setUndoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveEntry") {
-      const {id,staffId,dateStr,slot,createdAt}=last.data;
+      const {id,staffId,dateStr,slot,createdAt,hours}=last.data;
       const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt}:e));
-      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt}}]);
+      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt,...(hours!==undefined?{hours}:{})}:e));
+      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt,prevHours:current.hours}}]);
       try{
-        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt},`?id=eq.${id}`);
+        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt,...(hours!==undefined?{hours}:{})},`?id=eq.${id}`);
       }catch(err){
         setError("Redo failed - reverted.");
         if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setUndoStack(prev=>prev.slice(0,-1));}
       }
     } else if(last.type==="moveMultiple") {
-      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt}:e;}));
+      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt,prevHours:cur.hours}:null;}).filter(Boolean);
+      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,...(s.hours!==undefined?{hours:s.hours}:{})}:e;}));
       setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
       try{
-        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot,createdAt})=>
-          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt},`?id=eq.${id}`)
+        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot,createdAt,hours})=>
+          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt,...(hours!==undefined?{hours}:{})},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Redo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:e;}));
+        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,hours:ps.prevHours}:e;}));
         setUndoStack(prev=>prev.slice(0,-1));
       }
     } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
@@ -1096,6 +1134,7 @@ function MainApp({currentUser,onLogout}) {
   const [selectionMode,setSelectionMode]=useState(false);
   const [moveMode,setMoveMode]=useState(false); // tap-to-move, for touch devices where drag-and-drop can't fire
   const [dropTarget,setDropTarget]=useState(null);
+  const [contextMenu,setContextMenu]=useState(null); // {x,y,entry} - right-click quick actions
 
   useEffect(()=>{
     function onKeyDown(e){
@@ -1105,11 +1144,36 @@ function MainApp({currentUser,onLogout}) {
         setSelectionMode(false);
         setMoveMode(false);
         setCopyMode(false);
+        setContextMenu(null);
+        return;
+      }
+      if((e.key==="Delete"||e.key==="Backspace")&&!isFormField&&selectionMode&&selectedEntries.size>0){
+        e.preventDefault();
+        deleteSelectedEntries();
       }
     }
     window.addEventListener("keydown",onKeyDown);
     return ()=>window.removeEventListener("keydown",onKeyDown);
-  },[]);
+  },[selectionMode,selectedEntries]);
+
+  // Right-click quick-action menu on an entry - dismiss on any left click or
+  // scroll elsewhere, the same way a native context menu would behave.
+  useEffect(()=>{
+    if(!contextMenu)return;
+    function close(){setContextMenu(null);}
+    window.addEventListener("click",close);
+    window.addEventListener("scroll",close,true);
+    return ()=>{
+      window.removeEventListener("click",close);
+      window.removeEventListener("scroll",close,true);
+    };
+  },[contextMenu]);
+
+  function openContextMenu(e,entry){
+    if(!canEdit)return;
+    e.preventDefault();
+    setContextMenu({x:e.clientX,y:e.clientY,entry});
+  }
 
   const loadAll=useCallback(async()=>{
     try {
@@ -1129,7 +1193,7 @@ function MainApp({currentUser,onLogout}) {
         staffSorted.forEach((s,i)=>db("PATCH","staff",{sort_order:i},`?id=eq.${s.id}`).catch(()=>{}));
         setStaffOrder(staffSorted.map(s=>s.id));
       }
-      setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color})));
+      setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color,completed:!!j.completed})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
       setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at})));
     } catch(e){setError("Could not connect to database.");}
@@ -1139,15 +1203,22 @@ function MainApp({currentUser,onLogout}) {
   useEffect(()=>{loadAll();},[loadAll]);
 
   const threshold=oneMonthAgo();
-  const {activeJobs,archivedJobs}=useMemo(()=>{
-    const active=[],archived=[];
+  // A job someone has manually marked complete never lands in either bucket
+  // here - it's a closed job, not just a quiet/stale one. That single filter
+  // is what pulls it out of Job Summary, the quick-edit pill row above the
+  // calendar, and the "new entry" job picker all at once, since each of
+  // those already draws from activeJobs/archivedJobs rather than the raw
+  // jobs list. It never touches entries or the grid itself.
+  const {activeJobs,archivedJobs,completedJobs}=useMemo(()=>{
+    const active=[],archived=[],completed=[];
     for (const job of jobs){
+      if(job.completed){completed.push(job);continue;}
       const je=entries.filter(e=>e.jobId===job.id);
       if(!je.length){active.push(job);continue;}
       const maxDate=je.map(e=>e.dateStr).sort().reverse()[0];
       if(maxDate<threshold)archived.push(job);else active.push(job);
     }
-    return {activeJobs:active,archivedJobs:archived};
+    return {activeJobs:active,archivedJobs:archived,completedJobs:completed};
   },[jobs,entries,threshold]);
 
   const visibleDays=useMemo(()=>{
@@ -1159,10 +1230,10 @@ function MainApp({currentUser,onLogout}) {
   const totalWeeks=viewMode==="month"?4:viewWeeks;
   const weekStarts=Array.from({length:totalWeeks},(_,i)=>addDays(anchorDate,i*7));
 
-  const {entryMap,conflictKeys}=useMemo(()=>{
-    const map={},counts={};
-    for(const e of entries){const k=`${e.staffId}|${e.dateStr}|${e.slot}`;counts[k]=(counts[k]||0)+1;map[k]=e;}
-    return {entryMap:map,conflictKeys:new Set(Object.keys(counts).filter(k=>counts[k]>1))};
+  const {entryMap,conflictKeys,entriesByKey}=useMemo(()=>{
+    const map={},counts={},byKey={};
+    for(const e of entries){const k=`${e.staffId}|${e.dateStr}|${e.slot}`;counts[k]=(counts[k]||0)+1;map[k]=e;(byKey[k]=byKey[k]||[]).push(e);}
+    return {entryMap:map,conflictKeys:new Set(Object.keys(counts).filter(k=>counts[k]>1)),entriesByKey:byKey};
   },[entries]);
 
   function navigate(dir){const w=viewMode==="month"?4:viewWeeks;setAnchorDate(d=>addDays(d,dir*w*7));}
@@ -1255,7 +1326,7 @@ function MainApp({currentUser,onLogout}) {
     try{
       if(data.isNew){
         const [newJob]=await db("POST","jobs",[{job_no:data.jobNo,name:data.name,bg_color:data.bgColor,border_color:data.borderColor,text_color:data.textColor}]);
-        setJobs(prev=>[...prev,{id:newJob.id,jobNo:newJob.job_no,name:newJob.name,bgColor:newJob.bg_color,borderColor:newJob.border_color,textColor:newJob.text_color}]);
+        setJobs(prev=>[...prev,{id:newJob.id,jobNo:newJob.job_no,name:newJob.name,bgColor:newJob.bg_color,borderColor:newJob.border_color,textColor:newJob.text_color,completed:!!newJob.completed}]);
         const validSubs=data.subItems.filter(s=>s.name.trim());
         if(validSubs.length>0){const inserted=await db("POST","sub_items",validSubs.map(s=>({job_id:newJob.id,name:s.name,total_hours:s.totalHours||0})));setSubItems(prev=>[...prev,...inserted.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0}))]);}
       }else{
@@ -1283,30 +1354,47 @@ function MainApp({currentUser,onLogout}) {
     setSaving(false);
   }
 
-  async function deleteJob(id){
+  function deleteJob(id){
     const job=jobs.find(j=>j.id===id);
     const entryCount=entries.filter(e=>e.jobId===id).length;
     const msg=entryCount>0
       ?`Delete "${job?.jobNo} ${job?.name}"? This will permanently delete it and all ${entryCount} scheduled entries against it. This cannot be undone.`
       :`Delete "${job?.jobNo} ${job?.name}"? This cannot be undone.`;
-    if(!window.confirm(msg))return;
+    setConfirmDialog({message:msg,danger:true,confirmLabel:"Delete",onConfirm:async()=>{
+      setConfirmDialog(null);
+      setSaving(true);
+      try{
+        const jobEntryIds=entries.filter(e=>e.jobId===id).map(e=>e.id);
+        const jobSubIds=subItems.filter(s=>s.jobId===id).map(s=>s.id);
+        // Delete children explicitly first - don't rely on the DB having
+        // ON DELETE CASCADE set up, since deleting the job row while entries/
+        // sub_items still reference it would otherwise fail with a foreign
+        // key violation and silently do nothing.
+        if(jobEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${jobEntryIds.join(",")})`);
+        if(jobSubIds.length>0)await db("DELETE","sub_items",null,`?id=in.(${jobSubIds.join(",")})`);
+        await db("DELETE","jobs",null,`?id=eq.${id}`);
+        setJobs(prev=>prev.filter(j=>j.id!==id));
+        setSubItems(prev=>prev.filter(s=>s.jobId!==id));
+        setEntries(prev=>prev.filter(e=>e.jobId!==id));
+        setJobModal(null);
+      }
+      catch(e){setError("Failed to delete job.");}
+      setSaving(false);
+    }});
+  }
+
+  // Marking a job complete only pulls it out of the Job Summary tab (and, as
+  // a side effect, the quick-edit pill row and the "new entry" job picker,
+  // since those already draw from the same active-jobs bucket) - it never
+  // touches any entry, so the Schedule tab keeps showing its history exactly
+  // as before. Reopening just flips the same flag back.
+  async function toggleJobCompleted(id,completed){
     setSaving(true);
     try{
-      const jobEntryIds=entries.filter(e=>e.jobId===id).map(e=>e.id);
-      const jobSubIds=subItems.filter(s=>s.jobId===id).map(s=>s.id);
-      // Delete children explicitly first - don't rely on the DB having
-      // ON DELETE CASCADE set up, since deleting the job row while entries/
-      // sub_items still reference it would otherwise fail with a foreign
-      // key violation and silently do nothing.
-      if(jobEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${jobEntryIds.join(",")})`);
-      if(jobSubIds.length>0)await db("DELETE","sub_items",null,`?id=in.(${jobSubIds.join(",")})`);
-      await db("DELETE","jobs",null,`?id=eq.${id}`);
-      setJobs(prev=>prev.filter(j=>j.id!==id));
-      setSubItems(prev=>prev.filter(s=>s.jobId!==id));
-      setEntries(prev=>prev.filter(e=>e.jobId!==id));
+      await db("PATCH","jobs",{completed},`?id=eq.${id}`);
+      setJobs(prev=>prev.map(j=>j.id===id?{...j,completed}:j));
       setJobModal(null);
-    }
-    catch(e){setError("Failed to delete job.");}
+    }catch(e){setError("Failed to update job.");}
     setSaving(false);
   }
 
@@ -1325,24 +1413,26 @@ function MainApp({currentUser,onLogout}) {
     setSaving(false);
   }
 
-  async function removeStaff(id){
+  function removeStaff(id){
     const s=staff.find(x=>x.id===id);
     const entryCount=entries.filter(e=>e.staffId===id).length;
     const msg=entryCount>0
       ?`Remove ${s?.name}? This will permanently delete them and all ${entryCount} of their scheduled entries. This cannot be undone.`
       :`Remove ${s?.name}? This cannot be undone.`;
-    if(!window.confirm(msg))return;
-    setSaving(true);
-    try{
-      const staffEntryIds=entries.filter(e=>e.staffId===id).map(e=>e.id);
-      if(staffEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${staffEntryIds.join(",")})`);
-      await db("DELETE","staff",null,`?id=eq.${id}`);
-      setStaff(prev=>prev.filter(s=>s.id!==id));
-      setEntries(prev=>prev.filter(e=>e.staffId!==id));
-      setStaffModal(null);
-    }
-    catch(e){setError("Failed to remove staff.");}
-    setSaving(false);
+    setConfirmDialog({message:msg,danger:true,confirmLabel:"Remove",onConfirm:async()=>{
+      setConfirmDialog(null);
+      setSaving(true);
+      try{
+        const staffEntryIds=entries.filter(e=>e.staffId===id).map(e=>e.id);
+        if(staffEntryIds.length>0)await db("DELETE","entries",null,`?id=in.(${staffEntryIds.join(",")})`);
+        await db("DELETE","staff",null,`?id=eq.${id}`);
+        setStaff(prev=>prev.filter(s=>s.id!==id));
+        setEntries(prev=>prev.filter(e=>e.staffId!==id));
+        setStaffModal(null);
+      }
+      catch(e){setError("Failed to remove staff.");}
+      setSaving(false);
+    }});
   }
 
   async function performGroupMove(anchorEntry,toStaffId,toDateStr,toSlot){
@@ -1396,32 +1486,51 @@ function MainApp({currentUser,onLogout}) {
 
       const prevStates=idsToMove.map(id=>{
         const en=entries.find(x=>x.id===id);
-        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot,prevCreatedAt:en.createdAt};
+        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot,prevCreatedAt:en.createdAt,prevHours:en.hours};
       });
       pushUndo("moveMultiple",{prevStates});
       // Moving these entries makes them the newest arrivals wherever they
       // land, for capacity-conflict purposes - an old entry dragged into a
       // fresh conflict shouldn't still "win" on its original creation date.
       const movedAt=new Date().toISOString();
-      const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id]}));
+      // Same restoration as a single-entry drag (see handleDrop): if the one
+      // entry being moved was capped by a same-day sibling at its old spot,
+      // and its new spot has no sibling, give it the day back. Only applied
+      // for a single selected entry - a genuine multi-entry group move can
+      // shift several mutually-dependent entries together, where "was it
+      // capped" gets a lot less clear-cut, so those keep their hours as-is
+      // like before.
+      let newHoursById={};
+      if(idsToMove.length===1){
+        const id=idsToMove[0];
+        const en=entries.find(x=>x.id===id);
+        const newStaffId=idToStaff[id],newDate=idToDate[id],newSlot=idToSlot[id];
+        const oldSibling=entries.find(o=>o.id!==id&&o.staffId===en.staffId&&o.dateStr===en.dateStr&&o.slot!==en.slot);
+        const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,en);
+        const newSibling=entries.find(o=>o.id!==id&&o.staffId===newStaffId&&o.dateStr===newDate&&o.slot!==newSlot);
+        if(wasCappedByOldSibling&&!newSibling){
+          newHoursById[id]=Number(staff.find(s=>s.id===newStaffId)?.productiveHours)||8;
+        }
+      }
+      const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id],newHours:newHoursById[id]}));
       // Land the whole group immediately - don't make the user wait for every
       // PATCH to round-trip before the drop appears to take effect.
       setEntries(prev=>prev.map(x=>{
         const u=updates.find(u=>u.id===x.id);
-        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt}:x;
+        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt,...(u.newHours!==undefined?{hours:u.newHours}:{})}:x;
       }));
       setSelectedEntries(new Set());
       setSelectionMode(false);
       setMoveMode(false);
       try{
-        await Promise.all(updates.map(({id,newDate,newStaffId,newSlot})=>
-          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt},`?id=eq.${id}`)
+        await Promise.all(updates.map(({id,newDate,newStaffId,newSlot,newHours})=>
+          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt,...(newHours!==undefined?{hours:newHours}:{})},`?id=eq.${id}`)
         ));
       }catch(err){
         setError("Failed to move entries - reverted.");
         setEntries(prev=>prev.map(x=>{
           const ps=prevStates.find(p=>p.id===x.id);
-          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt}:x;
+          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,hours:ps.prevHours}:x;
         }));
         setUndoStack(s=>s.slice(0,-1));
       }
@@ -1485,9 +1594,11 @@ function MainApp({currentUser,onLogout}) {
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
-      // Stay in copy mode with the same selection - paste keeps the source group
-      // copied so it can be pasted again at another spot without re-selecting,
-      // until Copy is toggled off or a new selection is made.
+      // A single destination click lands the paste and exits Copy mode, the
+      // same as Move - it shouldn't take an extra Enter/click to settle.
+      setSelectedEntries(new Set());
+      setSelectionMode(false);
+      setCopyMode(false);
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
@@ -1501,32 +1612,70 @@ function MainApp({currentUser,onLogout}) {
     }catch(err){setError("Failed to copy entries.");}
   }
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
-  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect="move";setDropTarget({staffId,dateStr,slot});}
+  function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect=(e.ctrlKey||e.altKey||e.metaKey)?"copy":"move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
   async function handleDrop(e,toStaffId,toDateStr,toSlot){
     e.preventDefault();setDropTarget(null);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
     if(isPast(toDateStr))return;
+    // Holding Ctrl/Option while dropping copies instead of moves - the
+    // standard desktop drag convention, and a one-step alternative to the
+    // Select > Copy > tap-destination flow for a single entry.
+    const isCopyDrag=e.ctrlKey||e.altKey||e.metaKey;
     // Multi-select: shift all entries by same date offset, preserve relative staff rows
     if(selectionMode&&selectedEntries.size>0&&selectedEntries.has(entry.id)){
-      await performGroupMove(entry,toStaffId,toDateStr,toSlot);
+      if(isCopyDrag) await performGroupCopy(entry,toStaffId,toDateStr,toSlot);
+      else await performGroupMove(entry,toStaffId,toDateStr,toSlot);
       dragEntry.current=null;
       return;
     }
     // Single entry drag
     if(entry.staffId===toStaffId&&entry.dateStr===toDateStr&&entry.slot===toSlot){dragEntry.current=null;return;}
-    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt};
-    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt});
+    if(isCopyDrag){
+      if(entryMap[`${toStaffId}|${toDateStr}|${toSlot}`]){
+        setError("Couldn't copy - that slot is already occupied.");
+        dragEntry.current=null;
+        return;
+      }
+      const tempId=`temp_copy_${Date.now()}`;
+      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString()};
+      setEntries(prev=>[...prev,tempEntry]);
+      dragEntry.current=null;
+      try{
+        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null}]);
+        const i=inserted[0];
+        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at};
+        setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
+        pushUndo("addEntries",{ids:[newEntry.id]});
+      }catch(err){
+        setError("Failed to copy entry.");
+        setEntries(prev=>prev.filter(en=>en.id!==tempId));
+      }
+      return;
+    }
+    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt,hours:entry.hours};
+    // If this entry's hours were being capped by a same-day sibling at its
+    // OLD spot, and the new spot has no sibling to share the day with, its
+    // stored hours should go back to using the whole day - otherwise a
+    // reduction caused by that old conflict survives long after the
+    // conflict itself is gone (e.g. dragged away to an empty day).
+    const oldSibling=entries.find(o=>o.id!==entry.id&&o.staffId===entry.staffId&&o.dateStr===entry.dateStr&&o.slot!==entry.slot);
+    const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,entry);
+    const newSibling=entries.find(o=>o.id!==entry.id&&o.staffId===toStaffId&&o.dateStr===toDateStr&&o.slot!==toSlot);
+    const newHours=(wasCappedByOldSibling&&!newSibling)
+      ?(Number(staff.find(s=>s.id===toStaffId)?.productiveHours)||8)
+      :entry.hours;
+    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt,prevHours:prevState.hours});
     // Dropping it here makes it the newest arrival at this day/slot for
     // capacity-conflict purposes - an old entry dragged into a fresh
     // conflict shouldn't still "win" on its original creation date.
     const movedAt=new Date().toISOString();
     // Move it on screen immediately - don't wait for the server round-trip to
     // show the drop landing. Roll back if the save actually fails.
-    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt}:en));
+    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt,hours:newHours}:en));
     dragEntry.current=null;
     try{
-      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot,created_at:movedAt},`?id=eq.${entry.id}`);
+      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot,created_at:movedAt,hours:newHours},`?id=eq.${entry.id}`);
     }catch(err){
       setError("Failed to move entry - change reverted.");
       setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,...prevState}:en));
@@ -1647,14 +1796,14 @@ function MainApp({currentUser,onLogout}) {
     });
   }
 
-  async function deleteSelectedEntries(){
-    if(selectedEntries.size===0)return;
-    const ids=[...selectedEntries];
+  async function deleteEntriesByIds(ids){
+    if(ids.length===0)return;
     const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);
     // Clear them immediately - don't make the user wait on the delete to
     // round-trip before the selection disappears.
     pushUndo("deleteMultiple",{deletedEntries});
-    setEntries(prev=>prev.filter(e=>!selectedEntries.has(e.id)));
+    const idSet=new Set(ids);
+    setEntries(prev=>prev.filter(e=>!idSet.has(e.id)));
     setSelectedEntries(new Set());
     setSelectionMode(false);
     setMoveMode(false);
@@ -1666,6 +1815,9 @@ function MainApp({currentUser,onLogout}) {
       setEntries(prev=>[...prev,...deletedEntries]);
       setUndoStack(s=>s.slice(0,-1));
     }
+  }
+  function deleteSelectedEntries(){
+    return deleteEntriesByIds([...selectedEntries]);
   }
 
   function nextPreset(){return JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length];}
@@ -1913,8 +2065,6 @@ function MainApp({currentUser,onLogout}) {
                         const isSat=d.getDay()===6;
                         const k=`${st.id}|${ds}|${slot}`;
                         const entry=entryMap[k];
-                        const job=entry&&!entry.miscNote?jobs.find(j=>j.id===entry.jobId):null;
-                        const subItem=entry&&entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
                         const isConflict=conflictKeys.has(k);
                         const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
@@ -1925,7 +2075,90 @@ function MainApp({currentUser,onLogout}) {
                         // below) instead of showing a warning. This isn't tied to slot number -
                         // whichever slot was actually filled in later is the one that can be
                         // "Overcommitted".
-                        const isOvercommitted=!!entry&&!!otherSlotEntry&&!wasScheduledFirst(entry,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
+                        function computeIsOvercommitted(e){
+                          return !!e&&!!otherSlotEntry&&!wasScheduledFirst(e,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
+                        }
+                        // Works out a job entry's place in its sub-item's budget - factored out
+                        // so both the entry's own block AND a companion empty slot (to flag
+                        // leftover capacity once a job wraps up early) can use it.
+                        function computeJobEntryMeta(e){
+                          if(!e||e.miscNote||!e.subItemId)return null;
+                          const si=subItems.find(s=>s.id===e.subItemId);
+                          if(!si)return null;
+                          const siEntries=entries.filter(x=>x.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+                          const myIndex=siEntries.findIndex(x=>x.id===e.id);
+                          // Walk the sub-item's entries in date order and find the one that first
+                          // reaches (or passes) the total budget - that's the "completing" entry.
+                          // If nothing ever reaches it, the true last entry stands in for that role
+                          // instead - same formula, same display, just using whatever's left as of
+                          // walking into it rather than an amount that happens to close the budget.
+                          // Either way it's totalHours minus everything scheduled BEFORE it; this
+                          // entry's own hours never enter into what's displayed. Anything scheduled
+                          // after the completing entry is pure surplus ("over-run"). But if what's
+                          // left before the final entry is more than a single day could ever cover
+                          // (its own hours can never make up the gap), showing that full remaining
+                          // figure would be a physically impossible claim - so that case shows the
+                          // real shortfall instead: how much would still be left over even after a
+                          // full day here.
+                          let completeIdx=-1,cumulative=0;
+                          const befores=[];
+                          for(let i=0;i<siEntries.length;i++){
+                            befores.push(cumulative);
+                            const en=siEntries[i];
+                            const effHours=effectiveEntryHours(en,entries,staff);
+                            cumulative+=effHours;
+                            if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
+                          }
+                          const totalBudget=si.totalHours||null;
+                          const specialIdx=completeIdx!==-1?completeIdx:siEntries.length-1;
+                          const isSpecialEntry=myIndex===specialIdx;
+                          const isOverRun=completeIdx!==-1&&myIndex>completeIdx;
+                          let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
+                          if(isSpecialEntry){
+                            const remainingBefore=si.totalHours-befores[myIndex];
+                            const maxPossible=completeIdx===-1?maxPossibleHours(siEntries[myIndex],entries,staff):Infinity;
+                            if(completeIdx===-1&&remainingBefore>maxPossible+0.05){
+                              isUnderCap=true;
+                              underAmount=Math.round((remainingBefore-maxPossible)*2)/2;
+                            }else{
+                              isCompletingEntry=true;
+                              budgetRemaining=Math.max(0,Math.round(remainingBefore*2)/2);
+                            }
+                          }
+                          // When more than one person is scheduled against the same item, each of
+                          // them has their OWN last entry for it - not just whichever one entry the
+                          // walk above picks as the single item-wide completing/under one. Every
+                          // other staff member's own final entry should show their real, actual
+                          // stored hours instead of the flat total-budget placeholder, the same way
+                          // the one "special" entry does.
+                          const myStaffEntries=siEntries.filter(x=>x.staffId===e.staffId);
+                          const myLastEntry=myStaffEntries[myStaffEntries.length-1];
+                          const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id;
+                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry};
+                        }
+                        // Whenever this staff member doesn't have every hour of their day
+                        // used/allocated - whatever sits in the other slot, job or misc, for
+                        // whichever staff member it is - the empty slot flags that leftover
+                        // capacity instead of showing a plain "+".
+                        const showAvailableHours=!entry&&!!otherSlotEntry&&(Number(otherSlotEntry.hours)||0)<(Number(st.productiveHours)||8)-0.05;
+                        // Renders whichever entry sits in this staff/day/slot - factored out so a
+                        // conflict (two entries mapped to the same slot) can render BOTH of them
+                        // side by side at half width instead of only ever showing one.
+                        function renderEntryBlock(e,forceConflict){
+                          const eJob=e&&!e.miscNote?jobs.find(j=>j.id===e.jobId):null;
+                          const eSubItem=e&&e.subItemId?subItems.find(s=>s.id===e.subItemId):null;
+                          const eIsOvercommitted=computeIsOvercommitted(e);
+                          const blockOnClick=copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(e.id):()=>openEditEntry(e);
+                          const blockOnContextMenu=canEdit?ev=>openContextMenu(ev,e):undefined;
+                          if(e.miscNote){
+                            return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                          }
+                          if(!eJob){
+                            return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
+                          }
+                          const meta=computeJobEntryMeta(e)||{};
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                        }
                         return(
                           <td key={di}
                             style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
@@ -1933,64 +2166,14 @@ function MainApp({currentUser,onLogout}) {
                             onDragLeave={handleDragLeave}
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
                             {entry
-                              ? entry.miscNote
-                                ? <MiscBlock note={entry.miscNote} hours={entry.hours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>
-                                : job
-                                  ? (()=>{
-                                      const si=entry.subItemId?subItems.find(s=>s.id===entry.subItemId):null;
-                                      const siEntries=si?entries.filter(e=>e.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr)):[];
-                                      const myIndex=si?siEntries.findIndex(e=>e.id===entry.id):-1;
-                                      // Walk the sub-item's entries in date order and find the one that first
-                                      // reaches (or passes) the total budget - that's the "completing" entry.
-                                      // If nothing ever reaches it, the true last entry stands in for that role
-                                      // instead - same formula, same display, just using whatever's left as of
-                                      // walking into it rather than an amount that happens to close the budget.
-                                      // Either way it's totalHours minus everything scheduled BEFORE it; this
-                                      // entry's own hours never enter into what's displayed. Anything scheduled
-                                      // after the completing entry is pure surplus ("over-run"). But if what's
-                                      // left before the final entry is more than a single day could ever cover
-                                      // (its own hours can never make up the gap), showing that full remaining
-                                      // figure would be a physically impossible claim - so that case shows the
-                                      // real shortfall instead: how much would still be left over even after a
-                                      // full day here.
-                                      let completeIdx=-1,cumulative=0;
-                                      const befores=[];
-                                      if(si)for(let i=0;i<siEntries.length;i++){
-                                        befores.push(cumulative);
-                                        const e=siEntries[i];
-                                        const effHours=effectiveEntryHours(e,entries,staff);
-                                        cumulative+=effHours;
-                                        if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
-                                      }
-                                      const totalBudget=si?.totalHours||null;
-                                      const specialIdx=si?(completeIdx!==-1?completeIdx:siEntries.length-1):-1;
-                                      const isSpecialEntry=si&&myIndex===specialIdx;
-                                      const isOverRun=si&&completeIdx!==-1&&myIndex>completeIdx;
-                                      let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
-                                      if(isSpecialEntry){
-                                        const remainingBefore=si.totalHours-befores[myIndex];
-                                        const maxPossible=completeIdx===-1?maxPossibleHours(siEntries[myIndex],entries,staff):Infinity;
-                                        if(completeIdx===-1&&remainingBefore>maxPossible+0.05){
-                                          isUnderCap=true;
-                                          underAmount=Math.round((remainingBefore-maxPossible)*2)/2;
-                                        }else{
-                                          isCompletingEntry=true;
-                                          budgetRemaining=Math.max(0,Math.round(remainingBefore*2)/2);
-                                        }
-                                      }
-                                      // When more than one person is scheduled against the same item, each of
-                                      // them has their OWN last entry for it - not just whichever one entry the
-                                      // walk above picks as the single item-wide completing/under one. Every
-                                      // other staff member's own final entry should show their real, actual
-                                      // stored hours instead of the flat total-budget placeholder, the same way
-                                      // the one "special" entry does.
-                                      const myStaffEntries=si?siEntries.filter(e=>e.staffId===entry.staffId):[];
-                                      const myLastEntry=myStaffEntries[myStaffEntries.length-1];
-                                      const isPersonalLastEntry=si&&!isSpecialEntry&&!isOverRun&&myLastEntry?.id===entry.id;
-                      return <JobBlock job={job} subItem={subItem} hours={entry.hours} productiveHours={st.productiveHours} entry={entry} conflict={isConflict} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(entry.id):()=>openEditEntry(entry)} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={isCompletingEntry} budgetRemaining={budgetRemaining} totalBudget={totalBudget} selected={selectedEntries.has(entry.id)} selectionMode={selectionMode} isOverRun={isOverRun} isUnderCap={isUnderCap} underAmount={underAmount} isPersonalLastEntry={isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={isOvercommitted}/>;
-                                    })()
-                                  : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
-                              : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} copyMode={copyMode}/>
+                              ? isConflict
+                                ? <div style={{display:"flex",gap:2}}>
+                                    {(entriesByKey[k]||[entry]).slice(0,2).map(ce=>(
+                                      <div key={ce.id} style={{flex:1,minWidth:0}}>{renderEntryBlock(ce,true)}</div>
+                                    ))}
+                                  </div>
+                                : renderEntryBlock(entry,false)
+                              : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} available={showAvailableHours}/>
                             }
                           </td>
                         );
@@ -2018,11 +2201,28 @@ function MainApp({currentUser,onLogout}) {
               <SummarySection jobs={archivedJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={true} canEdit={canEdit} onUnschedule={null}/>
             </>
           )}
+          {/* Completed jobs are deliberately left out of the sections above -
+              this is just a way back to one if it was closed by mistake, not
+              a third section to browse day-to-day. */}
+          {canEdit&&completedJobs.length>0&&(
+            <details style={{marginTop:8}}>
+              <summary style={{cursor:"pointer",fontSize:12,color:"#94A3B8",fontWeight:500}}>Completed jobs ({completedJobs.length})</summary>
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:10}}>
+                {completedJobs.map(job=>(
+                  <div key={job.id} onClick={()=>setJobModal({isNew:false,...job,subItems:subItems.filter(s=>s.jobId===job.id)})}
+                    style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",border:`1.5px solid ${job.borderColor}`,borderRadius:8,background:job.bgColor,cursor:"pointer"}}>
+                    <span style={{fontSize:13,fontWeight:600,color:job.textColor}}>{job.jobNo} — {job.name}</span>
+                    <span style={{fontSize:11,color:job.textColor,opacity:0.75}}>completed · tap to reopen</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
 
-      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={activeJobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
-      {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onClose={()=>setJobModal(null)} saving={saving}/>}
+      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={jobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
+      {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onToggleComplete={toggleJobCompleted} onClose={()=>setJobModal(null)} saving={saving}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id} saving={saving}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline}/>}
       {workHoursOpen&&(
@@ -2043,16 +2243,16 @@ function MainApp({currentUser,onLogout}) {
           </div>
         </Modal>
       )}
-      {conflictAlert&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-          <div style={{background:"#fff",borderRadius:14,maxWidth:420,width:"100%",padding:24,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
-            <div style={{fontSize:16,fontWeight:600,color:"#1E293B",marginBottom:12}}>⚠ Scheduling Conflict</div>
-            <div style={{fontSize:14,color:"#475569",marginBottom:20,lineHeight:1.6}}>{conflictAlert.message}</div>
-            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-              <Btn variant="ghost" onClick={conflictAlert.onCancel}>Go Back</Btn>
-              <Btn variant="danger" onClick={conflictAlert.onConfirm}>Schedule Anyway</Btn>
-            </div>
-          </div>
+      {conflictAlert&&<ConfirmModal title="⚠ Scheduling Conflict" message={conflictAlert.message} cancelLabel="Go Back" confirmLabel="Schedule Anyway" danger onConfirm={conflictAlert.onConfirm} onCancel={conflictAlert.onCancel}/>}
+      {confirmDialog&&<ConfirmModal {...confirmDialog} onCancel={()=>setConfirmDialog(null)}/>}
+      {contextMenu&&(
+        <div onClick={e=>e.stopPropagation()}
+          style={{position:"fixed",left:Math.min(contextMenu.x,window.innerWidth-160),top:Math.min(contextMenu.y,window.innerHeight-180),zIndex:1200,background:"#fff",borderRadius:8,border:"1px solid #E2E8F0",boxShadow:"0 8px 24px rgba(0,0,0,0.18)",padding:4,minWidth:140}}>
+          <button onClick={()=>{openEditEntry(contextMenu.entry);setContextMenu(null);}} style={contextMenuItemStyle}>✎ Edit</button>
+          <button onClick={()=>{const id=contextMenu.entry.id;setSelectedEntries(new Set([id]));setSelectionMode(true);setCopyMode(true);setMoveMode(false);setContextMenu(null);}} style={contextMenuItemStyle}>⧉ Copy</button>
+          <button onClick={()=>{const id=contextMenu.entry.id;setSelectedEntries(new Set([id]));setSelectionMode(true);setMoveMode(true);setCopyMode(false);setContextMenu(null);}} style={contextMenuItemStyle}>↕ Move</button>
+          <div style={{height:1,background:"#F1F5F9",margin:"3px 0"}}/>
+          <button onClick={()=>{deleteEntriesByIds([contextMenu.entry.id]);setContextMenu(null);}} style={{...contextMenuItemStyle,color:"#EF4444"}}>🗑 Delete</button>
         </div>
       )}
     </div>
@@ -2062,6 +2262,7 @@ function MainApp({currentUser,onLogout}) {
 // ── Summary Section ───────────────────────────────────────────
 
 function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,setTab,archived,canEdit,onUnschedule}) {
+  const [confirmDialog,setConfirmDialog]=useState(null);
   return (
     <>
       {jobs.map(job=>{
@@ -2118,7 +2319,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                       <td style={{padding:"7px 12px",color:"#475569"}}>{assignedStaff||<em style={{color:"#94A3B8"}}>—</em>}</td>
                       <td style={{padding:"7px 12px",display:"flex",gap:4}}>
                         {canEdit&&!archived&&setEntryModal&&<button style={{fontSize:11,color:"#3B82F6",background:"none",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{setEntryModal({mode:"new",staffId:"",dateStr:todayStr,slot:0,jobId:job.id,subItemId:si.id,hours:8,autoFill:remaining>0,totalHours:remaining>0?remaining:8,entryType:"job",miscNote:""});setTab("schedule");}}>+ Schedule</button>}
-                        {canEdit&&!archived&&siEntries.length>0&&onUnschedule&&<button style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{if(window.confirm(`Remove all ${siEntries.length} scheduled entries for "${si.name}"?`))onUnschedule(siEntries.map(e=>e.id));}}>Unschedule</button>}
+                        {canEdit&&!archived&&siEntries.length>0&&onUnschedule&&<button style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>setConfirmDialog({message:`Remove all ${siEntries.length} scheduled entries for "${si.name}"?`,danger:true,confirmLabel:"Remove",onConfirm:()=>{setConfirmDialog(null);onUnschedule(siEntries.map(e=>e.id));}})}>Unschedule</button>}
                       </td>
                     </tr>
                   );
@@ -2139,6 +2340,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
           </div>
         );
       })}
+      {confirmDialog&&<ConfirmModal {...confirmDialog} onCancel={()=>setConfirmDialog(null)}/>}
     </>
   );
 }
@@ -2284,7 +2486,11 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             <>
               <Sel label="Job" value={form.jobId} onChange={e=>handleJobChange(e.target.value)}>
                 <option value="">— Select job —</option>
-                {jobs.map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}</option>)}
+                {/* A completed job is hidden from new entries - but if this
+                    entry already points at one (marked complete after the
+                    fact), keep it in the list so the dropdown still shows
+                    the entry's real job instead of going blank. */}
+                {jobs.filter(j=>!j.completed||j.id===form.jobId).map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}{j.completed?" (completed)":""}</option>)}
               </Sel>
               {form.jobId&&(
                 <Sel label="Joinery Item" value={form.subItemId||""} onChange={e=>handleSubChange(e.target.value)}>
@@ -2388,7 +2594,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
 // ── Job Modal ─────────────────────────────────────────────────
 
-function JobModal({data,onSave,onDelete,onClose,saving}) {
+function JobModal({data,onSave,onDelete,onToggleComplete,onClose,saving}) {
   const [form,setForm]=useState({...data,subItems:data.subItems.map(s=>({...s}))});
   const [importMsg,setImportMsg]=useState(null);
   const fileInputRef=useRef(null);
@@ -2520,7 +2726,14 @@ function JobModal({data,onSave,onDelete,onClose,saving}) {
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",marginTop:20,borderTop:"1px solid #F1F5F9",paddingTop:16}}>
-        <div>{!form.isNew&&<Btn variant="danger" disabled={saving} onClick={()=>onDelete(form.id)}>Delete Job</Btn>}</div>
+        <div style={{display:"flex",gap:8}}>
+          {!form.isNew&&<Btn variant="danger" disabled={saving} onClick={()=>onDelete(form.id)}>Delete Job</Btn>}
+          {!form.isNew&&onToggleComplete&&(
+            <Btn variant="ghost" disabled={saving} onClick={()=>onToggleComplete(form.id,!form.completed)}>
+              {form.completed?"↺ Reopen Job":"✓ Mark Complete"}
+            </Btn>
+          )}
+        </div>
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" disabled={saving} onClick={onClose}>Cancel</Btn>
           <Btn variant="primary" loading={saving} onClick={()=>{if(!form.jobNo||!form.name)return;onSave(form);}}>{saving?"Saving...":"Save Job"}</Btn>
