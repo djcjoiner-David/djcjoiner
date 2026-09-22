@@ -1512,7 +1512,12 @@ function MainApp({currentUser,onLogout}) {
         const oldStaffCap=Number(staff.find(s=>s.id===en.staffId)?.productiveHours)||8;
         const wasOldStaffFullDay=Math.abs(Number(en.hours)-oldStaffCap)<0.05;
         const newSibling=entries.find(o=>o.id!==id&&o.staffId===newStaffId&&o.dateStr===newDate&&o.slot!==newSlot);
-        if((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling){
+        // Same guard as handleDrop: don't force a full personal day onto an
+        // entry landing back on a day another staff member is also working
+        // the same joinery item - that's a shared/split budget day, and the
+        // background correction pass is what should work out the real split.
+        const sharedItemAtDest=en.subItemId&&entries.some(o=>o.id!==id&&o.subItemId===en.subItemId&&o.dateStr===newDate&&o.staffId!==newStaffId);
+        if((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest){
           newHoursById[id]=Number(staff.find(s=>s.id===newStaffId)?.productiveHours)||8;
         }
       }
@@ -1675,7 +1680,15 @@ function MainApp({currentUser,onLogout}) {
     const oldStaffCap=Number(staff.find(s=>s.id===entry.staffId)?.productiveHours)||8;
     const wasOldStaffFullDay=Math.abs(Number(entry.hours)-oldStaffCap)<0.05;
     const newSibling=entries.find(o=>o.id!==entry.id&&o.staffId===toStaffId&&o.dateStr===toDateStr&&o.slot!==toSlot);
-    const newHours=((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling)
+    // Neither restoration should hand this entry a full personal day when
+    // it's landing back on a day another staff member is ALSO working the
+    // same joinery item - that's a shared/split budget day, not a solo one,
+    // and forcing it to this person's whole cap would ignore the split.
+    // Leave it as-is and let the background correction pass work out the
+    // real split from the budget, the same way it does for any other
+    // multi-staff item.
+    const sharedItemAtDest=entry.subItemId&&entries.some(o=>o.id!==entry.id&&o.subItemId===entry.subItemId&&o.dateStr===toDateStr&&o.staffId!==toStaffId);
+    const newHours=((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest)
       ?(Number(staff.find(s=>s.id===toStaffId)?.productiveHours)||8)
       :entry.hours;
     pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt,prevHours:prevState.hours});
