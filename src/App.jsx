@@ -499,7 +499,14 @@ function Spinner({text="Loading..."}) {
 // ── Job Block ─────────────────────────────────────────────────
 
 function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
-  const hoursLabel=isOverRun?"over-run"
+  // An entry the background correction has reduced to nothing (e.g. another
+  // staff member now covers the whole day/budget) shouldn't be labelled
+  // "over-run" or any other budget-math term - it has zero real hours left,
+  // so say that plainly. It's the clearest signal that it's now empty and
+  // safe to remove, since it's no longer auto-deleted on its own.
+  const isZeroHours=Math.abs(Number(hours))<0.05;
+  const hoursLabel=isZeroHours?"0h"
+    :isOverRun?"over-run"
     :isUnderCap?`${underAmount}h under`
     :isCompletingEntry?`${budgetRemaining}h`
     :isPersonalLastEntry?`${hours}h`
