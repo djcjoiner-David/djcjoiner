@@ -31,23 +31,29 @@ function sanitizeRows(table, rows) {
 }
 
 // Session tokens prove *who* is making a request without the server having to
-// keep any state. They're signed with API_SECRET (already a private,
-// server-only value) so a client can't forge one or edit the user id inside
-// it. The role itself is never trusted from the token - it's looked up fresh
-// from the database on every request, so a role change or removed account
-// takes effect immediately instead of waiting for the old token to expire.
-// Every token also carries its own expiry, so a stolen/leaked token only
-// stays usable for a limited window rather than forever.
+// keep any state. They're signed with SESSION_SECRET - a value that only
+// ever lives on the server and is never sent to, or read by, the browser -
+// so a client can't forge one or edit the user id inside it. (This must NOT
+// be the same value as API_SECRET: API_SECRET is sent from the frontend on
+// every request via the x-api-key header, and since Vite bakes VITE_-
+// prefixed env vars into the shipped JS bundle, that value is visible to
+// anyone who opens devtools. Reusing it as the signing key would let anyone
+// forge a valid session for any user id.) The role itself is never trusted
+// from the token - it's looked up fresh from the database on every request,
+// so a role change or removed account takes effect immediately instead of
+// waiting for the old token to expire. Every token also carries its own
+// expiry, so a stolen/leaked token only stays usable for a limited window
+// rather than forever.
 function signSession(payload) {
   const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + SESSION_DURATION_MS })).toString('base64url');
-  const sig = createHmac('sha256', process.env.API_SECRET).update(body).digest('base64url');
+  const sig = createHmac('sha256', process.env.SESSION_SECRET).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
 
 function verifySession(token) {
   if (typeof token !== 'string' || !token.includes('.')) return null;
   const [body, sig] = token.split('.');
-  const expected = createHmac('sha256', process.env.API_SECRET).update(body).digest('base64url');
+  const expected = createHmac('sha256', process.env.SESSION_SECRET).update(body).digest('base64url');
   const sigBuf = Buffer.from(sig);
   const expectedBuf = Buffer.from(expected);
   if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return null;
@@ -90,6 +96,14 @@ export default async function handler(req, res) {
   const provided = req.headers['x-api-key'];
   if (!process.env.API_SECRET || provided !== process.env.API_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+  // SESSION_SECRET signs/verifies session tokens (see signSession above) and
+  // must be a *different* value from API_SECRET, set separately in Vercel's
+  // Environment Variables. It must never be exposed to the client - in
+  // particular, never assign it to a VITE_-prefixed variable.
+  if (!process.env.SESSION_SECRET) {
+    console.error('api/db error: SESSION_SECRET is not configured');
+    return res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 
   const { table, order, ...filters } = req.query;
