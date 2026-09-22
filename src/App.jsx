@@ -1799,19 +1799,9 @@ function MainApp({currentUser,onLogout}) {
     correctingRef.current=true;
     (async()=>{
       try{
-        // A correction that lands on (effectively) zero hours means someone
-        // else's entry now covers the whole day/budget for that spot - this
-        // entry has nothing left to represent, so it's removed outright
-        // rather than left sitting on the grid as an empty "0h" block.
-        const toDelete=corrections.filter(c=>c.newHours<=0.05);
-        const toPatch=corrections.filter(c=>c.newHours>0.05);
-        await Promise.all([
-          ...toPatch.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)),
-          ...(toDelete.length>0?[db("DELETE","entries",null,`?id=in.(${toDelete.map(c=>c.id).join(",")})`)]:[]),
-        ]);
-        const deletedIds=new Set(toDelete.map(c=>c.id));
-        setEntries(prev=>prev.filter(e=>!deletedIds.has(e.id)).map(e=>{
-          const c=toPatch.find(x=>x.id===e.id);
+        await Promise.all(corrections.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)));
+        setEntries(prev=>prev.map(e=>{
+          const c=corrections.find(x=>x.id===e.id);
           return c?{...e,hours:c.newHours}:e;
         }));
       }catch(err){
