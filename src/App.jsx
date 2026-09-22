@@ -1495,11 +1495,13 @@ function MainApp({currentUser,onLogout}) {
       const movedAt=new Date().toISOString();
       // Same restoration as a single-entry drag (see handleDrop): if the one
       // entry being moved was capped by a same-day sibling at its old spot,
-      // and its new spot has no sibling, give it the day back. Only applied
-      // for a single selected entry - a genuine multi-entry group move can
-      // shift several mutually-dependent entries together, where "was it
-      // capped" gets a lot less clear-cut, so those keep their hours as-is
-      // like before.
+      // or was simply using its old staff member's whole day outright (no
+      // sibling involved), and its new spot has no sibling, give it the new
+      // staff member's whole day back instead of carrying over the old
+      // number. Only applied for a single selected entry - a genuine
+      // multi-entry group move can shift several mutually-dependent entries
+      // together, where "was it capped" gets a lot less clear-cut, so those
+      // keep their hours as-is like before.
       let newHoursById={};
       if(idsToMove.length===1){
         const id=idsToMove[0];
@@ -1507,8 +1509,10 @@ function MainApp({currentUser,onLogout}) {
         const newStaffId=idToStaff[id],newDate=idToDate[id],newSlot=idToSlot[id];
         const oldSibling=entries.find(o=>o.id!==id&&o.staffId===en.staffId&&o.dateStr===en.dateStr&&o.slot!==en.slot);
         const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,en);
+        const oldStaffCap=Number(staff.find(s=>s.id===en.staffId)?.productiveHours)||8;
+        const wasOldStaffFullDay=Math.abs(Number(en.hours)-oldStaffCap)<0.05;
         const newSibling=entries.find(o=>o.id!==id&&o.staffId===newStaffId&&o.dateStr===newDate&&o.slot!==newSlot);
-        if(wasCappedByOldSibling&&!newSibling){
+        if((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling){
           newHoursById[id]=Number(staff.find(s=>s.id===newStaffId)?.productiveHours)||8;
         }
       }
@@ -1661,8 +1665,17 @@ function MainApp({currentUser,onLogout}) {
     // conflict itself is gone (e.g. dragged away to an empty day).
     const oldSibling=entries.find(o=>o.id!==entry.id&&o.staffId===entry.staffId&&o.dateStr===entry.dateStr&&o.slot!==entry.slot);
     const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,entry);
+    // Same idea for the other way an entry ends up short of a full day: it
+    // was already using its PREVIOUS staff member's entire day (no sibling
+    // involved at all), and moving it to someone with a higher cap should
+    // give it their whole day too - not just carry over the old person's
+    // number. Only when the stored hours exactly match the old staff's own
+    // cap, so a genuinely partial entry (e.g. one person's share of a job
+    // split across several staff) is never touched.
+    const oldStaffCap=Number(staff.find(s=>s.id===entry.staffId)?.productiveHours)||8;
+    const wasOldStaffFullDay=Math.abs(Number(entry.hours)-oldStaffCap)<0.05;
     const newSibling=entries.find(o=>o.id!==entry.id&&o.staffId===toStaffId&&o.dateStr===toDateStr&&o.slot!==toSlot);
-    const newHours=(wasCappedByOldSibling&&!newSibling)
+    const newHours=((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling)
       ?(Number(staff.find(s=>s.id===toStaffId)?.productiveHours)||8)
       :entry.hours;
     pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt,prevHours:prevState.hours});
