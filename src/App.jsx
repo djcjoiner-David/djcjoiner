@@ -1266,20 +1266,29 @@ function MainApp({currentUser,onLogout}) {
   // item on the same day - deleting their entry outright if nothing remains
   // for them. With more than one same-day colleague there's no clear way to
   // split the remainder, so nothing is touched rather than guessing.
-  async function adjustSameDaySibling(subItemId,dateStr,staffId,newHours,excludeId){
+  // extraCandidates covers entries this same operation just created, which
+  // haven't flowed through to the entries state yet at the point this runs
+  // (e.g. a copy's freshly-inserted row) - without it, that brand-new
+  // sibling would be invisible to the lookup below.
+  async function adjustSameDaySibling(subItemId,dateStr,staffId,newHours,excludeId,extraCandidates){
     const si=subItems.find(s=>s.id===subItemId);
     if(!si)return;
-    const itemEntries=entries.filter(x=>x.subItemId===subItemId&&x.id!==excludeId);
-    const before=itemEntries.filter(x=>x.dateStr<dateStr).reduce((sum,x)=>sum+effectiveEntryHours(x,entries,staff),0);
+    const pool=extraCandidates&&extraCandidates.length>0?[...entries,...extraCandidates]:entries;
+    const itemEntries=pool.filter(x=>x.subItemId===subItemId&&x.id!==excludeId);
+    const before=itemEntries.filter(x=>x.dateStr<dateStr).reduce((sum,x)=>sum+effectiveEntryHours(x,pool,staff),0);
     const siblings=itemEntries.filter(x=>x.dateStr===dateStr&&x.staffId!==staffId);
     if(siblings.length!==1)return;
     const sib=siblings[0];
     const sibCap=Number(staff.find(s=>s.id===sib.staffId)?.productiveHours)||8;
     const remaining=Math.max(0,Math.min(sibCap,Math.round((si.totalHours-before-newHours)*2)/2));
     if(remaining<0.05){
+      // Own undo entry, same as a normal delete - reusing the existing
+      // deleteEntry undo type re-inserts this exact entry if undone.
+      pushUndo("deleteEntry",{entry:sib});
       await db("DELETE","entries",null,`?id=eq.${sib.id}`);
       setEntries(prev=>prev.filter(e=>e.id!==sib.id));
     }else if(Math.abs(remaining-(Number(sib.hours)||0))>0.05){
+      pushUndo("editEntry",{prev:sib});
       await db("PATCH","entries",{hours:remaining},`?id=eq.${sib.id}`);
       setEntries(prev=>prev.map(e=>e.id===sib.id?{...e,hours:remaining}:e));
     }
@@ -1671,6 +1680,14 @@ function MainApp({currentUser,onLogout}) {
         const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
+        // Each copy carries its own source's hours over verbatim - for any
+        // that landed on a day another staff member already shares the same
+        // item, recalculate against that source, same as a manual edit.
+        for(const{en,newDate}of toInsert){
+          if(!en.miscNote&&en.subItemId){
+            await adjustSameDaySibling(en.subItemId,newDate,en.staffId,en.hours,en.id,newEntries);
+          }
+        }
       }catch(err){
         setError("Failed to copy entries.");
         setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
@@ -1713,6 +1730,13 @@ function MainApp({currentUser,onLogout}) {
         const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked};
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
         pushUndo("addEntries",{ids:[newEntry.id]});
+        // The copy just carries the source's hours over verbatim - if that
+        // lands it on a day another staff member already shares the same
+        // item, recalculate the ORIGINAL source's contribution against
+        // whichever of the two now needs adjusting, same as a manual edit.
+        if(!entry.miscNote&&entry.subItemId){
+          await adjustSameDaySibling(entry.subItemId,toDateStr,entry.staffId,entry.hours,entry.id,[newEntry]);
+        }
       }catch(err){
         setError("Failed to copy entry.");
         setEntries(prev=>prev.filter(en=>en.id!==tempId));
