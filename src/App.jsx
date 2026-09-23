@@ -1259,6 +1259,32 @@ function MainApp({currentUser,onLogout}) {
     setEntryModal({mode:"edit",...entry,autoFill:false,entryType:entry.miscNote?"misc":"job"});
   }
 
+  // A deliberate, manually-typed hours value (edit or a manual non-auto-fill
+  // new entry) is an adjustment, not just a fixed number sitting on its own:
+  // it deducts from what the item's budget has left for that specific day,
+  // and whatever's left goes to the ONE other staff member sharing the same
+  // item on the same day - deleting their entry outright if nothing remains
+  // for them. With more than one same-day colleague there's no clear way to
+  // split the remainder, so nothing is touched rather than guessing.
+  async function adjustSameDaySibling(subItemId,dateStr,staffId,newHours,excludeId){
+    const si=subItems.find(s=>s.id===subItemId);
+    if(!si)return;
+    const itemEntries=entries.filter(x=>x.subItemId===subItemId&&x.id!==excludeId);
+    const before=itemEntries.filter(x=>x.dateStr<dateStr).reduce((sum,x)=>sum+effectiveEntryHours(x,entries,staff),0);
+    const siblings=itemEntries.filter(x=>x.dateStr===dateStr&&x.staffId!==staffId);
+    if(siblings.length!==1)return;
+    const sib=siblings[0];
+    const sibCap=Number(staff.find(s=>s.id===sib.staffId)?.productiveHours)||8;
+    const remaining=Math.max(0,Math.min(sibCap,Math.round((si.totalHours-before-newHours)*2)/2));
+    if(remaining<0.05){
+      await db("DELETE","entries",null,`?id=eq.${sib.id}`);
+      setEntries(prev=>prev.filter(e=>e.id!==sib.id));
+    }else if(Math.abs(remaining-(Number(sib.hours)||0))>0.05){
+      await db("PATCH","entries",{hours:remaining},`?id=eq.${sib.id}`);
+      setEntries(prev=>prev.map(e=>e.id===sib.id?{...e,hours:remaining}:e));
+    }
+  }
+
   async function saveEntry(data,extraEntries){
     setSaving(true);
     try{
@@ -1297,6 +1323,9 @@ function MainApp({currentUser,onLogout}) {
         const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked}));
         pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
         setEntries(prev=>[...prev,...newMapped]);
+        if(data.entryType!=="misc"&&!data.autoFill&&data.subItemId&&newMapped.length===1){
+          await adjustSameDaySibling(data.subItemId,newMapped[0].dateStr,newMapped[0].staffId,newMapped[0].hours,newMapped[0].id);
+        }
       } else {
         const prevEntry=entries.find(e=>e.id===data.id);
         // Moving an entry to a new day/slot makes it the newest arrival there
@@ -1321,6 +1350,9 @@ function MainApp({currentUser,onLogout}) {
         },`?id=eq.${data.id}`);
         if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
         setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
+        if(hoursLocked&&data.subItemId){
+          await adjustSameDaySibling(data.subItemId,data.dateStr,data.staffId,data.hours,data.id);
+        }
       }
       setEntryModal(null);setTab("schedule");
     }catch(e){setError("Failed to save entry.");}
