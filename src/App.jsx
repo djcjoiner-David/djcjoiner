@@ -1170,12 +1170,11 @@ function MainApp({currentUser,onLogout}) {
     } else if(last.type==="bundle") {
       // Unwind the most recently applied part of the bundle first, so a
       // primary edit plus the same-day adjustment it triggered undo in the
-      // same order they'd naturally reverse in - one click, not two.
-      const redoSteps=[];
-      for(const step of[...last.data.steps].reverse()){
-        const r=await applyUndoStep(step);
-        if(r)redoSteps.push(r);
-      }
+      // same order they'd naturally reverse in - one click, not two. Fired
+      // together (not one-after-another) so it lands on screen as fast as
+      // any other single action here, not two round trips deep.
+      const results=await Promise.all([...last.data.steps].reverse().map(step=>applyUndoStep(step)));
+      const redoSteps=results.filter(Boolean);
       if(redoSteps.length>0)setRedoStack(prev=>[...prev,{type:"bundle",data:{steps:redoSteps.reverse()}}]);
     }
   }
@@ -1257,12 +1256,10 @@ function MainApp({currentUser,onLogout}) {
       }
     } else if(last.type==="bundle") {
       // Reapply in the original forward order (primary, then the cascaded
-      // adjustment), mirroring how the bundle was first built.
-      const undoSteps=[];
-      for(const step of last.data.steps){
-        const r=await applyRedoStep(step);
-        if(r)undoSteps.push(r);
-      }
+      // adjustment), mirroring how the bundle was first built - fired
+      // together, same as the undo side.
+      const results=await Promise.all(last.data.steps.map(step=>applyRedoStep(step)));
+      const undoSteps=results.filter(Boolean);
       if(undoSteps.length>0)setUndoStack(prev=>[...prev,{type:"bundle",data:{steps:undoSteps}}]);
     }
   }
@@ -1410,13 +1407,15 @@ function MainApp({currentUser,onLogout}) {
     if(remaining<0.05){
       // Own undo entry, same as a normal delete - reusing the existing
       // deleteEntry undo type re-inserts this exact entry if undone.
+      // Land it on screen immediately, same as every other mutation here -
+      // the save happens in the background, not in the way of the click.
       pushUndo("deleteEntry",{entry:sib});
-      await db("DELETE","entries",null,`?id=eq.${sib.id}`);
       setEntries(prev=>prev.filter(e=>e.id!==sib.id));
+      await db("DELETE","entries",null,`?id=eq.${sib.id}`);
     }else if(Math.abs(remaining-(Number(sib.hours)||0))>0.05){
       pushUndo("editEntry",{prev:sib});
-      await db("PATCH","entries",{hours:remaining},`?id=eq.${sib.id}`);
       setEntries(prev=>prev.map(e=>e.id===sib.id?{...e,hours:remaining}:e));
+      await db("PATCH","entries",{hours:remaining},`?id=eq.${sib.id}`);
     }
   }
 
@@ -1445,24 +1444,29 @@ function MainApp({currentUser,onLogout}) {
     const sourceShare=shares.find(s=>s.sid===sourceStaffId)?.hours??0;
     const destShare=shares.find(s=>s.sid===destStaffId)?.hours??0;
 
+    // Land both sides on screen immediately and fire their saves together
+    // rather than one after another - two sequential round trips for a
+    // single copy read as sluggish next to everything else in the app.
+    const jobs=[];
     const sourceEntry=pool.find(x=>x.id===sourceEntryId);
     if(sourceEntry&&Math.abs(sourceShare-(Number(sourceEntry.hours)||0))>0.05){
       pushUndo("editEntry",{prev:sourceEntry});
-      await db("PATCH","entries",{hours:sourceShare},`?id=eq.${sourceEntryId}`);
       setEntries(prev=>prev.map(e=>e.id===sourceEntryId?{...e,hours:sourceShare}:e));
+      jobs.push(db("PATCH","entries",{hours:sourceShare},`?id=eq.${sourceEntryId}`));
     }
     const destEntry=pool.find(x=>x.id===destEntryId);
     if(destShare<0.05){
       if(destEntry){
         pushUndo("deleteEntry",{entry:destEntry});
-        await db("DELETE","entries",null,`?id=eq.${destEntryId}`);
         setEntries(prev=>prev.filter(e=>e.id!==destEntryId));
+        jobs.push(db("DELETE","entries",null,`?id=eq.${destEntryId}`));
       }
     }else if(destEntry&&Math.abs(destShare-(Number(destEntry.hours)||0))>0.05){
       pushUndo("editEntry",{prev:destEntry});
-      await db("PATCH","entries",{hours:destShare},`?id=eq.${destEntryId}`);
       setEntries(prev=>prev.map(e=>e.id===destEntryId?{...e,hours:destShare}:e));
+      jobs.push(db("PATCH","entries",{hours:destShare},`?id=eq.${destEntryId}`));
     }
+    if(jobs.length>0)await Promise.all(jobs);
   }
 
   async function saveEntry(data,extraEntries){
@@ -1860,13 +1864,11 @@ function MainApp({currentUser,onLogout}) {
         // rebalance the pair rather than leaving the source untouched.
         bundlingRef.current=true;
         try{
-          for(let idx=0;idx<toInsert.length;idx++){
-            const{en,newDate,newStaffId}=toInsert[idx];
+          await Promise.all(toInsert.map(({en,newDate,newStaffId},idx)=>{
             const newEntry=newEntries[idx];
-            if(!en.miscNote&&en.subItemId&&newEntry){
-              await rebalanceCopiedPair(en.subItemId,newDate,en.staffId,en.id,newStaffId,newEntry.id,newEntries);
-            }
-          }
+            if(en.miscNote||!en.subItemId||!newEntry)return null;
+            return rebalanceCopiedPair(en.subItemId,newDate,en.staffId,en.id,newStaffId,newEntry.id,newEntries);
+          }));
         }finally{bundlingRef.current=false;}
       }catch(err){
         setError("Failed to copy entries.");
