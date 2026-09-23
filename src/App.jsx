@@ -974,9 +974,116 @@ function MainApp({currentUser,onLogout}) {
   const [undoStack,setUndoStack]=useState([]); // each item: {type, data}
   const [redoStack,setRedoStack]=useState([]); // same shapes, populated by undo/redo themselves
 
+  // When set, further pushUndo calls merge into the stack's TOP entry as a
+  // "bundle" instead of adding their own separate entry - so one user
+  // action that cascades into a second change (e.g. an edit that also
+  // adjusts a same-day colleague) undoes in a single click instead of two.
+  const bundlingRef=useRef(false);
   function pushUndo(type, data) {
-    setUndoStack(prev=>[...prev.slice(-19),{type,data}]);
+    setUndoStack(prev=>{
+      if(bundlingRef.current&&prev.length>0){
+        const top=prev[prev.length-1];
+        const step={type,data};
+        const steps=top.type==="bundle"?[...top.data.steps,step]:[top,step];
+        return [...prev.slice(0,-1),{type:"bundle",data:{steps}}];
+      }
+      return [...prev.slice(-19),{type,data}];
+    });
     setRedoStack([]); // a genuine new action invalidates whatever could have been redone
+  }
+
+  // Applies a single undo step of one of the three types a bundle can be
+  // made of, returning the matching redo step - shared between the
+  // standalone addEntries/editEntry/deleteEntry cases below and the
+  // "bundle" case, which just runs several of these in sequence.
+  async function applyUndoStep(step){
+    if(step.type==="addEntries"){
+      const removed=entries.filter(e=>step.data.ids.includes(e.id));
+      const rows=removed.map(entryFields);
+      setEntries(prev=>prev.filter(e=>!step.data.ids.includes(e.id)));
+      try{
+        await Promise.all(step.data.ids.map(id=>db("DELETE","entries",null,`?id=eq.${id}`)));
+        return{type:"addEntries",data:{rows}};
+      }catch(e){
+        setError("Undo failed - restored.");
+        setEntries(prev=>[...prev,...removed]);
+        return null;
+      }
+    }
+    if(step.type==="editEntry"){
+      const e=step.data.prev;
+      const current=entries.find(en=>en.id===e.id);
+      setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
+      try{
+        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked},`?id=eq.${e.id}`);
+        return current?{type:"editEntry",data:{state:current}}:null;
+      }catch(err){
+        setError("Undo failed - reverted.");
+        if(current)setEntries(prev=>prev.map(en=>en.id===e.id?current:en));
+        return null;
+      }
+    }
+    if(step.type==="deleteEntry"){
+      const e=step.data.entry;
+      const tempId=`temp_undo_${Date.now()}_${Math.random()}`;
+      setEntries(prev=>[...prev,{...e,id:tempId}]);
+      try{
+        const[inserted]=await db("POST","entries",[entryFields(e)]);
+        const real=mapInsertedEntry(inserted);
+        setEntries(prev=>prev.map(en=>en.id===tempId?real:en));
+        return{type:"deleteEntry",data:{id:real.id}};
+      }catch(err){
+        setError("Undo failed.");
+        setEntries(prev=>prev.filter(en=>en.id!==tempId));
+        return null;
+      }
+    }
+    return null;
+  }
+  // Mirrors applyUndoStep, for redo.
+  async function applyRedoStep(step){
+    if(step.type==="addEntries"){
+      const tempMap=step.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}_${Math.random()}`,row}));
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString(),hoursLocked:!!row.hours_locked}))]);
+      const tempIds=tempMap.map(t=>t.tempId);
+      try{
+        const inserted=await db("POST","entries",step.data.rows);
+        const mapped=inserted.map(mapInsertedEntry);
+        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
+        return{type:"addEntries",data:{ids:mapped.map(e=>e.id)}};
+      }catch(err){
+        setError("Redo failed.");
+        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
+        return null;
+      }
+    }
+    if(step.type==="editEntry"){
+      const s=step.data.state;
+      const current=entries.find(en=>en.id===s.id);
+      setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
+      try{
+        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote,hours_locked:!!s.hoursLocked},`?id=eq.${s.id}`);
+        return current?{type:"editEntry",data:{prev:current}}:null;
+      }catch(err){
+        setError("Redo failed - reverted.");
+        if(current)setEntries(prev=>prev.map(en=>en.id===s.id?current:en));
+        return null;
+      }
+    }
+    if(step.type==="deleteEntry"){
+      const{id}=step.data;
+      const entry=entries.find(e=>e.id===id);
+      setEntries(prev=>prev.filter(e=>e.id!==id));
+      try{
+        await db("DELETE","entries",null,`?id=eq.${id}`);
+        return entry?{type:"deleteEntry",data:{entry}}:null;
+      }catch(err){
+        setError("Redo failed - restored.");
+        if(entry)setEntries(prev=>[...prev,entry]);
+        return null;
+      }
+    }
+    return null;
   }
 
   async function handleUndo() {
@@ -1060,6 +1167,16 @@ function MainApp({currentUser,onLogout}) {
         setError("Undo failed.");
         setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
       }
+    } else if(last.type==="bundle") {
+      // Unwind the most recently applied part of the bundle first, so a
+      // primary edit plus the same-day adjustment it triggered undo in the
+      // same order they'd naturally reverse in - one click, not two.
+      const redoSteps=[];
+      for(const step of[...last.data.steps].reverse()){
+        const r=await applyUndoStep(step);
+        if(r)redoSteps.push(r);
+      }
+      if(redoSteps.length>0)setRedoStack(prev=>[...prev,{type:"bundle",data:{steps:redoSteps.reverse()}}]);
     }
   }
 
@@ -1138,6 +1255,15 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>[...prev,...deletedEntries]);
         setUndoStack(prev=>prev.slice(0,-1));
       }
+    } else if(last.type==="bundle") {
+      // Reapply in the original forward order (primary, then the cascaded
+      // adjustment), mirroring how the bundle was first built.
+      const undoSteps=[];
+      for(const step of last.data.steps){
+        const r=await applyRedoStep(step);
+        if(r)undoSteps.push(r);
+      }
+      if(undoSteps.length>0)setUndoStack(prev=>[...prev,{type:"bundle",data:{steps:undoSteps}}]);
     }
   }
   const [copyMode,setCopyMode]=useState(false); // tap-to-copy, arms via Select toolbar's Copy button
@@ -1378,7 +1504,9 @@ function MainApp({currentUser,onLogout}) {
         pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
         setEntries(prev=>[...prev,...newMapped]);
         if(data.entryType!=="misc"&&!data.autoFill&&data.subItemId&&newMapped.length===1){
-          await adjustSameDaySibling(data.subItemId,newMapped[0].dateStr,newMapped[0].staffId,newMapped[0].hours,newMapped[0].id);
+          bundlingRef.current=true;
+          try{await adjustSameDaySibling(data.subItemId,newMapped[0].dateStr,newMapped[0].staffId,newMapped[0].hours,newMapped[0].id);}
+          finally{bundlingRef.current=false;}
         }
       } else {
         const prevEntry=entries.find(e=>e.id===data.id);
@@ -1404,8 +1532,10 @@ function MainApp({currentUser,onLogout}) {
         },`?id=eq.${data.id}`);
         if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
         setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
-        if(hoursLocked&&data.subItemId){
-          await adjustSameDaySibling(data.subItemId,data.dateStr,data.staffId,data.hours,data.id);
+        if(hoursLocked&&data.subItemId&&prevEntry){
+          bundlingRef.current=true;
+          try{await adjustSameDaySibling(data.subItemId,data.dateStr,data.staffId,data.hours,data.id);}
+          finally{bundlingRef.current=false;}
         }
       }
       setEntryModal(null);setTab("schedule");
@@ -1728,13 +1858,16 @@ function MainApp({currentUser,onLogout}) {
         // Each copy carries its own source's hours over verbatim - for any
         // that landed on a day its own source item is still scheduled on,
         // rebalance the pair rather than leaving the source untouched.
-        for(let idx=0;idx<toInsert.length;idx++){
-          const{en,newDate,newStaffId}=toInsert[idx];
-          const newEntry=newEntries[idx];
-          if(!en.miscNote&&en.subItemId&&newEntry){
-            await rebalanceCopiedPair(en.subItemId,newDate,en.staffId,en.id,newStaffId,newEntry.id,newEntries);
+        bundlingRef.current=true;
+        try{
+          for(let idx=0;idx<toInsert.length;idx++){
+            const{en,newDate,newStaffId}=toInsert[idx];
+            const newEntry=newEntries[idx];
+            if(!en.miscNote&&en.subItemId&&newEntry){
+              await rebalanceCopiedPair(en.subItemId,newDate,en.staffId,en.id,newStaffId,newEntry.id,newEntries);
+            }
           }
-        }
+        }finally{bundlingRef.current=false;}
       }catch(err){
         setError("Failed to copy entries.");
         setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
@@ -1781,7 +1914,9 @@ function MainApp({currentUser,onLogout}) {
         // lands it on a day its own source item is still scheduled on,
         // rebalance the pair rather than leaving the source untouched.
         if(!entry.miscNote&&entry.subItemId){
-          await rebalanceCopiedPair(entry.subItemId,toDateStr,entry.staffId,entry.id,toStaffId,newEntry.id,[newEntry]);
+          bundlingRef.current=true;
+          try{await rebalanceCopiedPair(entry.subItemId,toDateStr,entry.staffId,entry.id,toStaffId,newEntry.id,[newEntry]);}
+          finally{bundlingRef.current=false;}
         }
       }catch(err){
         setError("Failed to copy entry.");
