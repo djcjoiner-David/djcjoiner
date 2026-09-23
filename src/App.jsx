@@ -267,8 +267,8 @@ function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); re
 
 // Shared between undo and redo: the row shape the API expects for an insert,
 // and the entry shape the app uses once that insert comes back with an id.
-function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}; }
-function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at}; }
+function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked}; }
+function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at,hoursLocked:!!inserted.hours_locked}; }
 
 function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   if (!totalHours||totalHours<=0) return [];
@@ -498,8 +498,19 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
-  const hoursLabel=isOverRun?"over-run"
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isLocked,isMobile,isPastDate,isOvercommitted}) {
+  // An entry the background correction has reduced to nothing (e.g. another
+  // staff member now covers the whole day/budget) shouldn't be labelled
+  // "over-run" or any other budget-math term - it has zero real hours left,
+  // so say that plainly. It's the clearest signal that it's now empty and
+  // safe to remove, since it's no longer auto-deleted on its own.
+  const isZeroHours=Math.abs(Number(hours))<0.05;
+  // A locked entry is a deliberately typed-in number - always show that
+  // real value, never the flat total-budget placeholder or an "over-run"/
+  // "under" flag left over from budget math that no longer derives it.
+  const hoursLabel=isZeroHours?"0h"
+    :isLocked?`${hours}h`
+    :isOverRun?"over-run"
     :isUnderCap?`${underAmount}h under`
     :isCompletingEntry?`${budgetRemaining}h`
     :isPersonalLastEntry?`${hours}h`
@@ -963,9 +974,116 @@ function MainApp({currentUser,onLogout}) {
   const [undoStack,setUndoStack]=useState([]); // each item: {type, data}
   const [redoStack,setRedoStack]=useState([]); // same shapes, populated by undo/redo themselves
 
+  // When set, further pushUndo calls merge into the stack's TOP entry as a
+  // "bundle" instead of adding their own separate entry - so one user
+  // action that cascades into a second change (e.g. an edit that also
+  // adjusts a same-day colleague) undoes in a single click instead of two.
+  const bundlingRef=useRef(false);
   function pushUndo(type, data) {
-    setUndoStack(prev=>[...prev.slice(-19),{type,data}]);
+    setUndoStack(prev=>{
+      if(bundlingRef.current&&prev.length>0){
+        const top=prev[prev.length-1];
+        const step={type,data};
+        const steps=top.type==="bundle"?[...top.data.steps,step]:[top,step];
+        return [...prev.slice(0,-1),{type:"bundle",data:{steps}}];
+      }
+      return [...prev.slice(-19),{type,data}];
+    });
     setRedoStack([]); // a genuine new action invalidates whatever could have been redone
+  }
+
+  // Applies a single undo step of one of the three types a bundle can be
+  // made of, returning the matching redo step - shared between the
+  // standalone addEntries/editEntry/deleteEntry cases below and the
+  // "bundle" case, which just runs several of these in sequence.
+  async function applyUndoStep(step){
+    if(step.type==="addEntries"){
+      const removed=entries.filter(e=>step.data.ids.includes(e.id));
+      const rows=removed.map(entryFields);
+      setEntries(prev=>prev.filter(e=>!step.data.ids.includes(e.id)));
+      try{
+        await Promise.all(step.data.ids.map(id=>db("DELETE","entries",null,`?id=eq.${id}`)));
+        return{type:"addEntries",data:{rows}};
+      }catch(e){
+        setError("Undo failed - restored.");
+        setEntries(prev=>[...prev,...removed]);
+        return null;
+      }
+    }
+    if(step.type==="editEntry"){
+      const e=step.data.prev;
+      const current=entries.find(en=>en.id===e.id);
+      setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
+      try{
+        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked},`?id=eq.${e.id}`);
+        return current?{type:"editEntry",data:{state:current}}:null;
+      }catch(err){
+        setError("Undo failed - reverted.");
+        if(current)setEntries(prev=>prev.map(en=>en.id===e.id?current:en));
+        return null;
+      }
+    }
+    if(step.type==="deleteEntry"){
+      const e=step.data.entry;
+      const tempId=`temp_undo_${Date.now()}_${Math.random()}`;
+      setEntries(prev=>[...prev,{...e,id:tempId}]);
+      try{
+        const[inserted]=await db("POST","entries",[entryFields(e)]);
+        const real=mapInsertedEntry(inserted);
+        setEntries(prev=>prev.map(en=>en.id===tempId?real:en));
+        return{type:"deleteEntry",data:{id:real.id}};
+      }catch(err){
+        setError("Undo failed.");
+        setEntries(prev=>prev.filter(en=>en.id!==tempId));
+        return null;
+      }
+    }
+    return null;
+  }
+  // Mirrors applyUndoStep, for redo.
+  async function applyRedoStep(step){
+    if(step.type==="addEntries"){
+      const tempMap=step.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}_${Math.random()}`,row}));
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString(),hoursLocked:!!row.hours_locked}))]);
+      const tempIds=tempMap.map(t=>t.tempId);
+      try{
+        const inserted=await db("POST","entries",step.data.rows);
+        const mapped=inserted.map(mapInsertedEntry);
+        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
+        return{type:"addEntries",data:{ids:mapped.map(e=>e.id)}};
+      }catch(err){
+        setError("Redo failed.");
+        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
+        return null;
+      }
+    }
+    if(step.type==="editEntry"){
+      const s=step.data.state;
+      const current=entries.find(en=>en.id===s.id);
+      setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
+      try{
+        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote,hours_locked:!!s.hoursLocked},`?id=eq.${s.id}`);
+        return current?{type:"editEntry",data:{prev:current}}:null;
+      }catch(err){
+        setError("Redo failed - reverted.");
+        if(current)setEntries(prev=>prev.map(en=>en.id===s.id?current:en));
+        return null;
+      }
+    }
+    if(step.type==="deleteEntry"){
+      const{id}=step.data;
+      const entry=entries.find(e=>e.id===id);
+      setEntries(prev=>prev.filter(e=>e.id!==id));
+      try{
+        await db("DELETE","entries",null,`?id=eq.${id}`);
+        return entry?{type:"deleteEntry",data:{entry}}:null;
+      }catch(err){
+        setError("Redo failed - restored.");
+        if(entry)setEntries(prev=>[...prev,entry]);
+        return null;
+      }
+    }
+    return null;
   }
 
   async function handleUndo() {
@@ -993,7 +1111,7 @@ function MainApp({currentUser,onLogout}) {
       setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
       if(current)setRedoStack(prev=>[...prev,{type:"editEntry",data:{state:current}}]);
       try{
-        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote},`?id=eq.${e.id}`);
+        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked},`?id=eq.${e.id}`);
       }catch(err){
         setError("Undo failed - reverted.");
         if(current){setEntries(prev=>prev.map(en=>en.id===e.id?current:en));setRedoStack(prev=>prev.slice(0,-1));}
@@ -1049,6 +1167,15 @@ function MainApp({currentUser,onLogout}) {
         setError("Undo failed.");
         setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
       }
+    } else if(last.type==="bundle") {
+      // Unwind the most recently applied part of the bundle first, so a
+      // primary edit plus the same-day adjustment it triggered undo in the
+      // same order they'd naturally reverse in - one click, not two. Fired
+      // together (not one-after-another) so it lands on screen as fast as
+      // any other single action here, not two round trips deep.
+      const results=await Promise.all([...last.data.steps].reverse().map(step=>applyUndoStep(step)));
+      const redoSteps=results.filter(Boolean);
+      if(redoSteps.length>0)setRedoStack(prev=>[...prev,{type:"bundle",data:{steps:redoSteps.reverse()}}]);
     }
   }
 
@@ -1058,7 +1185,7 @@ function MainApp({currentUser,onLogout}) {
     setRedoStack(prev=>prev.slice(0,-1));
     if(last.type==="addEntries") {
       const tempMap=last.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}`,row}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString()}))]);
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString(),hoursLocked:!!row.hours_locked}))]);
       const tempIds=tempMap.map(t=>t.tempId);
       try{
         const inserted=await db("POST","entries",last.data.rows);
@@ -1075,7 +1202,7 @@ function MainApp({currentUser,onLogout}) {
       setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
       if(current)setUndoStack(prev=>[...prev,{type:"editEntry",data:{prev:current}}]);
       try{
-        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote},`?id=eq.${s.id}`);
+        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote,hours_locked:!!s.hoursLocked},`?id=eq.${s.id}`);
       }catch(err){
         setError("Redo failed - reverted.");
         if(current){setEntries(prev=>prev.map(en=>en.id===s.id?current:en));setUndoStack(prev=>prev.slice(0,-1));}
@@ -1127,6 +1254,13 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>[...prev,...deletedEntries]);
         setUndoStack(prev=>prev.slice(0,-1));
       }
+    } else if(last.type==="bundle") {
+      // Reapply in the original forward order (primary, then the cascaded
+      // adjustment), mirroring how the bundle was first built - fired
+      // together, same as the undo side.
+      const results=await Promise.all(last.data.steps.map(step=>applyRedoStep(step)));
+      const undoSteps=results.filter(Boolean);
+      if(undoSteps.length>0)setUndoStack(prev=>[...prev,{type:"bundle",data:{steps:undoSteps}}]);
     }
   }
   const [copyMode,setCopyMode]=useState(false); // tap-to-copy, arms via Select toolbar's Copy button
@@ -1195,7 +1329,7 @@ function MainApp({currentUser,onLogout}) {
       }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color,completed:!!j.completed})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
-      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at})));
+      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked})));
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -1248,6 +1382,93 @@ function MainApp({currentUser,onLogout}) {
     setEntryModal({mode:"edit",...entry,autoFill:false,entryType:entry.miscNote?"misc":"job"});
   }
 
+  // A deliberate, manually-typed hours value (edit or a manual non-auto-fill
+  // new entry) is an adjustment, not just a fixed number sitting on its own:
+  // it deducts from what the item's budget has left for that specific day,
+  // and whatever's left goes to the ONE other staff member sharing the same
+  // item on the same day - deleting their entry outright if nothing remains
+  // for them. With more than one same-day colleague there's no clear way to
+  // split the remainder, so nothing is touched rather than guessing.
+  // extraCandidates covers entries this same operation just created, which
+  // haven't flowed through to the entries state yet at the point this runs
+  // (e.g. a copy's freshly-inserted row) - without it, that brand-new
+  // sibling would be invisible to the lookup below.
+  async function adjustSameDaySibling(subItemId,dateStr,staffId,newHours,excludeId,extraCandidates){
+    const si=subItems.find(s=>s.id===subItemId);
+    if(!si)return;
+    const pool=extraCandidates&&extraCandidates.length>0?[...entries,...extraCandidates]:entries;
+    const itemEntries=pool.filter(x=>x.subItemId===subItemId&&x.id!==excludeId);
+    const before=itemEntries.filter(x=>x.dateStr<dateStr).reduce((sum,x)=>sum+effectiveEntryHours(x,pool,staff),0);
+    const siblings=itemEntries.filter(x=>x.dateStr===dateStr&&x.staffId!==staffId);
+    if(siblings.length!==1)return;
+    const sib=siblings[0];
+    const sibCap=Number(staff.find(s=>s.id===sib.staffId)?.productiveHours)||8;
+    const remaining=Math.max(0,Math.min(sibCap,Math.round((si.totalHours-before-newHours)*2)/2));
+    if(remaining<0.05){
+      // Own undo entry, same as a normal delete - reusing the existing
+      // deleteEntry undo type re-inserts this exact entry if undone.
+      // Land it on screen immediately, same as every other mutation here -
+      // the save happens in the background, not in the way of the click.
+      pushUndo("deleteEntry",{entry:sib});
+      setEntries(prev=>prev.filter(e=>e.id!==sib.id));
+      await db("DELETE","entries",null,`?id=eq.${sib.id}`);
+    }else if(Math.abs(remaining-(Number(sib.hours)||0))>0.05){
+      pushUndo("editEntry",{prev:sib});
+      setEntries(prev=>prev.map(e=>e.id===sib.id?{...e,hours:remaining}:e));
+      await db("PATCH","entries",{hours:remaining},`?id=eq.${sib.id}`);
+    }
+  }
+
+  // A copy carries the source's hours over verbatim - fine for an empty
+  // destination, but if the source's own item is STILL scheduled that same
+  // day, this isn't two independent entries, it's one person's allocation
+  // being split back into two. Treating the untouched source as fixed (the
+  // way a manual edit does) leaves it hogging the whole day and the new
+  // arrival with whatever's left, which can be nothing. Rebalance both
+  // toward an even, capacity-proportional split of what's actually left
+  // for that day instead. Only acts when the source and the new copy are
+  // the ONLY two entries sharing that day for the item - a third already
+  // there makes the split ambiguous, so nothing is touched.
+  async function rebalanceCopiedPair(subItemId,dateStr,sourceStaffId,sourceEntryId,destStaffId,destEntryId,extraCandidates){
+    const si=subItems.find(s=>s.id===subItemId);
+    if(!si)return;
+    const pool=extraCandidates&&extraCandidates.length>0?[...entries,...extraCandidates]:entries;
+    const itemEntries=pool.filter(x=>x.subItemId===subItemId);
+    const before=itemEntries.filter(x=>x.dateStr<dateStr&&x.id!==sourceEntryId&&x.id!==destEntryId).reduce((sum,x)=>sum+effectiveEntryHours(x,pool,staff),0);
+    const sameDay=itemEntries.filter(x=>x.dateStr===dateStr);
+    if(sameDay.length!==2||!sameDay.some(x=>x.id===sourceEntryId)||!sameDay.some(x=>x.id===destEntryId))return;
+    const remainingForDay=Math.max(0,si.totalHours-before);
+    const sourceCap=Number(staff.find(s=>s.id===sourceStaffId)?.productiveHours)||8;
+    const destCap=Number(staff.find(s=>s.id===destStaffId)?.productiveHours)||8;
+    const shares=splitHoursByStaff([{sid:sourceStaffId,ph:sourceCap},{sid:destStaffId,ph:destCap}],remainingForDay);
+    const sourceShare=shares.find(s=>s.sid===sourceStaffId)?.hours??0;
+    const destShare=shares.find(s=>s.sid===destStaffId)?.hours??0;
+
+    // Land both sides on screen immediately and fire their saves together
+    // rather than one after another - two sequential round trips for a
+    // single copy read as sluggish next to everything else in the app.
+    const jobs=[];
+    const sourceEntry=pool.find(x=>x.id===sourceEntryId);
+    if(sourceEntry&&Math.abs(sourceShare-(Number(sourceEntry.hours)||0))>0.05){
+      pushUndo("editEntry",{prev:sourceEntry});
+      setEntries(prev=>prev.map(e=>e.id===sourceEntryId?{...e,hours:sourceShare}:e));
+      jobs.push(db("PATCH","entries",{hours:sourceShare},`?id=eq.${sourceEntryId}`));
+    }
+    const destEntry=pool.find(x=>x.id===destEntryId);
+    if(destShare<0.05){
+      if(destEntry){
+        pushUndo("deleteEntry",{entry:destEntry});
+        setEntries(prev=>prev.filter(e=>e.id!==destEntryId));
+        jobs.push(db("DELETE","entries",null,`?id=eq.${destEntryId}`));
+      }
+    }else if(destEntry&&Math.abs(destShare-(Number(destEntry.hours)||0))>0.05){
+      pushUndo("editEntry",{prev:destEntry});
+      setEntries(prev=>prev.map(e=>e.id===destEntryId?{...e,hours:destShare}:e));
+      jobs.push(db("PATCH","entries",{hours:destShare},`?id=eq.${destEntryId}`));
+    }
+    if(jobs.length>0)await Promise.all(jobs);
+  }
+
   async function saveEntry(data,extraEntries){
     setSaving(true);
     try{
@@ -1255,12 +1476,18 @@ function MainApp({currentUser,onLogout}) {
         const all=extraEntries&&extraEntries.length>0?extraEntries:[{dateStr:data.dateStr,hours:data.hours,staffId:data.staffId}];
         const valid=all.filter(p=>!isPast(p.dateStr));
         const conflicts=valid.filter(p=>!!entryMap[`${p.staffId||data.staffId}|${p.dateStr}|${data.slot}`]);
+        // Auto-fill spreads a total across days/staff algorithmically - that
+        // stays open to the background hours correction as budgets and
+        // conflicts shift. A manually-typed single entry (auto-fill off) is
+        // a deliberate number the person chose, so it's locked: the
+        // correction pass leaves it alone instead of re-deriving it.
         const buildRows=(items)=>items.map(({dateStr,hours,staffId})=>({
           staff_id:staffId||data.staffId,
           job_id:data.entryType==="misc"?null:data.jobId,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:dateStr,slot:data.slot,hours,
-          misc_note:data.entryType==="misc"?data.miscNote:null
+          misc_note:data.entryType==="misc"?data.miscNote:null,
+          hours_locked:data.entryType!=="misc"&&!data.autoFill
         }));
         if(conflicts.length>0){
           setSaving(false);
@@ -1269,7 +1496,7 @@ function MainApp({currentUser,onLogout}) {
             onConfirm:async()=>{
               setSaving(true);
               const inserted=await db("POST","entries",buildRows(valid));
-              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at}))]);
+              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked}))]);
               setConflictAlert(null);setEntryModal(null);setTab("schedule");setSaving(false);
             },
             onCancel:()=>setConflictAlert(null),
@@ -1277,9 +1504,14 @@ function MainApp({currentUser,onLogout}) {
           return;
         }
         const inserted=await db("POST","entries",buildRows(valid));
-        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at}));
+        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked}));
         pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
         setEntries(prev=>[...prev,...newMapped]);
+        if(data.entryType!=="misc"&&!data.autoFill&&data.subItemId&&newMapped.length===1){
+          bundlingRef.current=true;
+          try{await adjustSameDaySibling(data.subItemId,newMapped[0].dateStr,newMapped[0].staffId,newMapped[0].hours,newMapped[0].id);}
+          finally{bundlingRef.current=false;}
+        }
       } else {
         const prevEntry=entries.find(e=>e.id===data.id);
         // Moving an entry to a new day/slot makes it the newest arrival there
@@ -1288,16 +1520,27 @@ function MainApp({currentUser,onLogout}) {
         // even though it's the one that just showed up.
         const relocated=prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.slot!==data.slot);
         const newCreatedAt=relocated?new Date().toISOString():undefined;
+        // Saving an edit through this modal is always a deliberate choice of
+        // hours, so it locks the entry - the background correction pass will
+        // leave it as the person set it instead of re-deriving it from the
+        // item's remaining budget on the very next pass.
+        const hoursLocked=data.entryType!=="misc";
         await db("PATCH","entries",{
           staff_id:data.staffId,
           job_id:data.entryType==="misc"?null:data.jobId,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:data.dateStr,slot:data.slot,hours:data.hours,
           misc_note:data.entryType==="misc"?data.miscNote:null,
+          hours_locked:hoursLocked,
           ...(newCreatedAt?{created_at:newCreatedAt}:{})
         },`?id=eq.${data.id}`);
         if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
-        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
+        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
+        if(hoursLocked&&data.subItemId&&prevEntry){
+          bundlingRef.current=true;
+          try{await adjustSameDaySibling(data.subItemId,data.dateStr,data.staffId,data.hours,data.id);}
+          finally{bundlingRef.current=false;}
+        }
       }
       setEntryModal(null);setTab("schedule");
     }catch(e){setError("Failed to save entry.");}
@@ -1495,11 +1738,13 @@ function MainApp({currentUser,onLogout}) {
       const movedAt=new Date().toISOString();
       // Same restoration as a single-entry drag (see handleDrop): if the one
       // entry being moved was capped by a same-day sibling at its old spot,
-      // and its new spot has no sibling, give it the day back. Only applied
-      // for a single selected entry - a genuine multi-entry group move can
-      // shift several mutually-dependent entries together, where "was it
-      // capped" gets a lot less clear-cut, so those keep their hours as-is
-      // like before.
+      // or was simply using its old staff member's whole day outright (no
+      // sibling involved), and its new spot has no sibling, give it the new
+      // staff member's whole day back instead of carrying over the old
+      // number. Only applied for a single selected entry - a genuine
+      // multi-entry group move can shift several mutually-dependent entries
+      // together, where "was it capped" gets a lot less clear-cut, so those
+      // keep their hours as-is like before.
       let newHoursById={};
       if(idsToMove.length===1){
         const id=idsToMove[0];
@@ -1507,8 +1752,15 @@ function MainApp({currentUser,onLogout}) {
         const newStaffId=idToStaff[id],newDate=idToDate[id],newSlot=idToSlot[id];
         const oldSibling=entries.find(o=>o.id!==id&&o.staffId===en.staffId&&o.dateStr===en.dateStr&&o.slot!==en.slot);
         const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,en);
+        const oldStaffCap=Number(staff.find(s=>s.id===en.staffId)?.productiveHours)||8;
+        const wasOldStaffFullDay=Math.abs(Number(en.hours)-oldStaffCap)<0.05;
         const newSibling=entries.find(o=>o.id!==id&&o.staffId===newStaffId&&o.dateStr===newDate&&o.slot!==newSlot);
-        if(wasCappedByOldSibling&&!newSibling){
+        // Same guard as handleDrop: don't force a full personal day onto an
+        // entry landing back on a day another staff member is also working
+        // the same joinery item - that's a shared/split budget day, and the
+        // background correction pass is what should work out the real split.
+        const sharedItemAtDest=en.subItemId&&entries.some(o=>o.id!==id&&o.subItemId===en.subItemId&&o.dateStr===newDate&&o.staffId!==newStaffId);
+        if((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest){
           newHoursById[id]=Number(staff.find(s=>s.id===newStaffId)?.productiveHours)||8;
         }
       }
@@ -1584,13 +1836,15 @@ function MainApp({currentUser,onLogout}) {
 
       const rows=toInsert.map(({en,newDate,newSlot,newStaffId})=>({
         staff_id:newStaffId,job_id:en.jobId||null,sub_item_id:en.subItemId||null,
-        date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null
+        date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null,
+        hours_locked:!!en.hoursLocked
       }));
       // Show the pasted copies immediately with temporary ids, swapped for the
       // real ones once the server confirms - removed again if the save fails.
       const tempEntries=toInsert.map(({en,newDate,newSlot,newStaffId},i)=>({
         id:`temp_copy_${Date.now()}_${i}`,staffId:newStaffId,jobId:en.jobId||null,subItemId:en.subItemId||null,
-        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString()
+        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString(),
+        hoursLocked:!!en.hoursLocked
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
@@ -1602,9 +1856,20 @@ function MainApp({currentUser,onLogout}) {
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
-        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at}));
+        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
+        // Each copy carries its own source's hours over verbatim - for any
+        // that landed on a day its own source item is still scheduled on,
+        // rebalance the pair rather than leaving the source untouched.
+        bundlingRef.current=true;
+        try{
+          await Promise.all(toInsert.map(({en,newDate,newStaffId},idx)=>{
+            const newEntry=newEntries[idx];
+            if(en.miscNote||!en.subItemId||!newEntry)return null;
+            return rebalanceCopiedPair(en.subItemId,newDate,en.staffId,en.id,newStaffId,newEntry.id,newEntries);
+          }));
+        }finally{bundlingRef.current=false;}
       }catch(err){
         setError("Failed to copy entries.");
         setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
@@ -1638,15 +1903,23 @@ function MainApp({currentUser,onLogout}) {
         return;
       }
       const tempId=`temp_copy_${Date.now()}`;
-      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString()};
+      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString(),hoursLocked:!!entry.hoursLocked};
       setEntries(prev=>[...prev,tempEntry]);
       dragEntry.current=null;
       try{
-        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null}]);
+        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:!!entry.hoursLocked}]);
         const i=inserted[0];
-        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at};
+        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked};
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
         pushUndo("addEntries",{ids:[newEntry.id]});
+        // The copy just carries the source's hours over verbatim - if that
+        // lands it on a day its own source item is still scheduled on,
+        // rebalance the pair rather than leaving the source untouched.
+        if(!entry.miscNote&&entry.subItemId){
+          bundlingRef.current=true;
+          try{await rebalanceCopiedPair(entry.subItemId,toDateStr,entry.staffId,entry.id,toStaffId,newEntry.id,[newEntry]);}
+          finally{bundlingRef.current=false;}
+        }
       }catch(err){
         setError("Failed to copy entry.");
         setEntries(prev=>prev.filter(en=>en.id!==tempId));
@@ -1661,8 +1934,25 @@ function MainApp({currentUser,onLogout}) {
     // conflict itself is gone (e.g. dragged away to an empty day).
     const oldSibling=entries.find(o=>o.id!==entry.id&&o.staffId===entry.staffId&&o.dateStr===entry.dateStr&&o.slot!==entry.slot);
     const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,entry);
+    // Same idea for the other way an entry ends up short of a full day: it
+    // was already using its PREVIOUS staff member's entire day (no sibling
+    // involved at all), and moving it to someone with a higher cap should
+    // give it their whole day too - not just carry over the old person's
+    // number. Only when the stored hours exactly match the old staff's own
+    // cap, so a genuinely partial entry (e.g. one person's share of a job
+    // split across several staff) is never touched.
+    const oldStaffCap=Number(staff.find(s=>s.id===entry.staffId)?.productiveHours)||8;
+    const wasOldStaffFullDay=Math.abs(Number(entry.hours)-oldStaffCap)<0.05;
     const newSibling=entries.find(o=>o.id!==entry.id&&o.staffId===toStaffId&&o.dateStr===toDateStr&&o.slot!==toSlot);
-    const newHours=(wasCappedByOldSibling&&!newSibling)
+    // Neither restoration should hand this entry a full personal day when
+    // it's landing back on a day another staff member is ALSO working the
+    // same joinery item - that's a shared/split budget day, not a solo one,
+    // and forcing it to this person's whole cap would ignore the split.
+    // Leave it as-is and let the background correction pass work out the
+    // real split from the budget, the same way it does for any other
+    // multi-staff item.
+    const sharedItemAtDest=entry.subItemId&&entries.some(o=>o.id!==entry.id&&o.subItemId===entry.subItemId&&o.dateStr===toDateStr&&o.staffId!==toStaffId);
+    const newHours=((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest)
       ?(Number(staff.find(s=>s.id===toStaffId)?.productiveHours)||8)
       :entry.hours;
     pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt,prevHours:prevState.hours});
@@ -1723,7 +2013,14 @@ function MainApp({currentUser,onLogout}) {
         cumulative+=effectiveEntryHours(e,working,staff);
         if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
       });
-      const specialIdx=completeIdx!==-1?completeIdx:sorted.length-1;
+      const rawSpecialIdx=completeIdx!==-1?completeIdx:sorted.length-1;
+      // A locked entry's hours are a deliberate, manually-set number, not
+      // something this pass derives from what's left of the budget - so it
+      // never plays the "special" (completing/under-cap) role. If that's
+      // where the role would otherwise land, there's simply nothing left
+      // for this pass to derive for the item right now.
+      if(sorted[rawSpecialIdx].hoursLocked)return;
+      const specialIdx=rawSpecialIdx;
       const special=sorted[specialIdx];
       const remainingBefore=si.totalHours-befores[specialIdx];
       const maxPossible=completeIdx===-1?maxPossibleHours(special,working,staff):Infinity;
@@ -2110,9 +2407,19 @@ function MainApp({currentUser,onLogout}) {
                             if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
                           }
                           const totalBudget=si.totalHours||null;
-                          const specialIdx=completeIdx!==-1?completeIdx:siEntries.length-1;
-                          const isSpecialEntry=myIndex===specialIdx;
-                          const isOverRun=completeIdx!==-1&&myIndex>completeIdx;
+                          const rawSpecialIdx=completeIdx!==-1?completeIdx:siEntries.length-1;
+                          // Mirrors oneCorrectionPass: a locked entry's hours are a
+                          // deliberate manual number, never something derived from the
+                          // remaining budget, so it's never shown as the special
+                          // completing/under-cap entry either.
+                          const specialIdx=siEntries[rawSpecialIdx]?.hoursLocked?-1:rawSpecialIdx;
+                          const isSpecialEntry=specialIdx!==-1&&myIndex===specialIdx;
+                          // A locked entry is a deliberate, fixed number - it's never
+                          // relabelled "over-run" just for falling after the point the
+                          // budget got used up. Its own hours still count toward that
+                          // cumulative total for everyone else's sake, but the label on
+                          // this entry itself always just shows what was actually set.
+                          const isOverRun=!e.hoursLocked&&completeIdx!==-1&&myIndex>completeIdx;
                           let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
                           if(isSpecialEntry){
                             const remainingBefore=si.totalHours-befores[myIndex];
@@ -2134,7 +2441,7 @@ function MainApp({currentUser,onLogout}) {
                           const myStaffEntries=siEntries.filter(x=>x.staffId===e.staffId);
                           const myLastEntry=myStaffEntries[myStaffEntries.length-1];
                           const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id;
-                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry};
+                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry,isLocked:!!e.hoursLocked};
                         }
                         // Whenever this staff member doesn't have every hour of their day
                         // used/allocated - whatever sits in the other slot, job or misc, for
@@ -2157,7 +2464,7 @@ function MainApp({currentUser,onLogout}) {
                             return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
                           }
                           const meta=computeJobEntryMeta(e)||{};
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
                         }
                         return(
                           <td key={di}
@@ -2418,7 +2725,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         const fills=buildAutoFill(form.dateStr,Math.max(0,hours),ph);
         fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
       });
-      onSave({...form,staffId:staffToSchedule[0]},combined);
+      onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     } else {
       // Single staff, misc, or manual multi-staff (no autofill) - still one batch, one call
       const combined=[];
@@ -2432,7 +2739,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid});
         }
       });
-      onSave({...form,staffId:staffToSchedule[0]},combined);
+      onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     }
   }
 

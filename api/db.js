@@ -74,7 +74,7 @@ const ALLOWED_COLUMNS = {
   staff:          ['id', 'name', 'productive_hours', 'sort_order', 'created_at'],
   jobs:           ['id', 'job_no', 'name', 'bg_color', 'border_color', 'text_color', 'completed', 'created_at'],
   sub_items:      ['id', 'job_id', 'name', 'total_hours', 'created_at'],
-  entries:        ['id', 'staff_id', 'job_id', 'sub_item_id', 'date_str', 'slot', 'hours', 'misc_note', 'created_at'],
+  entries:        ['id', 'staff_id', 'job_id', 'sub_item_id', 'date_str', 'slot', 'hours', 'misc_note', 'created_at', 'hours_locked'],
   user_roles:     ['id', 'email', 'role', 'name', 'password', 'created_at', 'failed_login_count', 'locked_until'],
   keepalive_ping: ['id', 'pinged_at'],
   app_settings:   ['id', 'theme', 'logo_data', 'company_name', 'company_tagline'],
