@@ -1294,6 +1294,51 @@ function MainApp({currentUser,onLogout}) {
     }
   }
 
+  // A copy carries the source's hours over verbatim - fine for an empty
+  // destination, but if the source's own item is STILL scheduled that same
+  // day, this isn't two independent entries, it's one person's allocation
+  // being split back into two. Treating the untouched source as fixed (the
+  // way a manual edit does) leaves it hogging the whole day and the new
+  // arrival with whatever's left, which can be nothing. Rebalance both
+  // toward an even, capacity-proportional split of what's actually left
+  // for that day instead. Only acts when the source and the new copy are
+  // the ONLY two entries sharing that day for the item - a third already
+  // there makes the split ambiguous, so nothing is touched.
+  async function rebalanceCopiedPair(subItemId,dateStr,sourceStaffId,sourceEntryId,destStaffId,destEntryId,extraCandidates){
+    const si=subItems.find(s=>s.id===subItemId);
+    if(!si)return;
+    const pool=extraCandidates&&extraCandidates.length>0?[...entries,...extraCandidates]:entries;
+    const itemEntries=pool.filter(x=>x.subItemId===subItemId);
+    const before=itemEntries.filter(x=>x.dateStr<dateStr&&x.id!==sourceEntryId&&x.id!==destEntryId).reduce((sum,x)=>sum+effectiveEntryHours(x,pool,staff),0);
+    const sameDay=itemEntries.filter(x=>x.dateStr===dateStr);
+    if(sameDay.length!==2||!sameDay.some(x=>x.id===sourceEntryId)||!sameDay.some(x=>x.id===destEntryId))return;
+    const remainingForDay=Math.max(0,si.totalHours-before);
+    const sourceCap=Number(staff.find(s=>s.id===sourceStaffId)?.productiveHours)||8;
+    const destCap=Number(staff.find(s=>s.id===destStaffId)?.productiveHours)||8;
+    const shares=splitHoursByStaff([{sid:sourceStaffId,ph:sourceCap},{sid:destStaffId,ph:destCap}],remainingForDay);
+    const sourceShare=shares.find(s=>s.sid===sourceStaffId)?.hours??0;
+    const destShare=shares.find(s=>s.sid===destStaffId)?.hours??0;
+
+    const sourceEntry=pool.find(x=>x.id===sourceEntryId);
+    if(sourceEntry&&Math.abs(sourceShare-(Number(sourceEntry.hours)||0))>0.05){
+      pushUndo("editEntry",{prev:sourceEntry});
+      await db("PATCH","entries",{hours:sourceShare},`?id=eq.${sourceEntryId}`);
+      setEntries(prev=>prev.map(e=>e.id===sourceEntryId?{...e,hours:sourceShare}:e));
+    }
+    const destEntry=pool.find(x=>x.id===destEntryId);
+    if(destShare<0.05){
+      if(destEntry){
+        pushUndo("deleteEntry",{entry:destEntry});
+        await db("DELETE","entries",null,`?id=eq.${destEntryId}`);
+        setEntries(prev=>prev.filter(e=>e.id!==destEntryId));
+      }
+    }else if(destEntry&&Math.abs(destShare-(Number(destEntry.hours)||0))>0.05){
+      pushUndo("editEntry",{prev:destEntry});
+      await db("PATCH","entries",{hours:destShare},`?id=eq.${destEntryId}`);
+      setEntries(prev=>prev.map(e=>e.id===destEntryId?{...e,hours:destShare}:e));
+    }
+  }
+
   async function saveEntry(data,extraEntries){
     setSaving(true);
     try{
@@ -1681,11 +1726,13 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
         // Each copy carries its own source's hours over verbatim - for any
-        // that landed on a day another staff member already shares the same
-        // item, recalculate against that source, same as a manual edit.
-        for(const{en,newDate}of toInsert){
-          if(!en.miscNote&&en.subItemId){
-            await adjustSameDaySibling(en.subItemId,newDate,en.staffId,en.hours,en.id,newEntries);
+        // that landed on a day its own source item is still scheduled on,
+        // rebalance the pair rather than leaving the source untouched.
+        for(let idx=0;idx<toInsert.length;idx++){
+          const{en,newDate,newStaffId}=toInsert[idx];
+          const newEntry=newEntries[idx];
+          if(!en.miscNote&&en.subItemId&&newEntry){
+            await rebalanceCopiedPair(en.subItemId,newDate,en.staffId,en.id,newStaffId,newEntry.id,newEntries);
           }
         }
       }catch(err){
@@ -1731,11 +1778,10 @@ function MainApp({currentUser,onLogout}) {
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
         pushUndo("addEntries",{ids:[newEntry.id]});
         // The copy just carries the source's hours over verbatim - if that
-        // lands it on a day another staff member already shares the same
-        // item, recalculate the ORIGINAL source's contribution against
-        // whichever of the two now needs adjusting, same as a manual edit.
+        // lands it on a day its own source item is still scheduled on,
+        // rebalance the pair rather than leaving the source untouched.
         if(!entry.miscNote&&entry.subItemId){
-          await adjustSameDaySibling(entry.subItemId,toDateStr,entry.staffId,entry.hours,entry.id,[newEntry]);
+          await rebalanceCopiedPair(entry.subItemId,toDateStr,entry.staffId,entry.id,toStaffId,newEntry.id,[newEntry]);
         }
       }catch(err){
         setError("Failed to copy entry.");
