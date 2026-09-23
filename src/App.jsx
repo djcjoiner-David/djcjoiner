@@ -498,14 +498,18 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isMobile,isPastDate,isOvercommitted}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isLocked,isMobile,isPastDate,isOvercommitted}) {
   // An entry the background correction has reduced to nothing (e.g. another
   // staff member now covers the whole day/budget) shouldn't be labelled
   // "over-run" or any other budget-math term - it has zero real hours left,
   // so say that plainly. It's the clearest signal that it's now empty and
   // safe to remove, since it's no longer auto-deleted on its own.
   const isZeroHours=Math.abs(Number(hours))<0.05;
+  // A locked entry is a deliberately typed-in number - always show that
+  // real value, never the flat total-budget placeholder or an "over-run"/
+  // "under" flag left over from budget math that no longer derives it.
   const hoursLabel=isZeroHours?"0h"
+    :isLocked?`${hours}h`
     :isOverRun?"over-run"
     :isUnderCap?`${underAmount}h under`
     :isCompletingEntry?`${budgetRemaining}h`
@@ -2171,7 +2175,12 @@ function MainApp({currentUser,onLogout}) {
                           // completing/under-cap entry either.
                           const specialIdx=siEntries[rawSpecialIdx]?.hoursLocked?-1:rawSpecialIdx;
                           const isSpecialEntry=specialIdx!==-1&&myIndex===specialIdx;
-                          const isOverRun=completeIdx!==-1&&myIndex>completeIdx;
+                          // A locked entry is a deliberate, fixed number - it's never
+                          // relabelled "over-run" just for falling after the point the
+                          // budget got used up. Its own hours still count toward that
+                          // cumulative total for everyone else's sake, but the label on
+                          // this entry itself always just shows what was actually set.
+                          const isOverRun=!e.hoursLocked&&completeIdx!==-1&&myIndex>completeIdx;
                           let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
                           if(isSpecialEntry){
                             const remainingBefore=si.totalHours-befores[myIndex];
@@ -2193,7 +2202,7 @@ function MainApp({currentUser,onLogout}) {
                           const myStaffEntries=siEntries.filter(x=>x.staffId===e.staffId);
                           const myLastEntry=myStaffEntries[myStaffEntries.length-1];
                           const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id;
-                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry};
+                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry,isLocked:!!e.hoursLocked};
                         }
                         // Whenever this staff member doesn't have every hour of their day
                         // used/allocated - whatever sits in the other slot, job or misc, for
@@ -2216,7 +2225,7 @@ function MainApp({currentUser,onLogout}) {
                             return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
                           }
                           const meta=computeJobEntryMeta(e)||{};
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
                         }
                         return(
                           <td key={di}
