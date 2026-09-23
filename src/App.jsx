@@ -267,8 +267,8 @@ function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); re
 
 // Shared between undo and redo: the row shape the API expects for an insert,
 // and the entry shape the app uses once that insert comes back with an id.
-function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote}; }
-function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at}; }
+function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked}; }
+function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at,hoursLocked:!!inserted.hours_locked}; }
 
 function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
   if (!totalHours||totalHours<=0) return [];
@@ -1000,7 +1000,7 @@ function MainApp({currentUser,onLogout}) {
       setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
       if(current)setRedoStack(prev=>[...prev,{type:"editEntry",data:{state:current}}]);
       try{
-        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote},`?id=eq.${e.id}`);
+        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked},`?id=eq.${e.id}`);
       }catch(err){
         setError("Undo failed - reverted.");
         if(current){setEntries(prev=>prev.map(en=>en.id===e.id?current:en));setRedoStack(prev=>prev.slice(0,-1));}
@@ -1065,7 +1065,7 @@ function MainApp({currentUser,onLogout}) {
     setRedoStack(prev=>prev.slice(0,-1));
     if(last.type==="addEntries") {
       const tempMap=last.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}`,row}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString()}))]);
+      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString(),hoursLocked:!!row.hours_locked}))]);
       const tempIds=tempMap.map(t=>t.tempId);
       try{
         const inserted=await db("POST","entries",last.data.rows);
@@ -1082,7 +1082,7 @@ function MainApp({currentUser,onLogout}) {
       setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
       if(current)setUndoStack(prev=>[...prev,{type:"editEntry",data:{prev:current}}]);
       try{
-        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote},`?id=eq.${s.id}`);
+        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote,hours_locked:!!s.hoursLocked},`?id=eq.${s.id}`);
       }catch(err){
         setError("Redo failed - reverted.");
         if(current){setEntries(prev=>prev.map(en=>en.id===s.id?current:en));setUndoStack(prev=>prev.slice(0,-1));}
@@ -1202,7 +1202,7 @@ function MainApp({currentUser,onLogout}) {
       }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color,completed:!!j.completed})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
-      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at})));
+      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked})));
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -1262,12 +1262,18 @@ function MainApp({currentUser,onLogout}) {
         const all=extraEntries&&extraEntries.length>0?extraEntries:[{dateStr:data.dateStr,hours:data.hours,staffId:data.staffId}];
         const valid=all.filter(p=>!isPast(p.dateStr));
         const conflicts=valid.filter(p=>!!entryMap[`${p.staffId||data.staffId}|${p.dateStr}|${data.slot}`]);
+        // Auto-fill spreads a total across days/staff algorithmically - that
+        // stays open to the background hours correction as budgets and
+        // conflicts shift. A manually-typed single entry (auto-fill off) is
+        // a deliberate number the person chose, so it's locked: the
+        // correction pass leaves it alone instead of re-deriving it.
         const buildRows=(items)=>items.map(({dateStr,hours,staffId})=>({
           staff_id:staffId||data.staffId,
           job_id:data.entryType==="misc"?null:data.jobId,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:dateStr,slot:data.slot,hours,
-          misc_note:data.entryType==="misc"?data.miscNote:null
+          misc_note:data.entryType==="misc"?data.miscNote:null,
+          hours_locked:data.entryType!=="misc"&&!data.autoFill
         }));
         if(conflicts.length>0){
           setSaving(false);
@@ -1276,7 +1282,7 @@ function MainApp({currentUser,onLogout}) {
             onConfirm:async()=>{
               setSaving(true);
               const inserted=await db("POST","entries",buildRows(valid));
-              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at}))]);
+              setEntries(prev=>[...prev,...inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked}))]);
               setConflictAlert(null);setEntryModal(null);setTab("schedule");setSaving(false);
             },
             onCancel:()=>setConflictAlert(null),
@@ -1284,7 +1290,7 @@ function MainApp({currentUser,onLogout}) {
           return;
         }
         const inserted=await db("POST","entries",buildRows(valid));
-        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at}));
+        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked}));
         pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
         setEntries(prev=>[...prev,...newMapped]);
       } else {
@@ -1295,16 +1301,22 @@ function MainApp({currentUser,onLogout}) {
         // even though it's the one that just showed up.
         const relocated=prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.slot!==data.slot);
         const newCreatedAt=relocated?new Date().toISOString():undefined;
+        // Saving an edit through this modal is always a deliberate choice of
+        // hours, so it locks the entry - the background correction pass will
+        // leave it as the person set it instead of re-deriving it from the
+        // item's remaining budget on the very next pass.
+        const hoursLocked=data.entryType!=="misc";
         await db("PATCH","entries",{
           staff_id:data.staffId,
           job_id:data.entryType==="misc"?null:data.jobId,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:data.dateStr,slot:data.slot,hours:data.hours,
           misc_note:data.entryType==="misc"?data.miscNote:null,
+          hours_locked:hoursLocked,
           ...(newCreatedAt?{created_at:newCreatedAt}:{})
         },`?id=eq.${data.id}`);
         if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
-        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
+        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
       }
       setEntryModal(null);setTab("schedule");
     }catch(e){setError("Failed to save entry.");}
@@ -1600,13 +1612,15 @@ function MainApp({currentUser,onLogout}) {
 
       const rows=toInsert.map(({en,newDate,newSlot,newStaffId})=>({
         staff_id:newStaffId,job_id:en.jobId||null,sub_item_id:en.subItemId||null,
-        date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null
+        date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null,
+        hours_locked:!!en.hoursLocked
       }));
       // Show the pasted copies immediately with temporary ids, swapped for the
       // real ones once the server confirms - removed again if the save fails.
       const tempEntries=toInsert.map(({en,newDate,newSlot,newStaffId},i)=>({
         id:`temp_copy_${Date.now()}_${i}`,staffId:newStaffId,jobId:en.jobId||null,subItemId:en.subItemId||null,
-        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString()
+        dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString(),
+        hoursLocked:!!en.hoursLocked
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
@@ -1618,7 +1632,7 @@ function MainApp({currentUser,onLogout}) {
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
-        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at}));
+        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
       }catch(err){
@@ -1654,13 +1668,13 @@ function MainApp({currentUser,onLogout}) {
         return;
       }
       const tempId=`temp_copy_${Date.now()}`;
-      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString()};
+      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString(),hoursLocked:!!entry.hoursLocked};
       setEntries(prev=>[...prev,tempEntry]);
       dragEntry.current=null;
       try{
-        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null}]);
+        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:!!entry.hoursLocked}]);
         const i=inserted[0];
-        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at};
+        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked};
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
         pushUndo("addEntries",{ids:[newEntry.id]});
       }catch(err){
@@ -1756,7 +1770,14 @@ function MainApp({currentUser,onLogout}) {
         cumulative+=effectiveEntryHours(e,working,staff);
         if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
       });
-      const specialIdx=completeIdx!==-1?completeIdx:sorted.length-1;
+      const rawSpecialIdx=completeIdx!==-1?completeIdx:sorted.length-1;
+      // A locked entry's hours are a deliberate, manually-set number, not
+      // something this pass derives from what's left of the budget - so it
+      // never plays the "special" (completing/under-cap) role. If that's
+      // where the role would otherwise land, there's simply nothing left
+      // for this pass to derive for the item right now.
+      if(sorted[rawSpecialIdx].hoursLocked)return;
+      const specialIdx=rawSpecialIdx;
       const special=sorted[specialIdx];
       const remainingBefore=si.totalHours-befores[specialIdx];
       const maxPossible=completeIdx===-1?maxPossibleHours(special,working,staff):Infinity;
@@ -2143,8 +2164,13 @@ function MainApp({currentUser,onLogout}) {
                             if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
                           }
                           const totalBudget=si.totalHours||null;
-                          const specialIdx=completeIdx!==-1?completeIdx:siEntries.length-1;
-                          const isSpecialEntry=myIndex===specialIdx;
+                          const rawSpecialIdx=completeIdx!==-1?completeIdx:siEntries.length-1;
+                          // Mirrors oneCorrectionPass: a locked entry's hours are a
+                          // deliberate manual number, never something derived from the
+                          // remaining budget, so it's never shown as the special
+                          // completing/under-cap entry either.
+                          const specialIdx=siEntries[rawSpecialIdx]?.hoursLocked?-1:rawSpecialIdx;
+                          const isSpecialEntry=specialIdx!==-1&&myIndex===specialIdx;
                           const isOverRun=completeIdx!==-1&&myIndex>completeIdx;
                           let isCompletingEntry=false,budgetRemaining=null,isUnderCap=false,underAmount=null;
                           if(isSpecialEntry){
@@ -2451,7 +2477,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         const fills=buildAutoFill(form.dateStr,Math.max(0,hours),ph);
         fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
       });
-      onSave({...form,staffId:staffToSchedule[0]},combined);
+      onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     } else {
       // Single staff, misc, or manual multi-staff (no autofill) - still one batch, one call
       const combined=[];
@@ -2465,7 +2491,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid});
         }
       });
-      onSave({...form,staffId:staffToSchedule[0]},combined);
+      onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     }
   }
 
