@@ -270,18 +270,43 @@ function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); re
 function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked}; }
 function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at,hoursLocked:!!inserted.hours_locked}; }
 
-function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay) {
+// Lays out a total across consecutive weekdays at a daily rate. When
+// staffId/slot/entries are supplied, it also checks what that person
+// ACTUALLY has left each day rather than blindly assuming every day is a
+// full, untouched one: a day where the OTHER slot already has some hours
+// only contributes its real remaining share (not skipped outright, and not
+// over-booked either), and a day where THIS slot is already occupied is
+// skipped entirely - the walk just continues until the full total is
+// placed, extending as far as it needs to rather than relying on a fixed,
+// pre-computed day count. Callers that only want a rough, unconflicted
+// preview (e.g. the "does this block fit here" search) can omit those
+// three arguments and get the original blind, entries-agnostic walk.
+function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId, slot, entries) {
   if (!totalHours||totalHours<=0) return [];
   const ph = productiveHoursPerDay||8;
+  const capacityAware=staffId!==undefined&&slot!==undefined&&!!entries;
   const days=[]; let remaining=totalHours; let cur=parseISO(startDateStr);
-  while (remaining>0) {
+  let guard=0;
+  while (remaining>0.001 && guard<730) {
+    guard++;
     if (!isWeekend(cur)) {
-      const deducted=Math.min(ph,remaining);
-      days.push({dateStr:isoDate(cur),hours:deducted,deducted});
-      remaining-=ph;
+      const ds=isoDate(cur);
+      if(capacityAware){
+        const slotTaken=entries.some(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot===slot);
+        const usedElsewhere=entries.filter(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot!==slot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+        const available=Math.max(0,Math.round((ph-usedElsewhere)*2)/2);
+        if(!slotTaken&&available>0.001){
+          const deducted=Math.min(available,remaining);
+          days.push({dateStr:ds,hours:deducted,deducted});
+          remaining-=deducted;
+        }
+      }else{
+        const deducted=Math.min(ph,remaining);
+        days.push({dateStr:ds,hours:deducted,deducted});
+        remaining-=deducted;
+      }
     }
     cur=addDays(cur,1);
-    if (days.length>365) break;
   }
   return days;
 }
@@ -629,14 +654,17 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
     :isPersonalLastEntry?`${hours}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
   const flagColor=isOverRun||isUnderCap?"#D97706":undefined;
+  // A past-dated entry is locked, full stop - not editable by anyone
+  // (including admins), so none of the interaction affordances apply to it.
+  const editable=canEdit&&!isPastDate;
   return (
     <div
-      draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
-      onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
-      onDragEnd={canEdit?onDragEnd:undefined}
-      onClick={canEdit?onClick:undefined}
-      onContextMenu={canEdit&&onContextMenu?onContextMenu:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:canEdit?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
+      draggable={!isMobile&&editable&&!copyMode&&!moveMode}
+      onDragStart={editable&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
+      onDragEnd={editable?onDragEnd:undefined}
+      onClick={editable?onClick:undefined}
+      onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {isMobile?(
         <>
@@ -659,18 +687,26 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
   );
 }
 
-function MiscBlock({note,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
+function MiscBlock({note,hours,entry,job,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
+  const editable=canEdit&&!isPastDate;
+  // A misc entry tied to a job takes on that job's own colours (like a real
+  // job block) so it visually belongs to it - a plain, job-less misc note
+  // (a sick day, study leave) keeps the neutral grey it always had.
+  const bg=conflict?"#FEF2F2":selected?"#DBEAFE":(job?job.bgColor:"#F1F5F9");
+  const border=conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job?job.borderColor:"#94A3B8"}`;
+  const textColor=conflict?"#EF4444":(job?job.textColor:"#475569");
   return (
     <div
-      draggable={!isMobile&&canEdit&&!copyMode&&!moveMode}
-      onDragStart={canEdit&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
-      onDragEnd={canEdit?onDragEnd:undefined}
-      onClick={canEdit?onClick:undefined}
-      onContextMenu={canEdit&&onContextMenu?onContextMenu:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":"#F1F5F9",border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":"1.5px solid #94A3B8",borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:canEdit?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
+      draggable={!isMobile&&editable&&!copyMode&&!moveMode}
+      onDragStart={editable&&!copyMode&&!moveMode?e=>onDragStart(e,entry):undefined}
+      onDragEnd={editable?onDragEnd:undefined}
+      onClick={editable?onClick:undefined}
+      onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
+      style={{background:bg,border,borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:editable?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
-      <div style={{fontSize:isMobile?12:10,fontWeight:700,color:conflict?"#EF4444":"#475569",whiteSpace:"normal",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{note}</div>
-      <div style={{fontSize:isMobile?11:10,fontWeight:400,color:conflict?"#EF4444":"#475569",whiteSpace:"nowrap",lineHeight:1.3}}>{hours}h</div>
+      {job&&<div style={{fontSize:isMobile?11:9,fontWeight:700,color:textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>}
+      <div style={{fontSize:isMobile?12:10,fontWeight:700,color:textColor,whiteSpace:"pre-wrap",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{note}</div>
+      <div style={{fontSize:isMobile?11:10,fontWeight:400,color:textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{hours}h</div>
       {isOvercommitted&&<div style={{fontSize:isMobile?10:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
     </div>
   );
@@ -1015,7 +1051,6 @@ function MainApp({currentUser,onLogout}) {
   }
 
   const [viewWeeks,setViewWeeks]=useState(2);
-  const [viewMode,setViewMode]=useState("weeks");
   const [anchorDate,setAnchorDate]=useState(()=>mondayOf(TODAY));
 
   const [staff,setStaff]=useState([]);
@@ -1551,12 +1586,12 @@ function MainApp({currentUser,onLogout}) {
   },[jobs,entries,threshold]);
 
   const visibleDays=useMemo(()=>{
-    const days=[];const weeks=viewMode==="month"?4:viewWeeks;
-    for(let w=0;w<weeks;w++)for(let d=0;d<6;d++)days.push(addDays(anchorDate,w*7+d)); // Mon-Sat
+    const days=[];
+    for(let w=0;w<viewWeeks;w++)for(let d=0;d<6;d++)days.push(addDays(anchorDate,w*7+d)); // Mon-Sat
     return days;
-  },[anchorDate,viewWeeks,viewMode]);
+  },[anchorDate,viewWeeks]);
 
-  const totalWeeks=viewMode==="month"?4:viewWeeks;
+  const totalWeeks=viewWeeks;
   const weekStarts=Array.from({length:totalWeeks},(_,i)=>addDays(anchorDate,i*7));
 
   const {entryMap,conflictKeys,entriesByKey}=useMemo(()=>{
@@ -1565,7 +1600,7 @@ function MainApp({currentUser,onLogout}) {
     return {entryMap:map,conflictKeys:new Set(Object.keys(counts).filter(k=>counts[k]>1)),entriesByKey:byKey};
   },[entries]);
 
-  function navigate(dir){const w=viewMode==="month"?4:viewWeeks;setAnchorDate(d=>addDays(d,dir*w*7));}
+  function navigate(dir){setAnchorDate(d=>addDays(d,dir*viewWeeks*7));}
   function goToday(){setAnchorDate(mondayOf(TODAY));}
 
   function openNewEntry(staffId,dateStr,slot){
@@ -1690,7 +1725,11 @@ function MainApp({currentUser,onLogout}) {
         // correction pass leaves it alone instead of re-deriving it.
         const buildRows=(items)=>items.map(({dateStr,hours,staffId})=>({
           staff_id:staffId||data.staffId,
-          job_id:data.entryType==="misc"?null:data.jobId,
+          // A misc entry can now optionally carry a job too (so it renders
+          // with that job's colours) - only the joinery-item/budget link
+          // stays job-entry-only, since misc work was never tracked against
+          // an item's hour budget.
+          job_id:data.jobId||null,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:dateStr,slot:data.slot,hours,
           misc_note:data.entryType==="misc"?data.miscNote:null,
@@ -1753,7 +1792,7 @@ function MainApp({currentUser,onLogout}) {
         const hoursLocked=data.entryType!=="misc";
         await db("PATCH","entries",{
           staff_id:data.staffId,
-          job_id:data.entryType==="misc"?null:data.jobId,
+          job_id:data.jobId||null,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:data.dateStr,slot:data.slot,hours:data.hours,
           misc_note:data.entryType==="misc"?data.miscNote:null,
@@ -1761,7 +1800,7 @@ function MainApp({currentUser,onLogout}) {
           ...(newCreatedAt?{created_at:newCreatedAt}:{})
         },`?id=eq.${data.id}`);
         if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
-        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.entryType==="misc"?null:data.jobId,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
+        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
         if(prevEntry){
           bundlingRef.current=true;
           try{
@@ -2569,10 +2608,10 @@ function MainApp({currentUser,onLogout}) {
           <div style={{position:isMobile?"relative":"sticky",top:isMobile?undefined:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isMobile?6:12,paddingBottom:isMobile?4:8,marginBottom:4,flexShrink:0}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?6:12,marginBottom:isMobile?4:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
-              {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],["month","Month"]].map(([v,label])=>(
-                <button key={v} onClick={()=>{if(v==="month"){setViewMode("month");}else{setViewMode("weeks");setViewWeeks(v);}}}
-                  style={{padding:isMobile?"3px 8px":"5px 12px",borderRadius:6,border:"none",fontSize:isMobile?11:13,fontWeight:500,cursor:"pointer",background:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#fff":"transparent",color:(v==="month"&&viewMode==="month")||(v===viewWeeks&&viewMode!=="month")?"#1E293B":"#64748B"}}>
-                  {isMobile?(v==="month"?"Mo":`${v}w`):label}
+              {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],[5,"5 Weeks"],[6,"6 Weeks"]].map(([v,label])=>(
+                <button key={v} onClick={()=>setViewWeeks(v)}
+                  style={{padding:isMobile?"3px 8px":"5px 12px",borderRadius:6,border:"none",fontSize:isMobile?11:13,fontWeight:500,cursor:"pointer",background:v===viewWeeks?"#fff":"transparent",color:v===viewWeeks?"#1E293B":"#64748B"}}>
+                  {isMobile?`${v}w`:label}
                 </button>
               ))}
             </div>
@@ -2652,6 +2691,13 @@ function MainApp({currentUser,onLogout}) {
                     const weekIdx=Math.floor(i/6);const isWeekBound=d.getDay()===1&&weekIdx>0;
                     const isSat=d.getDay()===6;
                     const isFirstDayOfWeek=i%6===0;
+                    // Desktop has plenty of room for a "Week of ..." banner
+                    // (which already spells out the month) once per week, so
+                    // repeating the month on every single day would just be
+                    // noise there - instead, mark it only at the exact point
+                    // a week's days roll into a new month (e.g. a week
+                    // spanning 29 Sep-4 Oct), in that same spacer slot.
+                    const isMonthChange=i>0&&d.getMonth()!==visibleDays[i-1].getMonth();
                     return(
                       <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9,minWidth:isMobile?100:undefined}}>
                         {totalWeeks>1&&isFirstDayOfWeek&&(
@@ -2660,7 +2706,17 @@ function MainApp({currentUser,onLogout}) {
                           </div>
                         )}
                         {totalWeeks>1&&!isFirstDayOfWeek&&(
-                          <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9"}}/>
+                          <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:600,color:"#475569"}}>
+                            {!isMobile&&isMonthChange?d.toLocaleDateString("en-AU",{month:"short"}):""}
+                          </div>
+                        )}
+                        {/* Phone screens don't have room for a once-per-week
+                            banner to stay in view, so every day carries its
+                            own compact month label instead - same font/weight
+                            as (and inheriting the colour of) the date line it
+                            sits above, so it reads as one unit with it. */}
+                        {isMobile&&(
+                          <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{month:"short"})}</div>
                         )}
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
                       </th>
@@ -2767,10 +2823,15 @@ function MainApp({currentUser,onLogout}) {
                           // walk above picks as the single item-wide completing/under one. Every
                           // other staff member's own final entry should show their real, actual
                           // stored hours instead of the flat total-budget placeholder, the same way
-                          // the one "special" entry does.
+                          // the one "special" entry does - but only when that real number is
+                          // actually a genuine partial/tail value (less than the full day this
+                          // person could work). A last entry that happens to land on a completely
+                          // full, uncapped day isn't telling you anything different from an
+                          // ordinary interior day, so it shows the same placeholder those do.
                           const myStaffEntries=siEntries.filter(x=>x.staffId===e.staffId);
                           const myLastEntry=myStaffEntries[myStaffEntries.length-1];
-                          const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id;
+                          const myMaxThisDay=maxPossibleHours(e,entries,staff);
+                          const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id&&(Number(e.hours)||0)<myMaxThisDay-0.05;
                           return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry,isLocked:!!e.hoursLocked};
                         }
                         // Whenever this staff member doesn't have every hour of their day
@@ -2782,13 +2843,13 @@ function MainApp({currentUser,onLogout}) {
                         // conflict (two entries mapped to the same slot) can render BOTH of them
                         // side by side at half width instead of only ever showing one.
                         function renderEntryBlock(e,forceConflict){
-                          const eJob=e&&!e.miscNote?jobs.find(j=>j.id===e.jobId):null;
+                          const eJob=e&&e.jobId?jobs.find(j=>j.id===e.jobId):null;
                           const eSubItem=e&&e.subItemId?subItems.find(s=>s.id===e.subItemId):null;
                           const eIsOvercommitted=computeIsOvercommitted(e);
                           const blockOnClick=copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(e.id):()=>openEditEntry(e);
                           const blockOnContextMenu=canEdit?ev=>openContextMenu(ev,e):undefined;
                           if(e.miscNote){
-                            return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                            return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} job={eJob} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
                           }
                           if(!eJob){
                             return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
@@ -3029,8 +3090,8 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
   const preview=useMemo(()=>{
     if(!autoFill||!form.dateStr||!totalHours||form.entryType==="misc")return[];
-    return buildAutoFill(form.dateStr,totalHours,productiveHours);
-  },[autoFill,form.dateStr,totalHours,productiveHours,form.entryType]);
+    return buildAutoFill(form.dateStr,totalHours,productiveHours,sameDayStaffId,form.slot,entries);
+  },[autoFill,form.dateStr,totalHours,productiveHours,form.entryType,sameDayStaffId,form.slot,entries]);
 
   function handleSave(){
     const staffToSchedule=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
@@ -3056,7 +3117,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       const combined=[];
       shares.forEach(({sid,ph,hours})=>{
         const startForThis=form.staffStartDates?.[sid]||form.dateStr;
-        const fills=buildAutoFill(startForThis,Math.max(0,hours),ph);
+        const fills=buildAutoFill(startForThis,Math.max(0,hours),ph,sid,form.slot,entries);
         fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
       });
       onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
@@ -3067,7 +3128,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         const sf=staff.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
         if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
-          const fills=buildAutoFill(form.dateStr,form.totalHours,ph);
+          const fills=buildAutoFill(form.dateStr,form.totalHours,ph,sid,form.slot,entries);
           fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
         } else {
           combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid});
@@ -3078,7 +3139,10 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   }
 
   useEffect(()=>{
-    function onKey(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSave();}}
+    // A textarea (the misc-entry description) needs plain Enter to insert
+    // its second line, not submit the whole modal - every other field
+    // still saves on Enter as before.
+    function onKey(e){if(e.key==="Enter"&&!e.shiftKey&&e.target.tagName!=="TEXTAREA"){e.preventDefault();handleSave();}}
     window.addEventListener("keydown",onKey);
     return()=>window.removeEventListener("keydown",onKey);
   },[form,autoFill,preview]);
@@ -3124,7 +3188,17 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           </div>
 
           {form.entryType==="misc"?(
-            <Inp label="Description (e.g. Wash Cars, Study Leave)" value={form.miscNote} onChange={e=>set("miscNote",e.target.value)} placeholder="Enter description..."/>
+            <>
+              <Sel label="Job (optional)" value={form.jobId||""} onChange={e=>set("jobId",e.target.value)}>
+                <option value="">— No job / General —</option>
+                {jobs.filter(j=>!j.completed||j.id===form.jobId).map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}{j.completed?" (completed)":""}</option>)}
+              </Sel>
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Description (e.g. Wash Cars, Study Leave)</div>
+                <textarea value={form.miscNote} onChange={e=>set("miscNote",e.target.value)} placeholder="Enter description... (up to two lines)" rows={2}
+                  style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none",resize:"vertical",fontFamily:"inherit"}}/>
+              </div>
+            </>
           ):(
             <>
               <Sel label="Job" value={form.jobId} onChange={e=>handleJobChange(e.target.value)}>
