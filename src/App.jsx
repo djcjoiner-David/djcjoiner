@@ -3298,10 +3298,23 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       // out independently - see buildGroupAutoFill for the full rule (no
       // day left empty, no token partial day for a latecomer, everyone
       // available works together once there's real work left for more than
-      // one of them). A wide gap between when different staff actually
-      // start is expected and fine here - it means whoever could start
-      // earlier just kept the job moving, not that anything went wrong.
+      // one of them).
       const combined=buildGroupAutoFill(staffToSchedule,form.totalHours,form.dateStr,form.slot,entries,staff);
+      // Still confirm if the actual resulting start dates end up more than
+      // 2 working days apart, regardless of how the schedule was arrived
+      // at - this check stands on its own and isn't tied to whichever
+      // engine produced the dates.
+      const firstDateBySid={};
+      combined.forEach(({staffId,dateStr})=>{
+        if(!firstDateBySid[staffId]||dateStr<firstDateBySid[staffId])firstDateBySid[staffId]=dateStr;
+      });
+      const firstDates=Object.values(firstDateBySid);
+      if(firstDates.length>1){
+        const minDate=firstDates.reduce((a,b)=>a<b?a:b);
+        const maxDate=firstDates.reduce((a,b)=>a>b?a:b);
+        const spread=autoFillDayGap(minDate,maxDate);
+        if(spread>2&&!window.confirm(`Start dates for these staff are ${spread} working days apart - schedule anyway?`))return;
+      }
       onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     } else {
       // Single staff, misc, or manual multi-staff (no autofill) - still one batch, one call
