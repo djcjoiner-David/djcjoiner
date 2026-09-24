@@ -1647,17 +1647,21 @@ function MainApp({currentUser,onLogout}) {
     const si=subItems.find(s=>s.id===subItemId);
     if(!si)return{};
     const itemEntries=pool.filter(e=>e.subItemId===subItemId&&!e.miscNote);
+    // A locked entry commits its hours out of the item's total budget
+    // regardless of WHERE it falls in the date order - reserve every locked
+    // entry's share up front, across the whole item, before splitting
+    // anything else. Walking day-by-day and only "noticing" a lock once its
+    // own date comes up let earlier unlocked days spend against a pool a
+    // later lock had already claimed, letting the item's total run over by
+    // exactly the locked amount.
+    const lockedTotal=itemEntries.filter(e=>e.hoursLocked).reduce((a,e)=>a+(Number(e.hours)||0),0);
+    let remaining=Math.max(0,(si.totalHours||0)-lockedTotal);
     const byDate={};
-    itemEntries.forEach(e=>{(byDate[e.dateStr]=byDate[e.dateStr]||[]).push(e);});
+    itemEntries.filter(e=>!e.hoursLocked).forEach(e=>{(byDate[e.dateStr]=byDate[e.dateStr]||[]).push(e);});
     const dates=Object.keys(byDate).sort();
-    let remaining=si.totalHours||0;
     const plan={};
     dates.forEach(ds=>{
-      const dayEntries=byDate[ds];
-      const locked=dayEntries.filter(e=>e.hoursLocked);
-      const unlocked=dayEntries.filter(e=>!e.hoursLocked);
-      remaining-=locked.reduce((a,e)=>a+(Number(e.hours)||0),0);
-      if(unlocked.length===0)return;
+      const unlocked=byDate[ds];
       const parties=unlocked.map(e=>({
         sid:e.id,
         ph:Number(staff.find(s=>s.id===e.staffId)?.productiveHours)||8,
@@ -1708,6 +1712,31 @@ function MainApp({currentUser,onLogout}) {
     setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
     await Promise.all(competitors.map(c=>db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`)));
     return pool.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e);
+  }
+  // A lock only ever protects an entry from a same-day-same-item sibling -
+  // it's never meant to survive the item itself being reshuffled. Whenever a
+  // move or copy touches ANY entry in an item, every lock in that whole item
+  // (not just the day that was touched) is cleared so the follow-up
+  // recalculateItem call redistributes the ENTIRE budget from scratch with
+  // nothing protected - otherwise a lock dated later than the days a move/copy
+  // actually touched can keep reserving its hours out of the total while the
+  // rest of the item is redistributed around it, letting the item's stored
+  // total run over its real budget.
+  async function unlockAllLocksInItem(subItemId,pool){
+    const locked=pool.filter(x=>x.subItemId===subItemId&&x.hoursLocked);
+    if(locked.length===0)return pool;
+    const ids=new Set(locked.map(c=>c.id));
+    locked.forEach(c=>pushUndo("editEntry",{prev:c}));
+    setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
+    await Promise.all(locked.map(c=>db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`)));
+    return pool.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e);
+  }
+  // All the dates an item currently has entries on - used as the epicenter
+  // set for a move/copy's full-item recalc, since every lock in the item was
+  // just cleared and any entry anywhere in it (not only the day physically
+  // touched) can now legitimately settle at ~0 and needs to be delete-eligible.
+  function allDatesForItem(subItemId,pool){
+    return[...new Set(pool.filter(e=>e.subItemId===subItemId&&!e.miscNote).map(e=>e.dateStr))];
   }
 
   // The single entry point for keeping a joinery item's stored hours correct
@@ -2132,10 +2161,10 @@ function MainApp({currentUser,onLogout}) {
             // cost was the PER-ENTRY loop this replaces, batched below into
             // one pass per item instead of one per arrival.
             let pool=poolAfter;
-            for(const[subItemId,arrivals]of Object.entries(byItemArrivals)){
-              pool=await unlockStaleLocksAtMany(subItemId,arrivals.map(a=>({dateStr:a.dateStr,excludeId:a.id})),pool);
+            for(const subItemId of Object.keys(byItemArrivals)){
+              pool=await unlockAllLocksInItem(subItemId,pool);
             }
-            await Promise.all(Object.entries(byItem).map(([subItemId,dates])=>recalculateItem(subItemId,pool,[...dates])));
+            await Promise.all(Object.keys(byItem).map(subItemId=>recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool))));
           }finally{bundlingRef.current=false;}
         }
       }catch(err){
@@ -2240,10 +2269,10 @@ function MainApp({currentUser,onLogout}) {
         if(Object.keys(byItem).length>0){
           bundlingRef.current=true;
           try{
-            for(const[subItemId,arrivals]of Object.entries(byItemArrivals)){
-              pool=await unlockStaleLocksAtMany(subItemId,arrivals,pool);
+            for(const subItemId of Object.keys(byItemArrivals)){
+              pool=await unlockAllLocksInItem(subItemId,pool);
             }
-            await Promise.all(Object.entries(byItem).map(([subItemId,dates])=>recalculateItem(subItemId,pool,[...dates])));
+            await Promise.all(Object.keys(byItem).map(subItemId=>recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool))));
           }finally{bundlingRef.current=false;}
         }
       }catch(err){
@@ -2297,8 +2326,8 @@ function MainApp({currentUser,onLogout}) {
           bundlingRef.current=true;
           try{
             let pool=[...entries,newEntry];
-            pool=await unlockStaleLocksAt(entry.subItemId,toDateStr,newEntry.id,pool);
-            await recalculateItem(entry.subItemId,pool,[toDateStr]);
+            pool=await unlockAllLocksInItem(entry.subItemId,pool);
+            await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
           }finally{bundlingRef.current=false;}
         }
       }catch(err){
@@ -2355,10 +2384,8 @@ function MainApp({currentUser,onLogout}) {
         bundlingRef.current=true;
         try{
           let pool=entries.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:newHours}:en);
-          pool=await unlockStaleLocksAt(entry.subItemId,toDateStr,entry.id,pool);
-          const epicenters=[toDateStr];
-          if(entry.dateStr!==toDateStr)epicenters.push(entry.dateStr);
-          await recalculateItem(entry.subItemId,pool,epicenters);
+          pool=await unlockAllLocksInItem(entry.subItemId,pool);
+          await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
         }finally{bundlingRef.current=false;}
       }
     }catch(err){
