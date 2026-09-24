@@ -317,24 +317,27 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
 // sane bound so a pathological schedule can't spin the search forever.
 const SEARCH_HORIZON_DAYS=3650;
 
-// "First Available" was previously locked to whichever slot the modal
-// happened to have selected - it should instead just find the earliest
-// real opening, whichever slot that turns out to be, and report it back so
-// the modal can select the right one itself.
-function nextAvailableDate(staffIds, entries, fromDateStr) {
+// Tries whichever slot is already selected in the modal first, only
+// falling back to the other one if nothing works there - "ignore the slot
+// selection" means don't refuse to look elsewhere when the chosen slot is
+// genuinely full, not "throw away a perfectly good same-slot fit just
+// because the other slot's search happens to be tried first."
+function slotSearchOrder(preferredSlot){ return preferredSlot===1?[1,0]:[0,1]; }
+
+function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot) {
   const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
   let cur=parseISO(startStr);
   for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
     if(!isWeekend(cur)){
       const ds=isoDate(cur);
-      for(const slot of [0,1]){
+      for(const slot of slotSearchOrder(preferredSlot)){
         const conflict=staffIds.some(sid=>entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===slot));
         if(!conflict)return{dateStr:ds,slot};
       }
     }
     cur=addDays(cur,1);
   }
-  return{dateStr:startStr,slot:0};
+  return{dateStr:startStr,slot:preferredSlot===1?1:0};
 }
 
 // Whether ONE person's auto-fill block, starting on startDateStr, lands
@@ -351,19 +354,19 @@ function blockFits(staffShares, slot, entries, startDateStr) {
   return staffShares.every(({sid,ph,hours})=>personalBlockFits(sid,ph,hours,slot,entries,startDateStr));
 }
 
-function nextAvailableBlockDate(staffShares, entries, fromDateStr) {
+function nextAvailableBlockDate(staffShares, entries, fromDateStr, preferredSlot) {
   const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
   let cur=parseISO(startStr);
   for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
     if(!isWeekend(cur)){
       const ds=isoDate(cur);
-      for(const slot of [0,1]){
+      for(const slot of slotSearchOrder(preferredSlot)){
         if(blockFits(staffShares,slot,entries,ds))return{dateStr:ds,slot};
       }
     }
     cur=addDays(cur,1);
   }
-  return{dateStr:startStr,slot:0};
+  return{dateStr:startStr,slot:preferredSlot===1?1:0};
 }
 
 // Same search, but each staff member is allowed their OWN start date rather
@@ -372,14 +375,18 @@ function nextAvailableBlockDate(staffShares, entries, fromDateStr) {
 // earliest-fitting start for each person independently within that window;
 // if any one of them can't fit anywhere in the window, this anchor date is
 // abandoned and the search moves on to the next one rather than failing -
-// there's always assumed to be somewhere further out that works.
-function nextAvailableStaggeredDates(staffShares, entries, fromDateStr) {
+// there's always assumed to be somewhere further out that works. Also tries
+// the modal's already-selected slot before the other one, for the same
+// reason as the searches above - a clean, unstaggered fit in the chosen
+// slot beats a staggered one found only because the other slot was checked
+// first.
+function nextAvailableStaggeredDates(staffShares, entries, fromDateStr, preferredSlot) {
   const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
   let anchor=parseISO(startStr);
   for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
     if(!isWeekend(anchor)){
       const anchorStr=isoDate(anchor);
-      for(const slot of [0,1]){
+      for(const slot of slotSearchOrder(preferredSlot)){
         const perStaff=[];
         let ok=true;
         for(const share of staffShares){
@@ -712,21 +719,23 @@ function MiscBlock({note,hours,entry,job,onClick,onContextMenu,onDragStart,onDra
   );
 }
 
-function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,available}) {
+function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours}) {
   // Copy and Move both just arm a plain click-to-target on an empty slot -
   // no special "Paste here" fill, so they look and behave identically.
   if (isPastDate||!canEdit) return <div style={{minHeight:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
+  const available=availableHours>0;
   // A job that wrapped up without using this staff member's whole day
   // leaves the day's other slot free - flag that leftover capacity instead
   // of showing a plain "+", with the same pale grey used elsewhere in the
   // app (e.g. Saturday columns). Misc entries carry their own solid border,
   // so the shared grey tone doesn't need to compete with that for contrast.
+  // Shows the actual number left, not just that some is available.
   return (
     <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.2,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
+      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.3,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
       onMouseEnter={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
       onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
-      {isDropTarget?"↓":available?"Available Hours":"+"}
+      {isDropTarget?"↓":available?(<><div>{availableHours} Hours</div><div>Available</div></>):"+"}
     </div>
   );
 }
@@ -958,6 +967,12 @@ export default function DJCJoiner() {
     meta.setAttribute("content","width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover");
     document.body.style.overscrollBehavior="none";
     document.body.style.webkitTextSizeAdjust="100%";
+    // A phone browser (especially a home-screen/PWA install) can restore the
+    // page's LAST scroll position on open instead of starting fresh, landing
+    // partway down the grid with the header scrolled out of view. Force a
+    // real fresh start and stop the browser from doing this on its own.
+    if("scrollRestoration" in window.history)window.history.scrollRestoration="manual";
+    window.scrollTo(0,0);
   },[]);
   const [currentUser,setCurrentUser]=useState(()=>{
     try{const u=sessionStorage.getItem("djc_user");return u?JSON.parse(u):null;}catch{return null;}
@@ -1672,9 +1687,27 @@ function MainApp({currentUser,onLogout}) {
       pushUndo("editEntry",{prev:c});
       return db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`);
     });
-    setEntries(prev=>prev.map(e=>competitors.some(c=>c.id===e.id)?{...e,hoursLocked:false}:e));
+    const ids=new Set(competitors.map(c=>c.id));
+    setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
     await Promise.all(jobs);
-    return pool.map(e=>competitors.some(c=>c.id===e.id)?{...e,hoursLocked:false}:e);
+    return pool.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e);
+  }
+  // Same idea, but for a whole batch of arrivals at once (a multi-day
+  // auto-fill, or a group move/copy touching several days) - one filter
+  // pass and one setEntries update for the whole batch instead of looping
+  // unlockStaleLocksAt sequentially per arrival, which on a big schedule
+  // meant dozens of redundant full-pool scans and renders for what's almost
+  // always a no-op (nothing locked to begin with).
+  async function unlockStaleLocksAtMany(subItemId,arrivals,pool){
+    const excludeIds=new Set(arrivals.map(a=>a.excludeId));
+    const dateSet=new Set(arrivals.map(a=>a.dateStr));
+    const competitors=pool.filter(x=>x.subItemId===subItemId&&dateSet.has(x.dateStr)&&!excludeIds.has(x.id)&&x.hoursLocked);
+    if(competitors.length===0)return pool;
+    const ids=new Set(competitors.map(c=>c.id));
+    competitors.forEach(c=>pushUndo("editEntry",{prev:c}));
+    setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
+    await Promise.all(competitors.map(c=>db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`)));
+    return pool.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e);
   }
 
   // The single entry point for keeping a joinery item's stored hours correct
@@ -1691,24 +1724,34 @@ function MainApp({currentUser,onLogout}) {
   async function recalculateItem(subItemId,pool,epicenterDates){
     const plan=computeItemPlan(subItemId,pool);
     const epi=new Set(epicenterDates||[]);
-    const jobs=[];
+    // A big multi-day, multi-staff schedule can touch dozens of entries in
+    // one go - look each one up once (a Map, not a repeated pool.find scan
+    // per entry) and apply every change as a SINGLE setEntries update
+    // instead of one render per corrected entry, the same "batch it, don't
+    // trickle it" rule the rest of the app's mutations already follow.
+    const byId=new Map(pool.map(e=>[e.id,e]));
+    const toDelete=[];
+    const toPatch=[];
     Object.entries(plan).forEach(([id,newHoursRaw])=>{
-      const current=pool.find(e=>e.id===id);
+      const current=byId.get(id);
       if(!current)return;
       const newHours=newHoursRaw<0.05?0:newHoursRaw;
       const oldHours=Number(current.hours)||0;
       if(Math.abs(newHours-oldHours)<=0.05)return;
-      if(newHours===0&&epi.has(current.dateStr)){
-        pushUndo("deleteEntry",{entry:current});
-        setEntries(prev=>prev.filter(e=>e.id!==id));
-        jobs.push(db("DELETE","entries",null,`?id=eq.${id}`));
-      }else{
-        pushUndo("editEntry",{prev:current});
-        setEntries(prev=>prev.map(e=>e.id===id?{...e,hours:newHours}:e));
-        jobs.push(db("PATCH","entries",{hours:newHours},`?id=eq.${id}`));
-      }
+      if(newHours===0&&epi.has(current.dateStr))toDelete.push(current);
+      else toPatch.push({entry:current,newHours});
     });
-    if(jobs.length>0)await Promise.all(jobs);
+    if(toDelete.length===0&&toPatch.length===0)return;
+    toDelete.forEach(e=>pushUndo("deleteEntry",{entry:e}));
+    toPatch.forEach(({entry})=>pushUndo("editEntry",{prev:entry}));
+    const deleteIds=new Set(toDelete.map(e=>e.id));
+    const patchMap=new Map(toPatch.map(({entry,newHours})=>[entry.id,newHours]));
+    setEntries(prev=>prev.filter(e=>!deleteIds.has(e.id)).map(e=>patchMap.has(e.id)?{...e,hours:patchMap.get(e.id)}:e));
+    const jobs=[
+      ...toDelete.map(e=>db("DELETE","entries",null,`?id=eq.${e.id}`)),
+      ...toPatch.map(({entry,newHours})=>db("PATCH","entries",{hours:newHours},`?id=eq.${entry.id}`)),
+    ];
+    await Promise.all(jobs);
   }
 
   async function saveEntry(data,extraEntries){
@@ -1764,7 +1807,7 @@ function MainApp({currentUser,onLogout}) {
             const touchedDates=[...new Set(newMapped.map(m=>m.dateStr))];
             bundlingRef.current=true;
             try{
-              for(const m of newMapped)pool=await unlockStaleLocksAt(data.subItemId,m.dateStr,m.id,pool);
+              pool=await unlockStaleLocksAtMany(data.subItemId,newMapped.map(m=>({dateStr:m.dateStr,excludeId:m.id})),pool);
               await recalculateItem(data.subItemId,pool,touchedDates);
             }finally{bundlingRef.current=false;}
           }else if(newMapped.length===1){
@@ -2084,9 +2127,13 @@ function MainApp({currentUser,onLogout}) {
         if(Object.keys(byItem).length>0){
           bundlingRef.current=true;
           try{
+            // Typically only a handful of distinct items are touched by one
+            // move, so this outer loop stays cheap either way - the real
+            // cost was the PER-ENTRY loop this replaces, batched below into
+            // one pass per item instead of one per arrival.
             let pool=poolAfter;
             for(const[subItemId,arrivals]of Object.entries(byItemArrivals)){
-              for(const{id,dateStr}of arrivals)pool=await unlockStaleLocksAt(subItemId,dateStr,id,pool);
+              pool=await unlockStaleLocksAtMany(subItemId,arrivals.map(a=>({dateStr:a.dateStr,excludeId:a.id})),pool);
             }
             await Promise.all(Object.entries(byItem).map(([subItemId,dates])=>recalculateItem(subItemId,pool,[...dates])));
           }finally{bundlingRef.current=false;}
@@ -2181,19 +2228,21 @@ function MainApp({currentUser,onLogout}) {
         // that item/day so the whole group settles to the right split rather
         // than leaving the source untouched.
         let pool=[...entries,...newEntries];
-        const byItem={};
-        const arrivals=[];
+        const byItem={},byItemArrivals={};
         toInsert.forEach(({en,newDate},idx)=>{
           const newEntry=newEntries[idx];
           if(en.miscNote||!en.subItemId||!newEntry)return;
           const set=byItem[en.subItemId]=byItem[en.subItemId]||new Set();
           set.add(newDate);
-          arrivals.push({subItemId:en.subItemId,dateStr:newDate,id:newEntry.id});
+          const arrivals=byItemArrivals[en.subItemId]=byItemArrivals[en.subItemId]||[];
+          arrivals.push({dateStr:newDate,excludeId:newEntry.id});
         });
         if(Object.keys(byItem).length>0){
           bundlingRef.current=true;
           try{
-            for(const a of arrivals)pool=await unlockStaleLocksAt(a.subItemId,a.dateStr,a.id,pool);
+            for(const[subItemId,arrivals]of Object.entries(byItemArrivals)){
+              pool=await unlockStaleLocksAtMany(subItemId,arrivals,pool);
+            }
             await Promise.all(Object.entries(byItem).map(([subItemId,dates])=>recalculateItem(subItemId,pool,[...dates])));
           }finally{bundlingRef.current=false;}
         }
@@ -2838,7 +2887,10 @@ function MainApp({currentUser,onLogout}) {
                         // used/allocated - whatever sits in the other slot, job or misc, for
                         // whichever staff member it is - the empty slot flags that leftover
                         // capacity instead of showing a plain "+".
-                        const showAvailableHours=!entry&&!!otherSlotEntry&&(Number(otherSlotEntry.hours)||0)<(Number(st.productiveHours)||8)-0.05;
+                        const staffCap=Number(st.productiveHours)||8;
+                        const availableHours=!entry&&!!otherSlotEntry&&(Number(otherSlotEntry.hours)||0)<staffCap-0.05
+                          ?Math.max(0,Math.round((staffCap-(Number(otherSlotEntry.hours)||0))*2)/2)
+                          :0;
                         // Renders whichever entry sits in this staff/day/slot - factored out so a
                         // conflict (two entries mapped to the same slot) can render BOTH of them
                         // side by side at half width instead of only ever showing one.
@@ -2871,7 +2923,7 @@ function MainApp({currentUser,onLogout}) {
                                     ))}
                                   </div>
                                 : renderEntryBlock(entry,false)
-                              : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} available={showAvailableHours}/>
+                              : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} availableHours={availableHours}/>
                             }
                           </td>
                         );
@@ -3245,9 +3297,11 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                 if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
                   // A day only counts as "available" if every day the auto-fill
                   // would actually use is free - not just the start day. The
-                  // slot itself is no longer pinned to whatever's selected in
-                  // the modal either - this finds the earliest REAL opening,
-                  // wherever it actually is, with no distance limit.
+                  // currently-selected slot is tried first (a clean fit there
+                  // beats an artificially staggered one found only because
+                  // the other slot happened to be checked first) - only if
+                  // NOTHING works there does the search look at the other
+                  // slot, with no distance limit either way.
                   const staffWithPh=ids.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,ph:Number(sf?.productiveHours)||8};});
                   if(ids.length>1){
                     // Staff don't have to start on the same day - each is
@@ -3256,15 +3310,15 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                     // candidate date can't fit everyone within that spread,
                     // the search just keeps looking further out.
                     const shares=splitHoursByStaff(staffWithPh,form.totalHours);
-                    const result=nextAvailableStaggeredDates(shares,entries,todayStr);
+                    const result=nextAvailableStaggeredDates(shares,entries,todayStr,form.slot);
                     if(result)setForm(f=>({...f,dateStr:result.dateStr,slot:result.slot,staffStartDates:Object.fromEntries(result.perStaff.map(p=>[p.sid,p.startDateStr]))}));
                   }else{
                     const shares=staffWithPh.map(s=>({...s,hours:form.totalHours}));
-                    const{dateStr,slot}=nextAvailableBlockDate(shares,entries,todayStr);
+                    const{dateStr,slot}=nextAvailableBlockDate(shares,entries,todayStr,form.slot);
                     setForm(f=>({...f,dateStr,slot,staffStartDates:{}}));
                   }
                 } else {
-                  const{dateStr,slot}=nextAvailableDate(ids,entries,todayStr);
+                  const{dateStr,slot}=nextAvailableDate(ids,entries,todayStr,form.slot);
                   setForm(f=>({...f,dateStr,slot,staffStartDates:{}}));
                 }
               }} style={{width:"100%",padding:"7px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:12,cursor:"pointer",marginBottom:14}}>
