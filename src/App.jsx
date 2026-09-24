@@ -195,6 +195,7 @@ function isSunday(d) { return d.getDay()===0; }
 
 // Count working days (Mon-Sat) between two dates
 function workingDaysBetween(d1,d2) {
+  if(isoDate(d1)===isoDate(d2))return 0; // otherwise the loop below never finds its way back to d2
   let count=0;
   const step=d2>d1?1:-1;
   let cur=new Date(d1);
@@ -207,6 +208,23 @@ function workingDaysBetween(d1,d2) {
   return count;
 }
 
+// Counts days the same way addWorkingDays/slotSearchOrder-based searches
+// step through them (skipping BOTH Saturday and Sunday) - workingDaysBetween
+// above counts a Mon-Sat week instead (it matches the grid's own Saturday
+// column being schedulable), which is a different scale and would call a
+// perfectly on-target 2-day stagger "3 days apart" whenever a weekend falls
+// between the two dates.
+function autoFillDayGap(dateStr1,dateStr2){
+  const start=dateStr1<dateStr2?dateStr1:dateStr2;
+  const end=dateStr1<dateStr2?dateStr2:dateStr1;
+  let cur=parseISO(start);
+  let count=0;
+  while(isoDate(cur)!==end){
+    cur=addDays(cur,1);
+    if(!isWeekend(cur))count++;
+  }
+  return count;
+}
 // Shift a date by N working days (Mon-Sat, skip Sundays only)
 function addWorkingDays(d, n) {
   let cur=new Date(d);
@@ -241,11 +259,13 @@ function wasScheduledFirst(a, b) {
   // deterministic and consistent everywhere this is checked.
   return a.slot < b.slot;
 }
-function effectiveEntryHours(e, allEntries, staffList) {
+// `otherEntry`: see maxPossibleHours - same optional pre-looked-up value,
+// same reason (skip the linear scan when a caller already has an index).
+function effectiveEntryHours(e, allEntries, staffList, otherEntry) {
   const myHours = Number(e.hours) || 0;
   const stf = staffList.find(s => s.id === e.staffId);
   const cap = Number(stf?.productiveHours) || 8;
-  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
+  const other = otherEntry!==undefined ? otherEntry : allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
   if (!other || wasScheduledFirst(e, other)) return Math.min(myHours, cap);
   const otherHours = Math.min(Number(other.hours) || 0, cap);
   return Math.min(myHours, Math.max(0, cap - otherHours));
@@ -255,10 +275,16 @@ function effectiveEntryHours(e, allEntries, staffList) {
 // effectiveEntryHours, just without clamping to the entry's own raw value.
 // Used to tell whether a day genuinely has enough room left to finish a
 // joinery item, or whether even a full day there wouldn't be enough.
-function maxPossibleHours(e, allEntries, staffList) {
+// `otherEntry` is an optional pre-looked-up value for the one other-slot
+// entry this needs (staffId+dateStr+the other slot) - callers that already
+// have (or can cheaply build) an index for repeated lookups across many
+// entries pass it in directly instead of making this scan `allEntries`
+// (a linear scan) all over again per call; every existing caller that just
+// passes the full array still works exactly as before.
+function maxPossibleHours(e, allEntries, staffList, otherEntry) {
   const stf = staffList.find(s => s.id === e.staffId);
   const cap = Number(stf?.productiveHours) || 8;
-  const other = allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
+  const other = otherEntry!==undefined ? otherEntry : allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
   if (!other || wasScheduledFirst(e, other)) return cap;
   const otherHours = Math.min(Number(other.hours) || 0, cap);
   return Math.max(0, cap - otherHours);
@@ -1013,6 +1039,22 @@ function MainApp({currentUser,onLogout}) {
   },[loading]);
   const mobileTableMaxHeight=Math.max(150,viewportHeight-headerHeight-toolbarBlockHeight-16);
 
+  // The app-level scroll-to-top on mount (in DJCJoiner, above) fires before
+  // the real staff/jobs/entries data has loaded and the page has grown to
+  // its actual height - by the time that content lands and the layout
+  // reflows (or iOS Safari's chrome finishes settling), the page can end up
+  // scrolled part-way down again even though nothing the user did caused
+  // it. Re-assert scroll-to-top once loading actually finishes, with a
+  // couple of delayed re-checks for the same reflow/chrome-settling reasons
+  // useViewportHeight already has to guard against.
+  useEffect(()=>{
+    if(loading)return;
+    window.scrollTo(0,0);
+    const t1=setTimeout(()=>window.scrollTo(0,0),150);
+    const t2=setTimeout(()=>window.scrollTo(0,0),600);
+    return()=>{clearTimeout(t1);clearTimeout(t2);};
+  },[loading]);
+
   const [saving,setSaving]=useState(false);
   const [tab,setTab]=useState("schedule");
   useEffect(()=>{if(isMobile&&tab!=="schedule")setTab("schedule");},[isMobile,tab]);
@@ -1414,11 +1456,19 @@ function MainApp({currentUser,onLogout}) {
     } else if(last.type==="bundle") {
       // Unwind the most recently applied part of the bundle first, so a
       // primary edit plus the same-day adjustment it triggered undo in the
-      // same order they'd naturally reverse in - one click, not two. Fired
-      // together (not one-after-another) so it lands on screen as fast as
-      // any other single action here, not two round trips deep.
-      const results=await Promise.all([...last.data.steps].reverse().map(step=>applyUndoStep(step)));
-      const redoSteps=results.filter(Boolean);
+      // same order they'd naturally reverse in - one click, not two. Steps
+      // run ONE AT A TIME (not Promise.all) because two steps in the same
+      // bundle can target the SAME entry (e.g. a lock-clear then an hours
+      // change from the item-wide recalc it triggered) - firing their PATCH/
+      // DELETE calls concurrently let whichever one's network round-trip
+      // happened to land last silently win, regardless of which was meant
+      // to be authoritative, corrupting the final state or leaving a stray
+      // entry behind.
+      const redoSteps=[];
+      for(const step of [...last.data.steps].reverse()){
+        const r=await applyUndoStep(step);
+        if(r)redoSteps.push(r);
+      }
       if(redoSteps.length>0)setRedoStack(prev=>[...prev,{type:"bundle",data:{steps:redoSteps.reverse()}}]);
     }
   }
@@ -1500,10 +1550,14 @@ function MainApp({currentUser,onLogout}) {
       }
     } else if(last.type==="bundle") {
       // Reapply in the original forward order (primary, then the cascaded
-      // adjustment), mirroring how the bundle was first built - fired
-      // together, same as the undo side.
-      const results=await Promise.all(last.data.steps.map(step=>applyRedoStep(step)));
-      const undoSteps=results.filter(Boolean);
+      // adjustment), mirroring how the bundle was first built. Sequential
+      // for the same reason as the undo side - steps sharing an entry must
+      // not race each other's network calls.
+      const undoSteps=[];
+      for(const step of last.data.steps){
+        const r=await applyRedoStep(step);
+        if(r)undoSteps.push(r);
+      }
       if(undoSteps.length>0)setUndoStack(prev=>[...prev,{type:"bundle",data:{steps:undoSteps}}]);
     }
   }
@@ -1658,13 +1712,20 @@ function MainApp({currentUser,onLogout}) {
     const byDate={};
     itemEntries.filter(e=>!e.hoursLocked).forEach(e=>{(byDate[e.dateStr]=byDate[e.dateStr]||[]).push(e);});
     const dates=Object.keys(byDate).sort();
+    // Built once for the whole item, not re-scanned per entry - on a
+    // schedule with a lot of history across many jobs, redoing a full linear
+    // scan of the ENTIRE pool for every single party on every single day
+    // (what maxPossibleHours does on its own) is what was making a
+    // recalculation take several seconds once the total entry count grew.
+    const staffById=new Map(staff.map(s=>[s.id,s]));
+    const slotIndex=new Map(pool.map(e=>[`${e.staffId}|${e.dateStr}|${e.slot}`,e]));
     const plan={};
     dates.forEach(ds=>{
       const unlocked=byDate[ds];
       const parties=unlocked.map(e=>({
         sid:e.id,
-        ph:Number(staff.find(s=>s.id===e.staffId)?.productiveHours)||8,
-        cap:maxPossibleHours(e,pool,staff),
+        ph:Number(staffById.get(e.staffId)?.productiveHours)||8,
+        cap:maxPossibleHours(e,pool,staff,slotIndex.get(`${e.staffId}|${e.dateStr}|${e.slot===0?1:0}`)),
       }));
       const dayBudget=Math.max(0,Math.min(remaining,parties.reduce((a,p)=>a+p.cap,0)));
       const split=splitWithCaps(parties,dayBudget);
@@ -2436,6 +2497,15 @@ function MainApp({currentUser,onLogout}) {
       if(e.miscNote||!e.subItemId)return;
       (bySubItem[e.subItemId]=bySubItem[e.subItemId]||[]).push(e);
     });
+    // Built once per pass instead of every effectiveEntryHours/
+    // maxPossibleHours call re-scanning the whole entries array - this pass
+    // runs on every single entries change (including several times per one
+    // user action) and up to 8 times in a row per run, so an O(n) scan per
+    // entry here was really an O(n^2), repeated, ambient cost that grows
+    // with the whole app's entry count, not just whatever the user just did.
+    const slotIndexFor=(pool)=>new Map(pool.map(e=>[`${e.staffId}|${e.dateStr}|${e.slot}`,e]));
+    const otherOf=(index,e)=>index.get(`${e.staffId}|${e.dateStr}|${e.slot===0?1:0}`);
+    const workingIndex=slotIndexFor(working);
     const specialHours={}; // entryId -> newHours
     Object.values(bySubItem).forEach(siEntries=>{
       const si=subItems.find(s=>s.id===siEntries[0].subItemId);
@@ -2445,7 +2515,7 @@ function MainApp({currentUser,onLogout}) {
       const befores=[];
       sorted.forEach((e,i)=>{
         befores.push(cumulative);
-        cumulative+=effectiveEntryHours(e,working,staff);
+        cumulative+=effectiveEntryHours(e,working,staff,otherOf(workingIndex,e));
         if(completeIdx===-1&&cumulative>=si.totalHours-0.05)completeIdx=i;
       });
       const rawSpecialIdx=completeIdx!==-1?completeIdx:sorted.length-1;
@@ -2458,13 +2528,14 @@ function MainApp({currentUser,onLogout}) {
       const specialIdx=rawSpecialIdx;
       const special=sorted[specialIdx];
       const remainingBefore=si.totalHours-befores[specialIdx];
-      const maxPossible=completeIdx===-1?maxPossibleHours(special,working,staff):Infinity;
+      const maxPossible=completeIdx===-1?maxPossibleHours(special,working,staff,otherOf(workingIndex,special)):Infinity;
       specialHours[special.id]=(completeIdx===-1&&remainingBefore>maxPossible+0.05)
         ?Math.round(maxPossible*2)/2
         :Math.max(0,Math.round(remainingBefore*2)/2);
     });
     const afterSpecial=working.map(e=>specialHours[e.id]!==undefined?{...e,hours:specialHours[e.id]}:e);
-    return afterSpecial.map(e=>specialHours[e.id]!==undefined?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff)*2)/2});
+    const afterSpecialIndex=slotIndexFor(afterSpecial);
+    return afterSpecial.map(e=>specialHours[e.id]!==undefined?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))*2)/2});
   }
   // Correcting one item's finishing entry can change how much capacity a
   // DIFFERENT item's entry has left that same day (when two items share a
@@ -2778,24 +2849,27 @@ function MainApp({currentUser,onLogout}) {
                     const isMonthChange=i>0&&d.getMonth()!==visibleDays[i-1].getMonth();
                     return(
                       <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9,minWidth:isMobile?100:undefined}}>
-                        {totalWeeks>1&&isFirstDayOfWeek&&(
+                        {/* Phone screens don't have room for a once-per-week
+                            "Week of ..." banner AND a weekday/date line both -
+                            that's the squeeze that was pushing the weekday
+                            off the header. Mobile gets ONE compact row here
+                            instead: just the month, every day (not only at a
+                            boundary, since there's no separate week banner
+                            to already be spelling it out) - freeing the row
+                            below to always show weekday + date together. */}
+                        {isMobile?(
+                          <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
+                            {d.toLocaleDateString("en-AU",{month:"short"})}
+                          </div>
+                        ):totalWeeks>1&&isFirstDayOfWeek?(
                           <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
                             Week of {formatDate(addDays(anchorDate,weekIdx*7))}
                           </div>
-                        )}
-                        {totalWeeks>1&&!isFirstDayOfWeek&&(
+                        ):totalWeeks>1?(
                           <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:600,color:"#475569"}}>
-                            {!isMobile&&isMonthChange?d.toLocaleDateString("en-AU",{month:"short"}):""}
+                            {isMonthChange?d.toLocaleDateString("en-AU",{month:"short"}):""}
                           </div>
-                        )}
-                        {/* Phone screens don't have room for a once-per-week
-                            banner to stay in view, so every day carries its
-                            own compact month label instead - same font/weight
-                            as (and inheriting the colour of) the date line it
-                            sits above, so it reads as one unit with it. */}
-                        {isMobile&&(
-                          <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{month:"short"})}</div>
-                        )}
+                        ):null}
                         <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
                       </th>
                     );
@@ -3201,6 +3275,24 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         const fills=buildAutoFill(startForThis,Math.max(0,hours),ph,sid,form.slot,entries);
         fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
       });
+      // Each staff member's own REAL first scheduled day can end up further
+      // apart than the 2-working-day spread First Available is meant to
+      // keep them within - a manually-typed Start Date bypasses that search
+      // entirely, and even a First-Available result can drift once real
+      // per-day capacity/slot fallback plays out. Check the actual outcome,
+      // not just how it was arrived at, and confirm before committing to
+      // something this spread out rather than silently scheduling it.
+      const firstDateBySid={};
+      combined.forEach(({staffId,dateStr})=>{
+        if(!firstDateBySid[staffId]||dateStr<firstDateBySid[staffId])firstDateBySid[staffId]=dateStr;
+      });
+      const firstDates=Object.values(firstDateBySid);
+      if(firstDates.length>1){
+        const minDate=firstDates.reduce((a,b)=>a<b?a:b);
+        const maxDate=firstDates.reduce((a,b)=>a>b?a:b);
+        const spread=autoFillDayGap(minDate,maxDate);
+        if(spread>2&&!window.confirm(`Start dates for these staff are ${spread} working days apart - schedule anyway?`))return;
+      }
       onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     } else {
       // Single staff, misc, or manual multi-staff (no autofill) - still one batch, one call
