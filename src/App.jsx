@@ -347,6 +347,74 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
   return days;
 }
 
+// Coordinates an auto-fill across MULTIPLE staff sharing one item, day by
+// day, instead of pre-splitting the total by rate up front and laying each
+// person's calendar out independently (which is what used to leave a day
+// completely unstaffed between one person finishing their pre-computed
+// share and the next becoming available). Three rules, decided fresh every
+// single day:
+// - A day is never left empty just because someone else "was due" to start
+//   it there - whoever's already working that item keeps going at their
+//   full capacity, never a reduced amount just to leave room for someone
+//   else.
+// - A newly-available person only joins in once there's enough budget left
+//   that the people already on it couldn't finish it within one more day by
+//   themselves - otherwise they'd just be getting a token/partial day while
+//   displacing nothing real, so they're left out and the existing worker(s)
+//   finish it off alone.
+// - Once several people are genuinely available together with real work
+//   still left, they work those days together (splitting each shared day
+//   the normal capacity-proportional way), not one at a time.
+// `entries` should be the full, current pool (including anything not yet
+// committed from whatever's calling this) so capacity checks see the real
+// picture. Returns rows shaped like buildAutoFill's own output - dateStr,
+// hours, staffId, slot - ready to insert directly.
+function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, staffList) {
+  if (!totalHours||totalHours<=0||staffIds.length===0) return [];
+  let remaining=totalHours;
+  let pool=entries;
+  const rows=[];
+  const started=new Set();
+  let cur=parseISO(startDateStr);
+  let guard=0;
+  while (remaining>0.001 && guard<730) {
+    guard++;
+    if (!isWeekend(cur)) {
+      const ds=isoDate(cur);
+      const candidates=[];
+      staffIds.forEach(sid=>{
+        const sf=staffList.find(s=>s.id===sid);
+        const ph=Number(sf?.productiveHours)||8;
+        for(const trySlot of slotSearchOrder(slot)){
+          const slotTaken=pool.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===trySlot);
+          if(slotTaken)continue;
+          const usedElsewhere=pool.filter(e=>e.staffId===sid&&e.dateStr===ds&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+          const available=Math.max(0,Math.round((ph-usedElsewhere)*2)/2);
+          if(available>0.001){candidates.push({sid,ph,cap:available,slot:trySlot});break;}
+        }
+      });
+      if(candidates.length>0){
+        const established=candidates.filter(c=>started.has(c.sid));
+        const establishedCapToday=established.reduce((a,c)=>a+c.cap,0);
+        const parties=(established.length>0&&establishedCapToday>=remaining-0.001)?established:candidates;
+        const dayBudget=Math.max(0,Math.min(remaining,parties.reduce((a,p)=>a+p.cap,0)));
+        const split=splitWithCaps(parties.map(p=>({sid:p.sid,ph:p.ph,cap:p.cap})),dayBudget);
+        split.forEach(p=>{
+          if(p.hours>0.001){
+            const party=parties.find(x=>x.sid===p.sid);
+            const row={dateStr:ds,hours:p.hours,staffId:p.sid,slot:party.slot};
+            rows.push(row);
+            pool=[...pool,row];
+            started.add(p.sid);
+          }
+        });
+        remaining-=dayBudget;
+      }
+    }
+    cur=addDays(cur,1);
+  }
+  return rows;
+}
 
 // Search horizon for every "find a place this fits" search below. Not a
 // user-facing limit - there's always assumed to be room somewhere - just a
@@ -413,68 +481,38 @@ function nextAvailableBlockDate(staffShares, entries, fromDateStr, preferredSlot
   return{dateStr:startStr,slot:preferredSlot===1?1:0};
 }
 
-// Same search, but each staff member is allowed their OWN start date rather
-// than being forced to share one - as long as every person's actual start
-// falls within a 2-working-day spread of the earliest one. Tries the
-// earliest-fitting start for each person independently within that window;
-// if any one of them can't fit anywhere in the window, this anchor date is
-// abandoned and the search moves on to the next one rather than failing -
-// there's always assumed to be somewhere further out that works. Also tries
-// the modal's already-selected slot before the other one, for the same
-// reason as the searches above - a clean, unstaggered fit in the chosen
-// slot beats a staggered one found only because the other slot was checked
-// first.
-function nextAvailableStaggeredDates(staffShares, entries, fromDateStr, preferredSlot) {
+// For a group auto-fill (see buildGroupAutoFill), the group doesn't need to
+// find a day where EVERYONE fits - it needs the earliest day where ANY of
+// them has real capacity, since buildGroupAutoFill itself brings the rest
+// in as they each become available (that's the whole point of coordinating
+// day by day instead of pre-splitting a fixed share per person up front).
+// This just gives "First Available" something sensible to put in the Start
+// Date field.
+function earliestAnyAvailable(staffIds, entries, staffList, fromDateStr, preferredSlot) {
   const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
-  let anchor=parseISO(startStr);
+  let cur=parseISO(startStr);
   for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
-    if(!isWeekend(anchor)){
-      const anchorStr=isoDate(anchor);
-      for(const slot of slotSearchOrder(preferredSlot)){
-        const perStaff=[];
-        let ok=true;
-        for(const share of staffShares){
-          let placed=null;
-          for(let off=0;off<=2;off++){
-            const candidate=isoDate(addWorkingDays(anchor,off));
-            if(personalBlockFits(share.sid,share.ph,slot,entries,candidate)){placed=candidate;break;}
-          }
-          if(placed===null){ok=false;break;}
-          perStaff.push({sid:share.sid,startDateStr:placed});
+    if(!isWeekend(cur)){
+      const ds=isoDate(cur);
+      for(const sid of staffIds){
+        const sf=staffList.find(s=>s.id===sid);
+        const ph=Number(sf?.productiveHours)||8;
+        for(const trySlot of slotSearchOrder(preferredSlot)){
+          const slotTaken=entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===trySlot);
+          if(slotTaken)continue;
+          const usedElsewhere=entries.filter(e=>e.staffId===sid&&e.dateStr===ds&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+          if(Math.max(0,Math.round((ph-usedElsewhere)*2)/2)>0.001)return{dateStr:ds,slot:trySlot};
         }
-        if(ok)return{dateStr:anchorStr,slot,perStaff};
       }
     }
-    anchor=addDays(anchor,1);
+    cur=addDays(cur,1);
   }
-  return null;
+  return{dateStr:startStr,slot:preferredSlot===1?1:0};
 }
 
-// Splits totalHours across staff proportional to each person's productive
-// rate, so equal-rate staff get an equal share and different-rate staff get
-// shares matching their own daily rate. Each share is rounded to the nearest
-// half hour; the last person absorbs whatever rounding leaves over, so the
-// total always adds up to exactly totalHours. Used by both the modal preview
-// and the actual save so they can never disagree.
-function splitHoursByStaff(staffWithPh, totalHours) {
-  const totalPh=staffWithPh.reduce((a,x)=>a+x.ph,0)||1;
-  let alloc=0;
-  return staffWithPh.map(({sid,name,ph},idx)=>{
-    const isLast=idx===staffWithPh.length-1;
-    let hours;
-    if(isLast){
-      hours=Math.round((totalHours-alloc)*2)/2;
-    }else{
-      const share=totalHours*(ph/totalPh);
-      hours=Math.round(share*2)/2;
-    }
-    alloc+=hours;
-    return{sid,name,ph,hours};
-  });
-}
-
-// Like splitHoursByStaff, but each party also carries a hard ceiling
-// (`cap`) it can never be given more than - e.g. whatever's actually left
+// Splits a total proportional to each party's rate, but each party also
+// carries a hard ceiling (`cap`) it can never be given more than - e.g.
+// whatever's actually left
 // of their day once a different item/misc entry in their other slot is
 // accounted for. Distributes proportional to weight the same way, but
 // whenever that would push someone over their own cap, pins them at their
@@ -3204,7 +3242,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   const [form,setForm]=useState(()=>{
     const jobSubs=subItems.filter(s=>s.jobId===data.jobId);
     const defaultSub=data.subItemId||(jobSubs[0]?.id||"");
-    return{...data,subItemId:defaultSub,totalHours:data.totalHours||jobSubs[0]?.totalHours||0,entryType:data.entryType||"job",miscNote:data.miscNote||"",staffIds:data.staffId?[data.staffId]:[],staffStartDates:{}};
+    return{...data,subItemId:defaultSub,totalHours:data.totalHours||jobSubs[0]?.totalHours||0,entryType:data.entryType||"job",miscNote:data.miscNote||"",staffIds:data.staffId?[data.staffId]:[]};
   });
   const [autoFill,setAutoFill]=useState(data.autoFill!==false);
 
@@ -3255,44 +3293,15 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     else if(!form.jobId)return;
 
     if(autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length>1){
-      // Split the budget hours directly, proportional to each person's productive rate.
-      // (Splitting by whole days first and multiplying by rate can overshoot the budget
-      // when the job's last day is partial - hours must be split, not days.)
-      const staffWithPh=staffToSchedule.map(sid=>{
-        const sf=staff.find(s=>s.id===sid);
-        return{sid,ph:Number(sf?.productiveHours)||8};
-      });
-      const shares=splitHoursByStaff(staffWithPh,form.totalHours);
-
-      // Build one combined batch across ALL staff and save it in a single call,
-      // so a conflict on one person can't clobber another person's confirmation/save.
-      // Each person starts on their OWN resolved date when "First Available"
-      // found a staggered arrangement (within a 2-working-day spread of each
-      // other) - otherwise everyone shares the single Start Date field.
-      const combined=[];
-      shares.forEach(({sid,ph,hours})=>{
-        const startForThis=form.staffStartDates?.[sid]||form.dateStr;
-        const fills=buildAutoFill(startForThis,Math.max(0,hours),ph,sid,form.slot,entries);
-        fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
-      });
-      // Each staff member's own REAL first scheduled day can end up further
-      // apart than the 2-working-day spread First Available is meant to
-      // keep them within - a manually-typed Start Date bypasses that search
-      // entirely, and even a First-Available result can drift once real
-      // per-day capacity/slot fallback plays out. Check the actual outcome,
-      // not just how it was arrived at, and confirm before committing to
-      // something this spread out rather than silently scheduling it.
-      const firstDateBySid={};
-      combined.forEach(({staffId,dateStr})=>{
-        if(!firstDateBySid[staffId]||dateStr<firstDateBySid[staffId])firstDateBySid[staffId]=dateStr;
-      });
-      const firstDates=Object.values(firstDateBySid);
-      if(firstDates.length>1){
-        const minDate=firstDates.reduce((a,b)=>a<b?a:b);
-        const maxDate=firstDates.reduce((a,b)=>a>b?a:b);
-        const spread=autoFillDayGap(minDate,maxDate);
-        if(spread>2&&!window.confirm(`Start dates for these staff are ${spread} working days apart - schedule anyway?`))return;
-      }
+      // One coordinated day-by-day walk across everyone selected, instead of
+      // pre-splitting the total by rate and laying each person's calendar
+      // out independently - see buildGroupAutoFill for the full rule (no
+      // day left empty, no token partial day for a latecomer, everyone
+      // available works together once there's real work left for more than
+      // one of them). A wide gap between when different staff actually
+      // start is expected and fine here - it means whoever could start
+      // earlier just kept the job moving, not that anything went wrong.
+      const combined=buildGroupAutoFill(staffToSchedule,form.totalHours,form.dateStr,form.slot,entries,staff);
       onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     } else {
       // Single staff, misc, or manual multi-staff (no autofill) - still one batch, one call
@@ -3349,9 +3358,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                       // actual fill (capacity/slot-aware) resolves any
                       // conflict at save time instead of the UI pre-emptively
                       // (and confusingly) jumping it forward on your behalf.
-                      // Staff selection changed - any previously-resolved
-                      // staggered per-person start dates no longer apply.
-                      setForm(f=>({...f,staffIds:newStaffIds,staffId:newStaffId,staffStartDates:{}}));
+                      setForm(f=>({...f,staffIds:newStaffIds,staffId:newStaffId}));
                     }}
                     style={{width:14,height:14}}/>
                   {s.name} <span style={{fontSize:11,color:"#94A3B8"}}>({s.productiveHours}h/day)</span>
@@ -3409,38 +3416,35 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             ))}
           </div>
           <div style={{marginBottom:8}}>
-            <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>setForm(f=>({...f,dateStr:e.target.value,staffStartDates:{}}))}/>
+            <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>setForm(f=>({...f,dateStr:e.target.value}))}/>
           </div>
           {form.mode==="new"&&(
             <button type="button" onClick={()=>{
                 const ids=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
                 if(ids.length===0)return;
                 if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
-                  // A day only counts as "available" if every day the auto-fill
-                  // would actually use is free - not just the start day. The
-                  // currently-selected slot is tried first (a clean fit there
-                  // beats an artificially staggered one found only because
-                  // the other slot happened to be checked first) - only if
-                  // NOTHING works there does the search look at the other
-                  // slot, with no distance limit either way.
-                  const staffWithPh=ids.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,ph:Number(sf?.productiveHours)||8};});
                   if(ids.length>1){
-                    // Staff don't have to start on the same day - each is
-                    // allowed their own start, as long as it's within a
-                    // 2-working-day spread of the earliest one. If a
-                    // candidate date can't fit everyone within that spread,
-                    // the search just keeps looking further out.
-                    const shares=splitHoursByStaff(staffWithPh,form.totalHours);
-                    const result=nextAvailableStaggeredDates(shares,entries,todayStr,form.slot);
-                    if(result)setForm(f=>({...f,dateStr:result.dateStr,slot:result.slot,staffStartDates:Object.fromEntries(result.perStaff.map(p=>[p.sid,p.startDateStr]))}));
+                    // The group only needs the earliest day ANY of them can
+                    // start - buildGroupAutoFill brings the rest in as they
+                    // each become available, day by day, so there's no need
+                    // to pre-find a day (or a staggered set of days) that
+                    // works for everyone at once.
+                    const{dateStr,slot}=earliestAnyAvailable(ids,entries,staff,todayStr,form.slot);
+                    setForm(f=>({...f,dateStr,slot}));
                   }else{
+                    // A day only counts as "available" if every day the
+                    // auto-fill would actually use is free - not just the
+                    // start day. The currently-selected slot is tried first,
+                    // only falling back to the other one if nothing works
+                    // there.
+                    const staffWithPh=ids.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,ph:Number(sf?.productiveHours)||8};});
                     const shares=staffWithPh.map(s=>({...s,hours:form.totalHours}));
                     const{dateStr,slot}=nextAvailableBlockDate(shares,entries,todayStr,form.slot);
-                    setForm(f=>({...f,dateStr,slot,staffStartDates:{}}));
+                    setForm(f=>({...f,dateStr,slot}));
                   }
                 } else {
                   const{dateStr,slot}=nextAvailableDate(ids,entries,todayStr,form.slot);
-                  setForm(f=>({...f,dateStr,slot,staffStartDates:{}}));
+                  setForm(f=>({...f,dateStr,slot}));
                 }
               }} style={{width:"100%",padding:"7px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:12,cursor:"pointer",marginBottom:14}}>
               First Available
@@ -3459,14 +3463,21 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                 <input type="number" min={0.5} max={999} step={0.5} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
               </div>
               {form.staffIds.length>1&&(()=>{
-                const staffWithPh=form.staffIds.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,name:sf?.name,ph:Number(sf?.productiveHours)||8};});
-                const shares=splitHoursByStaff(staffWithPh,form.totalHours||0);
+                // The real computed outcome, not an upfront-by-rate estimate -
+                // this is exactly what buildGroupAutoFill will actually save,
+                // so what's shown here can't disagree with what happens.
+                const groupFill=buildGroupAutoFill(form.staffIds,form.totalHours||0,form.dateStr,form.slot,entries,staff);
+                const byStaff={};
+                groupFill.forEach(r=>{(byStaff[r.staffId]=byStaff[r.staffId]||[]).push(r);});
                 return <div style={{fontSize:11,color:"#3B82F6",marginTop:6,lineHeight:1.5}}>
-                  📋 {form.totalHours}h split evenly by rate:<br/>
-                  {shares.map(({sid,name,ph,hours})=>{
-                    const staggeredStart=form.staffStartDates?.[sid];
+                  📋 {form.totalHours}h, filling every day together - no one waits idle while someone else already has room:<br/>
+                  {form.staffIds.map(sid=>{
+                    const sf=staff.find(s=>s.id===sid);
+                    const rows=(byStaff[sid]||[]).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+                    const total=Math.round(rows.reduce((a,r)=>a+r.hours,0)*2)/2;
+                    const dateRange=rows.length===0?"not needed":rows.length===1?formatDate(parseISO(rows[0].dateStr)):`${formatDate(parseISO(rows[0].dateStr))} → ${formatDate(parseISO(rows[rows.length-1].dateStr))}`;
                     return <span key={sid} style={{display:"block",paddingLeft:8}}>
-                      • {name}: {hours}h ({ph}h/day = ~{ph>0?Math.ceil(hours/ph):0} days){staggeredStart&&staggeredStart!==form.dateStr?` · starts ${formatDate(parseISO(staggeredStart))}`:""}
+                      • {sf?.name}: {total}h ({rows.length} day{rows.length===1?"":"s"}) · {dateRange}
                     </span>;
                   })}
                 </div>;
