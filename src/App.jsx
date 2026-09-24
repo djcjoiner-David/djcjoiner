@@ -292,13 +292,23 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
     if (!isWeekend(cur)) {
       const ds=isoDate(cur);
       if(capacityAware){
-        const slotTaken=entries.some(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot===slot);
-        const usedElsewhere=entries.filter(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot!==slot).reduce((a,e)=>a+(Number(e.hours)||0),0);
-        const available=Math.max(0,Math.round((ph-usedElsewhere)*2)/2);
-        if(!slotTaken&&available>0.001){
-          const deducted=Math.min(available,remaining);
-          days.push({dateStr:ds,hours:deducted,deducted});
-          remaining-=deducted;
+        // A person's day isn't hard-locked to whichever slot the modal
+        // happens to have selected - if that slot's genuinely taken but
+        // their OTHER slot still has room that day, use it instead of
+        // skipping their whole day and pushing them needlessly further out.
+        // The requested slot is always tried first, so a clean fit there
+        // still wins whenever one exists.
+        for(const trySlot of slotSearchOrder(slot)){
+          const slotTaken=entries.some(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot===trySlot);
+          if(slotTaken)continue;
+          const usedElsewhere=entries.filter(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+          const available=Math.max(0,Math.round((ph-usedElsewhere)*2)/2);
+          if(available>0.001){
+            const deducted=Math.min(available,remaining);
+            days.push({dateStr:ds,hours:deducted,deducted,slot:trySlot});
+            remaining-=deducted;
+            break;
+          }
         }
       }else{
         const deducted=Math.min(ph,remaining);
@@ -340,18 +350,26 @@ function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot) {
   return{dateStr:startStr,slot:preferredSlot===1?1:0};
 }
 
-// Whether ONE person's auto-fill block, starting on startDateStr, lands
-// entirely on free days in the given slot - checks every day the block
-// would actually use, not just the first one.
-function personalBlockFits(sid, ph, hours, slot, entries, startDateStr) {
-  const days=buildAutoFill(startDateStr,hours,ph);
-  return days.every(d=>!entries.some(e=>e.staffId===sid&&e.dateStr===d.dateStr&&e.slot===slot));
+// Whether this person actually has real capacity to START their auto-fill
+// block on startDateStr - checking the requested slot first, falling back
+// to their other slot the same way the real fill does. Once the start day
+// has genuine room, buildAutoFill's own day-by-day capacity/slot handling
+// takes it from there (including any later partial days or gaps), so this
+// only needs to answer for the one day being considered as a candidate.
+function personalBlockFits(sid, ph, slot, entries, startDateStr) {
+  if(isWeekend(parseISO(startDateStr)))return false;
+  return slotSearchOrder(slot).some(trySlot=>{
+    const slotTaken=entries.some(e=>e.staffId===sid&&e.dateStr===startDateStr&&e.slot===trySlot);
+    if(slotTaken)return false;
+    const usedElsewhere=entries.filter(e=>e.staffId===sid&&e.dateStr===startDateStr&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+    return Math.max(0,Math.round((ph-usedElsewhere)*2)/2)>0.001;
+  });
 }
 // Like nextAvailableDate, but for an auto-fill block that spans multiple
-// days per person: checks that EVERY day each person's share would actually
-// land on is free, not just the first day. staffShares is [{sid,ph,hours}].
+// days per person: checks that EVERY person actually has room to start on
+// startDateStr, not just the first one. staffShares is [{sid,ph,hours}].
 function blockFits(staffShares, slot, entries, startDateStr) {
-  return staffShares.every(({sid,ph,hours})=>personalBlockFits(sid,ph,hours,slot,entries,startDateStr));
+  return staffShares.every(({sid,ph})=>personalBlockFits(sid,ph,slot,entries,startDateStr));
 }
 
 function nextAvailableBlockDate(staffShares, entries, fromDateStr, preferredSlot) {
@@ -393,7 +411,7 @@ function nextAvailableStaggeredDates(staffShares, entries, fromDateStr, preferre
           let placed=null;
           for(let off=0;off<=2;off++){
             const candidate=isoDate(addWorkingDays(anchor,off));
-            if(personalBlockFits(share.sid,share.ph,share.hours,slot,entries,candidate)){placed=candidate;break;}
+            if(personalBlockFits(share.sid,share.ph,slot,entries,candidate)){placed=candidate;break;}
           }
           if(placed===null){ok=false;break;}
           perStaff.push({sid:share.sid,startDateStr:placed});
@@ -404,25 +422,6 @@ function nextAvailableStaggeredDates(staffShares, entries, fromDateStr, preferre
     anchor=addDays(anchor,1);
   }
   return null;
-}
-
-// Like nextAvailableDate, but scoped to one specific slot - used by the
-// staff-selection checkboxes' "find me a free day" nicety, which shouldn't
-// go changing which slot is selected just because the OTHER slot happens to
-// be free sooner; that slot-agnostic search is reserved for the explicit
-// "First Available" button.
-function nextAvailableDateForSlot(staffIds, slot, entries, fromDateStr) {
-  const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
-  let cur=parseISO(startStr);
-  for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
-    if(!isWeekend(cur)){
-      const ds=isoDate(cur);
-      const conflict=staffIds.some(sid=>entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===slot));
-      if(!conflict)return ds;
-    }
-    cur=addDays(cur,1);
-  }
-  return startStr;
 }
 
 // Splits totalHours across staff proportional to each person's productive
@@ -1787,15 +1786,18 @@ function MainApp({currentUser,onLogout}) {
     setSaving(true);
     try{
       if(data.mode==="new"){
-        const all=extraEntries&&extraEntries.length>0?extraEntries:[{dateStr:data.dateStr,hours:data.hours,staffId:data.staffId}];
+        const all=extraEntries&&extraEntries.length>0?extraEntries:[{dateStr:data.dateStr,hours:data.hours,staffId:data.staffId,slot:data.slot}];
         const valid=all.filter(p=>!isPast(p.dateStr));
-        const conflicts=valid.filter(p=>!!entryMap[`${p.staffId||data.staffId}|${p.dateStr}|${data.slot}`]);
+        // A capacity-aware auto-fill day can land in either slot (see
+        // buildAutoFill) - each item carries its own actual slot, falling
+        // back to the modal's chosen one only for non-autofill entries.
+        const conflicts=valid.filter(p=>!!entryMap[`${p.staffId||data.staffId}|${p.dateStr}|${p.slot!==undefined?p.slot:data.slot}`]);
         // Auto-fill spreads a total across days/staff algorithmically - that
         // stays open to the background hours correction as budgets and
         // conflicts shift. A manually-typed single entry (auto-fill off) is
         // a deliberate number the person chose, so it's locked: the
         // correction pass leaves it alone instead of re-deriving it.
-        const buildRows=(items)=>items.map(({dateStr,hours,staffId})=>({
+        const buildRows=(items)=>items.map(({dateStr,hours,staffId,slot})=>({
           staff_id:staffId||data.staffId,
           // A misc entry can now optionally carry a job too (so it renders
           // with that job's colours) - only the joinery-item/budget link
@@ -1803,7 +1805,7 @@ function MainApp({currentUser,onLogout}) {
           // an item's hour budget.
           job_id:data.jobId||null,
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
-          date_str:dateStr,slot:data.slot,hours,
+          date_str:dateStr,slot:slot!==undefined?slot:data.slot,hours,
           misc_note:data.entryType==="misc"?data.miscNote:null,
           hours_locked:data.entryType!=="misc"&&!data.autoFill
         }));
@@ -3197,7 +3199,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       shares.forEach(({sid,ph,hours})=>{
         const startForThis=form.staffStartDates?.[sid]||form.dateStr;
         const fills=buildAutoFill(startForThis,Math.max(0,hours),ph,sid,form.slot,entries);
-        fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
+        fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
       });
       onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     } else {
@@ -3208,9 +3210,9 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         const ph=Number(sf?.productiveHours)||8;
         if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
           const fills=buildAutoFill(form.dateStr,form.totalHours,ph,sid,form.slot,entries);
-          fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid}));
+          fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
         } else {
-          combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid});
+          combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid,slot:form.slot});
         }
       });
       onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
@@ -3250,14 +3252,14 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                     onChange={e=>{
                       const newStaffIds=e.target.checked?[...form.staffIds,s.id]:form.staffIds.filter(id=>id!==s.id);
                       const newStaffId=e.target.checked?s.id:(form.staffIds.find(id=>id!==s.id)||"");
-                      setForm(f=>{
-                        const nextDate=data.mode==="new"&&newStaffIds.length>0&&entries
-                          ?nextAvailableDateForSlot(newStaffIds,f.slot,entries,f.dateStr)
-                          :f.dateStr;
-                        // Staff selection changed - any previously-resolved
-                        // staggered per-person start dates no longer apply.
-                        return{...f,staffIds:newStaffIds,staffId:newStaffId,dateStr:nextDate,staffStartDates:{}};
-                      });
+                      // Toggling a staff member never moves the date out from
+                      // under you - the date field is yours to set, and the
+                      // actual fill (capacity/slot-aware) resolves any
+                      // conflict at save time instead of the UI pre-emptively
+                      // (and confusingly) jumping it forward on your behalf.
+                      // Staff selection changed - any previously-resolved
+                      // staggered per-person start dates no longer apply.
+                      setForm(f=>({...f,staffIds:newStaffIds,staffId:newStaffId,staffStartDates:{}}));
                     }}
                     style={{width:14,height:14}}/>
                   {s.name} <span style={{fontSize:11,color:"#94A3B8"}}>({s.productiveHours}h/day)</span>
