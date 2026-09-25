@@ -307,10 +307,19 @@ function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.st
 // pre-computed day count. Callers that only want a rough, unconflicted
 // preview (e.g. the "does this block fit here" search) can omit those
 // three arguments and get the original blind, entries-agnostic walk.
-function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId, slot, entries) {
+// `subItemId`, when given alongside those three, keeps this person's slot
+// CONSISTENT across the whole item: once they have an entry for it
+// (existing, or the first one placed in this very walk), every later day
+// sticks to that same slot rather than re-picking whichever's free - a
+// person's entries for one item shouldn't hop between Slot 1 and Slot 2
+// from day to day.
+function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId, slot, entries, subItemId) {
   if (!totalHours||totalHours<=0) return [];
   const ph = productiveHoursPerDay||8;
   const capacityAware=staffId!==undefined&&slot!==undefined&&!!entries;
+  let establishedSlot=capacityAware&&subItemId!==undefined
+    ?entries.find(e=>e.staffId===staffId&&e.subItemId===subItemId)?.slot
+    :undefined;
   const days=[]; let remaining=totalHours; let cur=parseISO(startDateStr);
   let guard=0;
   while (remaining>0.001 && guard<730) {
@@ -323,8 +332,11 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
         // their OTHER slot still has room that day, use it instead of
         // skipping their whole day and pushing them needlessly further out.
         // The requested slot is always tried first, so a clean fit there
-        // still wins whenever one exists.
-        for(const trySlot of slotSearchOrder(slot)){
+        // still wins whenever one exists. Once a slot's established for
+        // this item, though, only that slot is tried - consistency wins
+        // over flexibility from here on.
+        const trySlots=establishedSlot!==undefined?[establishedSlot]:slotSearchOrder(slot);
+        for(const trySlot of trySlots){
           const slotTaken=entries.some(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
           const usedElsewhere=entries.filter(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
@@ -333,6 +345,7 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
             const deducted=Math.min(available,remaining);
             days.push({dateStr:ds,hours:deducted,deducted,slot:trySlot});
             remaining-=deducted;
+            if(establishedSlot===undefined)establishedSlot=trySlot;
             break;
           }
         }
@@ -367,14 +380,25 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
 //   the normal capacity-proportional way), not one at a time.
 // `entries` should be the full, current pool (including anything not yet
 // committed from whatever's calling this) so capacity checks see the real
-// picture. Returns rows shaped like buildAutoFill's own output - dateStr,
-// hours, staffId, slot - ready to insert directly.
-function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, staffList) {
+// picture. `subItemId`, when given, keeps each person's slot CONSISTENT
+// across the whole item the same way buildAutoFill does - once someone has
+// an entry for it (existing, or their first day placed in this walk),
+// every later day sticks to that same slot instead of re-picking whichever
+// one's free. Returns rows shaped like buildAutoFill's own output -
+// dateStr, hours, staffId, slot - ready to insert directly.
+function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, staffList, subItemId) {
   if (!totalHours||totalHours<=0||staffIds.length===0) return [];
   let remaining=totalHours;
   let pool=entries;
   const rows=[];
   const started=new Set();
+  const establishedSlots=new Map();
+  if(subItemId!==undefined){
+    staffIds.forEach(sid=>{
+      const existing=entries.find(e=>e.staffId===sid&&e.subItemId===subItemId);
+      if(existing)establishedSlots.set(sid,existing.slot);
+    });
+  }
   let cur=parseISO(startDateStr);
   let guard=0;
   while (remaining>0.001 && guard<730) {
@@ -385,7 +409,8 @@ function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, s
       staffIds.forEach(sid=>{
         const sf=staffList.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
-        for(const trySlot of slotSearchOrder(slot)){
+        const trySlots=establishedSlots.has(sid)?[establishedSlots.get(sid)]:slotSearchOrder(slot);
+        for(const trySlot of trySlots){
           const slotTaken=pool.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
           const usedElsewhere=pool.filter(e=>e.staffId===sid&&e.dateStr===ds&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
@@ -406,6 +431,7 @@ function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, s
             rows.push(row);
             pool=[...pool,row];
             started.add(p.sid);
+            if(!establishedSlots.has(p.sid))establishedSlots.set(p.sid,party.slot);
           }
         });
         remaining-=dayBudget;
@@ -3245,6 +3271,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     return{...data,subItemId:defaultSub,totalHours:data.totalHours||jobSubs[0]?.totalHours||0,entryType:data.entryType||"job",miscNote:data.miscNote||"",staffIds:data.staffId?[data.staffId]:[]};
   });
   const [autoFill,setAutoFill]=useState(data.autoFill!==false);
+  const [staggerConfirm,setStaggerConfirm]=useState(null); // {message,combined,staffId}
 
   function set(k,v){setForm(f=>({...f,[k]:v}));}
   const jobSubs=subItems.filter(s=>s.jobId===form.jobId);
@@ -3283,8 +3310,8 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
   const preview=useMemo(()=>{
     if(!autoFill||!form.dateStr||!totalHours||form.entryType==="misc")return[];
-    return buildAutoFill(form.dateStr,totalHours,productiveHours,sameDayStaffId,form.slot,entries);
-  },[autoFill,form.dateStr,totalHours,productiveHours,form.entryType,sameDayStaffId,form.slot,entries]);
+    return buildAutoFill(form.dateStr,totalHours,productiveHours,sameDayStaffId,form.slot,entries,form.subItemId);
+  },[autoFill,form.dateStr,totalHours,productiveHours,form.entryType,sameDayStaffId,form.slot,entries,form.subItemId]);
 
   function handleSave(){
     const staffToSchedule=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
@@ -3299,7 +3326,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       // day left empty, no token partial day for a latecomer, everyone
       // available works together once there's real work left for more than
       // one of them).
-      const combined=buildGroupAutoFill(staffToSchedule,form.totalHours,form.dateStr,form.slot,entries,staff);
+      const combined=buildGroupAutoFill(staffToSchedule,form.totalHours,form.dateStr,form.slot,entries,staff,form.subItemId);
       // Still confirm if the actual resulting start dates end up more than
       // 2 working days apart, regardless of how the schedule was arrived
       // at - this check stands on its own and isn't tied to whichever
@@ -3313,7 +3340,10 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         const minDate=firstDates.reduce((a,b)=>a<b?a:b);
         const maxDate=firstDates.reduce((a,b)=>a>b?a:b);
         const spread=autoFillDayGap(minDate,maxDate);
-        if(spread>2&&!window.confirm(`Start dates for these staff are ${spread} working days apart - schedule anyway?`))return;
+        if(spread>2){
+          setStaggerConfirm({message:`Start dates for these staff are ${spread} working days apart - schedule anyway?`,combined,staffId:staffToSchedule[0]});
+          return;
+        }
       }
       onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     } else {
@@ -3323,7 +3353,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         const sf=staff.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
         if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
-          const fills=buildAutoFill(form.dateStr,form.totalHours,ph,sid,form.slot,entries);
+          const fills=buildAutoFill(form.dateStr,form.totalHours,ph,sid,form.slot,entries,form.subItemId);
           fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
         } else {
           combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid,slot:form.slot});
@@ -3343,6 +3373,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   },[form,autoFill,preview]);
 
   return(
+    <>
     <Modal title={form.mode==="new"?"New Schedule Entry":"Edit Schedule Entry"} onClose={onClose} wide>
       {/* Entry type switcher */}
       <div style={{display:"flex",gap:6,marginBottom:14,background:"#F1F5F9",borderRadius:8,padding:3}}>
@@ -3479,7 +3510,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                 // The real computed outcome, not an upfront-by-rate estimate -
                 // this is exactly what buildGroupAutoFill will actually save,
                 // so what's shown here can't disagree with what happens.
-                const groupFill=buildGroupAutoFill(form.staffIds,form.totalHours||0,form.dateStr,form.slot,entries,staff);
+                const groupFill=buildGroupAutoFill(form.staffIds,form.totalHours||0,form.dateStr,form.slot,entries,staff,form.subItemId);
                 const byStaff={};
                 groupFill.forEach(r=>{(byStaff[r.staffId]=byStaff[r.staffId]||[]).push(r);});
                 return <div style={{fontSize:11,color:"#3B82F6",marginTop:6,lineHeight:1.5}}>
@@ -3524,6 +3555,10 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         </div>
       </div>
     </Modal>
+    {staggerConfirm&&<ConfirmModal title="⚠ Schedule Confirmation" message={staggerConfirm.message} confirmLabel="Schedule Anyway" cancelLabel="Go Back"
+      onConfirm={()=>{onSave({...form,staffId:staggerConfirm.staffId,autoFill},staggerConfirm.combined);setStaggerConfirm(null);}}
+      onCancel={()=>setStaggerConfirm(null)}/>}
+    </>
   );
 }
 
