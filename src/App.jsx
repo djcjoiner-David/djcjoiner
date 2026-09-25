@@ -801,8 +801,7 @@ function MiscBlock({note,hours,entry,job,onClick,onContextMenu,onDragStart,onDra
       style={{background:bg,border,borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:editable?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {job&&<div style={{fontSize:isMobile?11:9,fontWeight:700,color:textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>}
-      <div style={{fontSize:isMobile?12:10,fontWeight:700,color:textColor,whiteSpace:"pre-wrap",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{note}</div>
-      <div style={{fontSize:isMobile?11:10,fontWeight:400,color:textColor,whiteSpace:"nowrap",lineHeight:1.3}}>{hours}h</div>
+      <div style={{fontSize:isMobile?12:10,fontWeight:400,color:textColor,whiteSpace:"pre-wrap",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
       {isOvercommitted&&<div style={{fontSize:isMobile?10:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
     </div>
   );
