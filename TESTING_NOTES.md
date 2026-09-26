@@ -232,18 +232,35 @@ applied. Re-check against current `src/App.jsx` before use.)*
    everything exactly (including the id-swap case); two genuinely separate
    actions with an artificially-overlapping in-flight network delay still
    get two independent undo entries, not one merged click.
-3. **Cross-item lock conflict** (bug #4, and the modal trap in bug #5): NOT
-   an automatic cross-item cascade/auto-unlock. Instead:
-   (a) show the entry as Overcommitted *and* display the actual
-   shortfall/overcommit number, so the user has what's needed to decide how
-   to resolve it manually (extra hours, overtime, Saturday work, etc.);
-   (b) fix the edit modal's Hours field so it never fully blocks manual
-   entry — specifically, the sibling-slot clamp must not hard-cap based on
-   the other slot's *current* stored value when the user is deliberately
-   about to correct that other value too, in a separate edit;
+3. ✅ **FIXED. Cross-item lock conflict** (bug #4, and the modal trap in bug
+   #5): NOT an automatic cross-item cascade/auto-unlock. Instead:
+   (a) `computeJobEntryMeta` now computes `itemShortfall` (the item's total
+   budget minus everyone's real effective hours across it) and `JobBlock`
+   shows it alongside the existing "⚠ Overcommitted" flag whenever the
+   entry is locked (`⚠ Overcommitted · Nh short`), so the user has what's
+   needed to decide how to resolve it manually (extra hours, overtime,
+   Saturday work, etc.) without the app guessing;
+   (b) the edit modal's `maxHours` no longer hard-caps based on the sibling
+   slot's *current* stored value when editing an entry that's already
+   locked — that's a deliberate manual correction (possibly of exactly this
+   conflict), not a fresh scheduling choice, so it's capped only by the
+   staff member's own daily hours instead. A warning still shows if the
+   sibling slot has real hours, prompting the user to check it too. A
+   brand-new or still-unlocked entry keeps the original hard cap, so it
+   can't accidentally create a fresh overcommitment;
    (c) after each manual edit, only that item recalculates (already the
    existing per-item behavior in `saveEntry`'s edit branch) — no forced
    cross-item cascade.
+   **Extra bug found and fixed while verifying this**: `oneCorrectionPass`'s
+   final effective-hours capping step applied to every entry regardless of
+   `hoursLocked`, contradicting its own documented intent (a locked entry
+   is supposed to be fully protected from the ambient pass). In practice
+   this meant a locked entry that lost the same-day scheduling-order
+   tie-break to a sibling from a *different* item had its manually-set
+   hours silently forced back down moments after being corrected by hand —
+   the fix in (b) alone would have been cosmetic without this, since the
+   corrected value could never actually stick. Now skipped for any locked
+   entry, matching the rest of the ambient pass.
 4. **Move-caused budget shortfall** (bug #6): auto-extend — recalculation
    should add new entries to cover the shortfall automatically. This is
    explicitly different from decision #3 above (cross-item conflict stays
