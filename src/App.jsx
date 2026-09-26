@@ -732,7 +732,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isLocked,isMobile,isPastDate,isOvercommitted}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall}) {
   // An entry the background correction has reduced to nothing (e.g. another
   // staff member now covers the whole day/budget) shouldn't be labelled
   // "over-run" or any other budget-math term - it has zero real hours left,
@@ -750,6 +750,11 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
     :isPersonalLastEntry?`${hours}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
   const flagColor=isOverRun||isUnderCap?"#D97706":undefined;
+  // Only meaningful for a LOCKED Overcommitted entry - that's the case with
+  // no automatic repair path (see TESTING_NOTES.md, bug 2A #4), so it's the
+  // one place this number needs to surface at all. An unlocked Overcommitted
+  // entry self-heals via the ambient correction pass within moments.
+  const showShortfall=isOvercommitted&&isLocked&&itemShortfall>0.05;
   // A past-dated entry is locked, full stop - not editable by anyone
   // (including admins), so none of the interaction affordances apply to it.
   const editable=canEdit&&!isPastDate;
@@ -768,7 +773,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
           <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
             {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
-          {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
+          {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted{showShortfall?` · ${itemShortfall}h short`:""}</div>}
         </>
       ):(
         <>
@@ -776,7 +781,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
             {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
-          {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted</div>}
+          {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted{showShortfall?` · ${itemShortfall}h short`:""}</div>}
         </>
       )}
     </div>
@@ -2536,7 +2541,16 @@ function MainApp({currentUser,onLogout}) {
     });
     const afterSpecial=working.map(e=>specialHours[e.id]!==undefined?{...e,hours:specialHours[e.id]}:e);
     const afterSpecialIndex=slotIndexFor(afterSpecial);
-    return afterSpecial.map(e=>specialHours[e.id]!==undefined?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))*2)/2});
+    // A locked entry is meant to be fully protected from this ambient pass
+    // (see unlockStaleLocksAt) - not just excluded from the "special"
+    // completing/under-cap role above, but from EVERY correction this pass
+    // makes, including this final effective-hours capping step. Without
+    // this check, a locked entry that loses the same-day scheduling-order
+    // tie-break to a sibling from a DIFFERENT item (bug 2A #4) had its
+    // manually-set hours silently forced back down by this pass moments
+    // after being corrected by hand, making the correction impossible to
+    // ever make stick.
+    return afterSpecial.map(e=>(specialHours[e.id]!==undefined||e.hoursLocked)?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))*2)/2});
   }
   // Correcting one item's finishing entry can change how much capacity a
   // DIFFERENT item's entry has left that same day (when two items share a
@@ -2984,7 +2998,16 @@ function MainApp({currentUser,onLogout}) {
                           const myLastEntry=myStaffEntries[myStaffEntries.length-1];
                           const myMaxThisDay=maxPossibleHours(e,entries,staff);
                           const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id&&(Number(e.hours)||0)<myMaxThisDay-0.05;
-                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry,isLocked:!!e.hoursLocked};
+                          // How many hours this ITEM as a whole still needs to reach its
+                          // total budget, using everyone's real effective hours (not raw
+                          // stored ones) - `cumulative` is exactly that sum, since the walk
+                          // above just finished adding every entry's effective hours to it.
+                          // A locked, Overcommitted entry (bug 2A #4: a different item filled
+                          // its sibling slot, leaving it with zero real room) has no automatic
+                          // repair path and isn't ever the "special" completing/under-cap
+                          // entry above, so this is the only place its shortfall surfaces.
+                          const itemShortfall=Math.max(0,Math.round((si.totalHours-cumulative)*2)/2);
+                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry,isLocked:!!e.hoursLocked,itemShortfall};
                         }
                         // Whenever this staff member doesn't have every hour of their day
                         // used/allocated - whatever sits in the other slot, job or misc, for
@@ -3010,7 +3033,7 @@ function MainApp({currentUser,onLogout}) {
                             return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
                           }
                           const meta=computeJobEntryMeta(e)||{};
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall}/>;
                         }
                         return(
                           <td key={di}
@@ -3227,12 +3250,20 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   // whatever's already there.
   const sameDayStaffId=form.staffIds[0]||form.staffId;
   const otherSlotEntry=entries.find(e=>e.staffId===sameDayStaffId&&e.dateStr===form.dateStr&&e.slot===(form.slot===0?1:0)&&e.id!==form.id);
+  const mineIfEditing=form.mode==="edit"?entries.find(e=>e.id===form.id):null;
+  // Editing an already-LOCKED entry is a deliberate manual correction, not a
+  // fresh scheduling choice - it may be exactly the fix for a cross-item
+  // conflict (a different job filled the sibling slot after this one was
+  // locked, leaving it Overcommitted with no automatic repair path - see
+  // TESTING_NOTES.md, bug 2A #4/#5). Capping it to whatever the sibling
+  // CURRENTLY claims would make it impossible to type the corrected value,
+  // since the sibling is likely getting its own separate correcting edit
+  // right after this one. A brand-new or still-unlocked entry keeps the
+  // normal cap, so it can't accidentally create a fresh overcommitment.
+  const editingLockedEntry=!!mineIfEditing?.hoursLocked;
   const maxHours=(()=>{
-    if(!otherSlotEntry)return productiveHours;
-    if(form.mode==="edit"){
-      const mine=entries.find(e=>e.id===form.id);
-      if(mine&&wasScheduledFirst(mine,otherSlotEntry))return productiveHours;
-    }
+    if(!otherSlotEntry||editingLockedEntry)return productiveHours;
+    if(mineIfEditing&&wasScheduledFirst(mineIfEditing,otherSlotEntry))return productiveHours;
     const otherEff=Math.min(Number(otherSlotEntry.hours)||0,productiveHours);
     return Math.max(0,Math.round((productiveHours-otherEff)*2)/2);
   })();
@@ -3435,6 +3466,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             <div style={{width:130}}>
               <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
+              {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day already has {otherSlotEntry.hours}h - you may need to adjust it too</div>}
             </div>
           ):autoFill&&form.mode==="new"?(
             <div>
@@ -3476,6 +3508,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             <div style={{width:130}}>
               <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
+              {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day already has {otherSlotEntry.hours}h - you may need to adjust it too</div>}
             </div>
           )}
         </div>
