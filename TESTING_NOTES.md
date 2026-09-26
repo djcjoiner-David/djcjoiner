@@ -302,21 +302,14 @@ item-total-badge display question) — see 2D below; it turned out to be more
 nuanced than first thought (see the note under 2D #1), so it needs a fresh
 look rather than being folded into any of the four above.
 
-### 2D. Open questions
-1. **Item-total-badge display (2A #10) — revised understanding.** While
-   fixing #3, found that the code location isn't a single bug — there's
-   already a real mechanism for this (`computeJobEntryMeta`, in the grid's
-   render code): it shows an entry's own real hours whenever it's the
-   item's completing entry, under-cap, a person's own personal last entry,
-   locked, or (as of fix #3) Overcommitted-with-shortfall. The flat
-   "total budget" placeholder only shows on a genuinely interior day where
-   none of those apply — which may be intentional (a placeholder for a day
-   that isn't otherwise special) rather than a flat bug. What's still true:
-   this makes it hard to visually confirm an ordinary interior day's real
-   hours from the grid alone without opening the entry. Needs a fresh
-   decision with the user on whether/how to change this, not a code fix
-   assumed from the original framing.
-2. Fixes #3 and #4 above did not end up depending on resolving #1 first —
-   both shipped using the existing mechanism (the new `itemShortfall`
-   display in fix #3 is a new field in that same `computeJobEntryMeta`
-   function, not a rewrite of it).
+### 2D. Resolved questions
+1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
+   with the user: the flat "total budget" placeholder on an ordinary,
+   non-final, full day is **intentional** — it lets anyone glance at any
+   entry for an item and immediately see how many hours the item needs in
+   total, which was judged more valuable than showing that one day's real
+   number. `computeJobEntryMeta` already shows an entry's own real hours
+   whenever it's the item's completing entry, under-cap, a person's own
+   personal last entry, locked, or Overcommitted-with-shortfall (fix #3) -
+   the placeholder only applies outside those cases. No longer an open
+   item; nothing to fix here.
