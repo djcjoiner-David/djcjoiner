@@ -1697,11 +1697,15 @@ function MainApp({currentUser,onLogout}) {
   // of being forced onto one person. `pool` should be the full, current
   // entries array (including any not-yet-committed changes from the
   // mutation this is running for) so the other-slot capacity checks see the
-  // real picture. Returns entryId -> the hours it should have; entries that
-  // are locked or already correct are simply left out.
+  // real picture. Returns {plan, remaining}: plan is entryId -> the hours it
+  // should have (entries that are locked or already correct are simply left
+  // out); remaining is whatever's left of the budget that couldn't be
+  // placed on any of the item's existing days - a genuine shortfall a
+  // caller may want to act on (see extendItemIfShort), not a rounding
+  // artifact.
   function computeItemPlan(subItemId,pool){
     const si=subItems.find(s=>s.id===subItemId);
-    if(!si)return{};
+    if(!si)return{plan:{},remaining:0};
     const itemEntries=pool.filter(e=>e.subItemId===subItemId&&!e.miscNote);
     // A locked entry commits its hours out of the item's total budget
     // regardless of WHERE it falls in the date order - reserve every locked
@@ -1735,7 +1739,7 @@ function MainApp({currentUser,onLogout}) {
       split.forEach(p=>{plan[p.sid]=p.hours;});
       remaining-=dayBudget;
     });
-    return plan;
+    return {plan,remaining};
   }
 
   // A locked entry is protected from the AMBIENT/silent budget math (the
@@ -1821,7 +1825,7 @@ function MainApp({currentUser,onLogout}) {
   // corrections were applied, so a caller settling several items in a row
   // (see resettleItemsAfterUndoRedo) can thread it forward.
   async function recalculateItem(subItemId,pool,epicenterDates,token,silent){
-    const plan=computeItemPlan(subItemId,pool);
+    const {plan}=computeItemPlan(subItemId,pool);
     const epi=new Set(epicenterDates||[]);
     // A big multi-day, multi-staff schedule can touch dozens of entries in
     // one go - look each one up once (a Map, not a repeated pool.find scan
@@ -1854,6 +1858,43 @@ function MainApp({currentUser,onLogout}) {
     ];
     await Promise.all(jobs);
     return pool.filter(e=>!deleteIds.has(e.id)).map(e=>patchMap.has(e.id)?{...e,hours:patchMap.get(e.id)}:e);
+  }
+
+  // A move/copy can swap in staff with less combined daily capacity across
+  // an item's existing days than it had before (e.g. lower-productive-hours
+  // people replacing higher ones on the same days) - computeItemPlan only
+  // ever adjusts or deletes EXISTING entries, so any budget that no longer
+  // fits anywhere is silently left unplaced. Called only after a move/copy's
+  // own recalculateItem, this continues the schedule forward from the
+  // item's last existing day, using the exact same coordinated day-by-day
+  // walk (buildGroupAutoFill) a brand-new schedule uses - picking up with
+  // whoever is still genuinely active on the item (a real, unlocked entry
+  // on that last day), at their already-established slots, until the
+  // shortfall is fully placed. Deliberately NOT called from a delete or a
+  // plain manual edit - shrinking the schedule is the user's explicit
+  // intent there, not something to compensate for automatically.
+  async function extendItemIfShort(subItemId,pool,token){
+    const si=subItems.find(s=>s.id===subItemId);
+    if(!si)return pool;
+    const {remaining}=computeItemPlan(subItemId,pool);
+    const shortfall=Math.round(remaining*2)/2;
+    if(shortfall<=0.05)return pool;
+    const itemEntries=pool.filter(e=>e.subItemId===subItemId&&!e.miscNote);
+    if(itemEntries.length===0)return pool;
+    const lastDate=itemEntries.reduce((max,e)=>e.dateStr>max?e.dateStr:max,itemEntries[0].dateStr);
+    const continuingStaffIds=[...new Set(itemEntries.filter(e=>e.dateStr===lastDate&&!e.hoursLocked).map(e=>e.staffId))];
+    if(continuingStaffIds.length===0)return pool;
+    const startDateStr=isoDate(addWorkingDays(parseISO(lastDate),1));
+    const extension=buildGroupAutoFill(continuingStaffIds,shortfall,startDateStr,0,pool,staff,subItemId);
+    if(extension.length===0)return pool;
+    const rows=extension.map(r=>({staff_id:r.staffId,job_id:si.jobId,sub_item_id:subItemId,date_str:r.dateStr,slot:r.slot,hours:r.hours,misc_note:null,hours_locked:false}));
+    const inserted=await db("POST","entries",rows);
+    const newEntries=inserted.map(mapInsertedEntry);
+    pushUndo("addEntries",{ids:newEntries.map(e=>e.id)},token);
+    setEntries(prev=>[...prev,...newEntries]);
+    const daySpan=new Set(extension.map(r=>r.dateStr)).size;
+    setError(`Extended by ${daySpan} day${daySpan===1?"":"s"} to cover the full ${si.totalHours}h budget.`);
+    return [...pool,...newEntries];
   }
 
   async function saveEntry(data,extraEntries){
@@ -2240,7 +2281,15 @@ function MainApp({currentUser,onLogout}) {
           for(const subItemId of Object.keys(byItemArrivals)){
             pool=await unlockAllLocksInItem(subItemId,pool,token);
           }
-          await Promise.all(Object.keys(byItem).map(subItemId=>recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool),token)));
+          const settledPool=pool;
+          await Promise.all(Object.keys(byItem).map(async subItemId=>{
+            const afterRecalc=await recalculateItem(subItemId,settledPool,allDatesForItem(subItemId,settledPool),token);
+            // Moving staff onto an item's existing days can leave it short
+            // of its total budget if the new staff have less combined daily
+            // capacity than who was there before - extend the schedule
+            // forward to cover it rather than silently dropping the rest.
+            if(afterRecalc)await extendItemIfShort(subItemId,afterRecalc,token);
+          }));
         }
       }catch(err){
         setError("Failed to move entries - reverted.");
@@ -2346,7 +2395,11 @@ function MainApp({currentUser,onLogout}) {
           for(const subItemId of Object.keys(byItemArrivals)){
             pool=await unlockAllLocksInItem(subItemId,pool,token);
           }
-          await Promise.all(Object.keys(byItem).map(subItemId=>recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool),token)));
+          const settledPool=pool;
+          await Promise.all(Object.keys(byItem).map(async subItemId=>{
+            const afterRecalc=await recalculateItem(subItemId,settledPool,allDatesForItem(subItemId,settledPool),token);
+            if(afterRecalc)await extendItemIfShort(subItemId,afterRecalc,token);
+          }));
         }
       }catch(err){
         setError("Failed to copy entries.");
@@ -2399,7 +2452,8 @@ function MainApp({currentUser,onLogout}) {
         if(!entry.miscNote&&entry.subItemId){
           let pool=[...entries,newEntry];
           pool=await unlockAllLocksInItem(entry.subItemId,pool,token);
-          await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool),token);
+          const afterRecalc=await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool),token);
+          if(afterRecalc)await extendItemIfShort(entry.subItemId,afterRecalc,token);
         }
       }catch(err){
         setError("Failed to copy entry.");
@@ -2455,7 +2509,8 @@ function MainApp({currentUser,onLogout}) {
       if(entry.subItemId){
         let pool=entries.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:newHours}:en);
         pool=await unlockAllLocksInItem(entry.subItemId,pool,token);
-        await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool),token);
+        const afterRecalc=await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool),token);
+        if(afterRecalc)await extendItemIfShort(entry.subItemId,afterRecalc,token);
       }
     }catch(err){
       setError("Failed to move entry - change reverted.");

@@ -261,36 +261,62 @@ applied. Re-check against current `src/App.jsx` before use.)*
    the fix in (b) alone would have been cosmetic without this, since the
    corrected value could never actually stick. Now skipped for any locked
    entry, matching the rest of the ambient pass.
-4. **Move-caused budget shortfall** (bug #6): auto-extend — recalculation
-   should add new entries to cover the shortfall automatically. This is
-   explicitly different from decision #3 above (cross-item conflict stays
+4. ✅ **FIXED. Move-caused budget shortfall** (bug #6): auto-extend.
+   `computeItemPlan` now returns `{plan, remaining}` (previously just the
+   plan) — `remaining` is whatever budget couldn't be placed on any of the
+   item's existing days. A new `extendItemIfShort(subItemId, pool, token)`,
+   called only after Move's and Copy's own `recalculateItem` (single-entry
+   and group, both), checks for that leftover and if found, continues the
+   schedule forward from the item's last existing day using the exact same
+   coordinated day-by-day walk (`buildGroupAutoFill`) a brand-new schedule
+   uses — picking up with whoever has a real, unlocked entry on that last
+   day, at their already-established slots, until the shortfall is fully
+   placed. The new entries share the *same* undo token as the move/copy, so
+   undoing it also undoes the extension in one click. A brief message
+   ("Extended by N days to cover the full Xh budget") shows so the new
+   entries aren't a silent surprise — flagged as easy to drop later if it
+   feels unnecessary in practice. Deliberately NOT wired into Delete or a
+   plain manual edit — shrinking the schedule is the user's explicit intent
+   there, not something to compensate for automatically; this is explicitly
+   different treatment from decision #3 above (cross-item conflict stays
    manual/flagged) — the user confirmed these two scenarios get different
-   treatment.
+   treatment. Verified live via Playwright with the exact Laundry W
+   numbers: a group move that swaps in two lower-capacity staff across the
+   same two days comes up 8h short: the fix adds a third day split
+   proportionally between the two continuing staff (4.5h + 3.5h), landing
+   the item back at its exact 30h test budget.
 5. **Item-total-badge display bug** (bug #10): needs fixing so entries show
    their own real hours, not a static total repeated across days. Code
    location not yet found — pending investigation.
 
 ### 2C. Agreed fix order
-1. Zero-hours manual edit → delete (contained, low risk).
-2. Undo/redo engine fixes (biggest lift; stabilizes everything tested from
-   here on, since further testing depends on undo/redo being trustworthy).
-3. Cross-item conflict display + modal-unblock fix.
-4. Move-caused budget shortfall auto-extend (biggest redesign — bring back
-   a specific design for confirmation before coding, same as the earlier
-   group-scheduling rewrite this session).
+1. ✅ Zero-hours manual edit → delete (contained, low risk).
+2. ✅ Undo/redo engine fixes (biggest lift; stabilizes everything tested
+   from here on, since further testing depends on undo/redo being
+   trustworthy).
+3. ✅ Cross-item conflict display + modal-unblock fix.
+4. ✅ Move-caused budget shortfall auto-extend.
 
-*(Where the item-total-badge fix (#5 in 2B) lands in this order is not yet
-finalized — it's needed for #3 above to actually show a real shortfall
-number, so it likely needs to land at or before step 3.)*
+All four agreed fixes are shipped. The remaining open item is #5 in 2B (the
+item-total-badge display question) — see 2D below; it turned out to be more
+nuanced than first thought (see the note under 2D #1), so it needs a fresh
+look rather than being folded into any of the four above.
 
 ### 2D. Open questions
-1. Exact code location of the item-total-badge display bug (2A #10) — not
-   yet found.
-2. Whether the display-badge fix should be sequenced before or alongside
-   the cross-item conflict fix (2C step 3), since that fix's "show the
-   shortfall number" requirement depends on accurate per-entry display.
-3. Exact mechanics of "auto-extend" for the move-caused shortfall case (2C
-   step 4) — which staff continue the extension, what day-selection rules
-   apply (likely reusing `buildGroupAutoFill`'s day-by-day coordination
-   logic) — not yet designed in detail; to be brought back for explicit
-   confirmation before coding, per the standing redesign-confirmation rule.
+1. **Item-total-badge display (2A #10) — revised understanding.** While
+   fixing #3, found that the code location isn't a single bug — there's
+   already a real mechanism for this (`computeJobEntryMeta`, in the grid's
+   render code): it shows an entry's own real hours whenever it's the
+   item's completing entry, under-cap, a person's own personal last entry,
+   locked, or (as of fix #3) Overcommitted-with-shortfall. The flat
+   "total budget" placeholder only shows on a genuinely interior day where
+   none of those apply — which may be intentional (a placeholder for a day
+   that isn't otherwise special) rather than a flat bug. What's still true:
+   this makes it hard to visually confirm an ordinary interior day's real
+   hours from the grid alone without opening the entry. Needs a fresh
+   decision with the user on whether/how to change this, not a code fix
+   assumed from the original framing.
+2. Fixes #3 and #4 above did not end up depending on resolving #1 first —
+   both shipped using the existing mechanism (the new `itemShortfall`
+   display in fix #3 is a new field in that same `computeJobEntryMeta`
+   function, not a rewrite of it).
