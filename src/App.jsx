@@ -1241,298 +1241,289 @@ function MainApp({currentUser,onLogout}) {
   const [undoStack,setUndoStack]=useState([]); // each item: {type, data}
   const [redoStack,setRedoStack]=useState([]); // same shapes, populated by undo/redo themselves
 
-  // When set, further pushUndo calls merge into the stack's TOP entry as a
-  // "bundle" instead of adding their own separate entry - so one user
-  // action that cascades into a second change (e.g. an edit that also
-  // adjusts a same-day colleague) undoes in a single click instead of two.
-  const bundlingRef=useRef(false);
-  function pushUndo(type, data) {
+  // A token shared by every pushUndo call that belongs to ONE user action
+  // (its primary step, plus any cascade steps recalculation triggers)
+  // merges them into a single "bundle" undo entry - one click undoes the
+  // whole thing. A step only merges into whatever's on TOP of the stack if
+  // that top entry was stamped with the SAME token - unlike a shared
+  // true/false "currently bundling" flag, this can never mistake a
+  // DIFFERENT action's still-in-flight work for its own, even if two
+  // actions' async cascades happen to overlap in time (see
+  // TESTING_NOTES.md, bug 2A #2). Generate a fresh token (e.g. `Symbol()`)
+  // once per action and pass it to every pushUndo call that action makes,
+  // directly or via unlockStaleLocksAt/unlockAllLocksInItem/recalculateItem.
+  function pushUndo(type, data, token) {
     setUndoStack(prev=>{
-      if(bundlingRef.current&&prev.length>0){
-        const top=prev[prev.length-1];
+      const top=prev[prev.length-1];
+      if(token!==undefined&&top&&top._token===token){
         const step={type,data};
         const steps=top.type==="bundle"?[...top.data.steps,step]:[top,step];
-        return [...prev.slice(0,-1),{type:"bundle",data:{steps}}];
+        return [...prev.slice(0,-1),{type:"bundle",data:{steps},_token:token}];
       }
-      return [...prev.slice(-19),{type,data}];
+      return [...prev.slice(-19),{type,data,_token:token}];
     });
     setRedoStack([]); // a genuine new action invalidates whatever could have been redone
   }
 
-  // Applies a single undo step of one of the three types a bundle can be
-  // made of, returning the matching redo step - shared between the
-  // standalone addEntries/editEntry/deleteEntry cases below and the
-  // "bundle" case, which just runs several of these in sequence.
-  async function applyUndoStep(step){
+  // A bundle step that recreates a deleted row (undo of deleteEntry/
+  // deleteMultiple/unscheduleItem) or re-inserts a removed one (redo of
+  // addEntries) gets a brand-new id from the server. Any OTHER step in the
+  // same bundle that still references the id that row had a moment ago
+  // needs remapping to the new one before it runs, or it silently targets a
+  // row that no longer exists (see TESTING_NOTES.md, bug 2A #1).
+  function remapStepIds(step, idMap){
+    if(idMap.size===0)return step;
+    const remap=id=>idMap.has(id)?idMap.get(id):id;
+    if(step.type==="moveEntry")
+      return {...step,data:{...step.data,id:remap(step.data.id)}};
+    if(step.type==="editEntry"){
+      const key=step.data.prev?"prev":"state";
+      return {...step,data:{...step.data,[key]:{...step.data[key],id:remap(step.data[key].id)}}};
+    }
+    if(step.type==="deleteEntry"){
+      if(step.data.entry)return {...step,data:{...step.data,entry:{...step.data.entry,id:remap(step.data.entry.id)}}};
+      if(step.data.id!==undefined)return {...step,data:{...step.data,id:remap(step.data.id)}};
+    }
+    if(step.type==="moveMultiple"){
+      const key=step.data.prevStates?"prevStates":"states";
+      return {...step,data:{...step.data,[key]:step.data[key].map(s=>({...s,id:remap(s.id)}))}};
+    }
+    if((step.type==="addEntries"||step.type==="deleteMultiple"||step.type==="unscheduleItem")&&step.data.ids)
+      return {...step,data:{...step.data,ids:step.data.ids.map(remap)}};
+    return step;
+  }
+
+  // Every subItemId a step's entries belong to, gathered generically from
+  // whichever fields that step's shape happens to carry - safe to
+  // over-include (recalculateItem is a no-op if nothing needs correcting),
+  // so this doesn't need to be exhaustively precise per type.
+  function stepSubItemIds(step, pool){
+    const result=new Set();
+    const byId=id=>{const e=pool.find(x=>x.id===id);if(e?.subItemId)result.add(e.subItemId);};
+    const byEntry=e=>{if(e?.subItemId)result.add(e.subItemId);};
+    if(step.data.id!==undefined)byId(step.data.id);
+    if(step.data.ids)step.data.ids.forEach(byId);
+    byEntry(step.data.prev);byEntry(step.data.state);byEntry(step.data.entry);
+    if(step.data.deletedEntries)step.data.deletedEntries.forEach(byEntry);
+    if(step.data.prevStates)step.data.prevStates.forEach(s=>byId(s.id));
+    if(step.data.states)step.data.states.forEach(s=>byId(s.id));
+    return result;
+  }
+
+  // Applies a single undo step, using `pool` (this action's running view of
+  // the entries, threaded through by the caller) rather than the
+  // component's own `entries` state for its lookups - a bundle applies
+  // several steps back to back, and a later step needs to see what an
+  // EARLIER step in the same pass just did, not the stale snapshot from
+  // before any of them ran (see TESTING_NOTES.md, bug 2A #1/#7). Returns
+  // {redo, pool, idRemap}: the matching redo step (or null if it failed),
+  // the pool updated to reflect this step's change, and any [oldId,newId]
+  // pairs this step's own recreate/re-insert produced. Doesn't touch the
+  // screen itself - the caller applies ONE combined setEntries once the
+  // whole action (single step or full bundle) has finished, instead of one
+  // render per step (see TESTING_NOTES.md, bug 2A #8).
+  async function applyUndoStep(step, pool){
     if(step.type==="addEntries"){
-      const removed=entries.filter(e=>step.data.ids.includes(e.id));
-      const rows=removed.map(entryFields);
-      setEntries(prev=>prev.filter(e=>!step.data.ids.includes(e.id)));
+      const removed=pool.filter(e=>step.data.ids.includes(e.id));
       try{
         await Promise.all(step.data.ids.map(id=>db("DELETE","entries",null,`?id=eq.${id}`)));
-        return{type:"addEntries",data:{rows}};
+        return{redo:{type:"addEntries",data:{rows:removed.map(entryFields),origIds:removed.map(e=>e.id)}},pool:pool.filter(e=>!step.data.ids.includes(e.id))};
       }catch(e){
-        setError("Undo failed - restored.");
-        setEntries(prev=>[...prev,...removed]);
-        return null;
+        setError("Undo failed - not removed.");
+        return{redo:null,pool};
       }
     }
     if(step.type==="editEntry"){
       const e=step.data.prev;
-      const current=entries.find(en=>en.id===e.id);
-      setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
+      const current=pool.find(en=>en.id===e.id);
+      if(!current)return{redo:null,pool};
       try{
         await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked},`?id=eq.${e.id}`);
-        return current?{type:"editEntry",data:{state:current}}:null;
+        return{redo:{type:"editEntry",data:{state:current}},pool:pool.map(en=>en.id===e.id?e:en)};
       }catch(err){
-        setError("Undo failed - reverted.");
-        if(current)setEntries(prev=>prev.map(en=>en.id===e.id?current:en));
-        return null;
+        setError("Undo failed - not reverted.");
+        return{redo:null,pool};
       }
     }
     if(step.type==="deleteEntry"){
       const e=step.data.entry;
-      const tempId=`temp_undo_${Date.now()}_${Math.random()}`;
-      setEntries(prev=>[...prev,{...e,id:tempId}]);
       try{
         const[inserted]=await db("POST","entries",[entryFields(e)]);
         const real=mapInsertedEntry(inserted);
-        setEntries(prev=>prev.map(en=>en.id===tempId?real:en));
-        return{type:"deleteEntry",data:{id:real.id}};
+        return{redo:{type:"deleteEntry",data:{id:real.id}},pool:[...pool,real],idRemap:e.id!==real.id?[[e.id,real.id]]:[]};
       }catch(err){
         setError("Undo failed.");
-        setEntries(prev=>prev.filter(en=>en.id!==tempId));
-        return null;
+        return{redo:null,pool};
       }
     }
     if(step.type==="moveEntry"){
       const {id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours}=step.data;
-      const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})}:e));
+      const current=pool.find(e=>e.id===id);
+      if(!current)return{redo:null,pool};
       try{
         await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})},`?id=eq.${id}`);
-        return current?{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt,hours:current.hours}}:null;
+        return{redo:{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt,hours:current.hours}},pool:pool.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})}:e)};
       }catch(err){
-        setError("Undo failed - reverted.");
-        if(current)setEntries(prev=>prev.map(e=>e.id===id?current:e));
-        return null;
+        setError("Undo failed - not reverted.");
+        return{redo:null,pool};
       }
     }
     if(step.type==="moveMultiple"){
-      const states=step.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt,hours:cur.hours}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const ps=step.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,...(ps.prevHours!==undefined?{hours:ps.prevHours}:{})}:e;}));
+      const known=step.data.prevStates.filter(ps=>pool.some(e=>e.id===ps.id));
+      if(known.length===0)return{redo:null,pool};
+      const states=known.map(ps=>{const cur=pool.find(e=>e.id===ps.id);return {id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt,hours:cur.hours};});
       try{
-        await Promise.all(step.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours})=>
+        await Promise.all(known.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours})=>
           db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})},`?id=eq.${id}`)
         ));
-        return{type:"moveMultiple",data:{states}};
+        return{redo:{type:"moveMultiple",data:{states}},pool:pool.map(e=>{const ps=known.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,...(ps.prevHours!==undefined?{hours:ps.prevHours}:{})}:e;})};
       }catch(err){
-        setError("Undo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,hours:s.hours}:e;}));
-        return null;
+        setError("Undo failed - not reverted.");
+        return{redo:null,pool};
       }
     }
     if(step.type==="deleteMultiple"||step.type==="unscheduleItem"){
-      const tempMap=step.data.deletedEntries.map((en,i)=>({tempId:`temp_undo_${Date.now()}_${i}_${Math.random()}`,en}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,en})=>({...en,id:tempId}))]);
-      const tempIds=tempMap.map(t=>t.tempId);
       try{
         const inserted=await db("POST","entries",step.data.deletedEntries.map(entryFields));
         const mapped=inserted.map(mapInsertedEntry);
-        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
-        return{type:step.type,data:{ids:mapped.map(e=>e.id)}};
+        const idRemap=step.data.deletedEntries.map((en,i)=>[en.id,mapped[i]?.id]).filter(([o,n])=>o!==undefined&&n!==undefined&&o!==n);
+        return{redo:{type:step.type,data:{ids:mapped.map(e=>e.id)}},pool:[...pool,...mapped],idRemap};
       }catch(err){
         setError("Undo failed.");
-        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
-        return null;
+        return{redo:null,pool};
       }
     }
-    return null;
+    return{redo:null,pool};
   }
   // Mirrors applyUndoStep, for redo.
-  async function applyRedoStep(step){
+  async function applyRedoStep(step, pool){
     if(step.type==="addEntries"){
-      const tempMap=step.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}_${Math.random()}`,row}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString(),hoursLocked:!!row.hours_locked}))]);
-      const tempIds=tempMap.map(t=>t.tempId);
       try{
         const inserted=await db("POST","entries",step.data.rows);
         const mapped=inserted.map(mapInsertedEntry);
-        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
-        return{type:"addEntries",data:{ids:mapped.map(e=>e.id)}};
+        const idRemap=(step.data.origIds||[]).map((oldId,i)=>[oldId,mapped[i]?.id]).filter(([o,n])=>o!==undefined&&n!==undefined&&o!==n);
+        return{undo:{type:"addEntries",data:{ids:mapped.map(e=>e.id)}},pool:[...pool,...mapped],idRemap};
       }catch(err){
         setError("Redo failed.");
-        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
-        return null;
+        return{undo:null,pool};
       }
     }
     if(step.type==="editEntry"){
       const s=step.data.state;
-      const current=entries.find(en=>en.id===s.id);
-      setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
+      const current=pool.find(en=>en.id===s.id);
+      if(!current)return{undo:null,pool};
       try{
         await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote,hours_locked:!!s.hoursLocked},`?id=eq.${s.id}`);
-        return current?{type:"editEntry",data:{prev:current}}:null;
+        return{undo:{type:"editEntry",data:{prev:current}},pool:pool.map(en=>en.id===s.id?s:en)};
       }catch(err){
-        setError("Redo failed - reverted.");
-        if(current)setEntries(prev=>prev.map(en=>en.id===s.id?current:en));
-        return null;
+        setError("Redo failed - not reverted.");
+        return{undo:null,pool};
       }
     }
     if(step.type==="deleteEntry"){
       const{id}=step.data;
-      const entry=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.filter(e=>e.id!==id));
+      const entry=pool.find(e=>e.id===id);
+      if(!entry)return{undo:null,pool};
       try{
         await db("DELETE","entries",null,`?id=eq.${id}`);
-        return entry?{type:"deleteEntry",data:{entry}}:null;
+        return{undo:{type:"deleteEntry",data:{entry}},pool:pool.filter(e=>e.id!==id)};
       }catch(err){
-        setError("Redo failed - restored.");
-        if(entry)setEntries(prev=>[...prev,entry]);
-        return null;
+        setError("Redo failed - not restored.");
+        return{undo:null,pool};
       }
     }
     if(step.type==="moveEntry"){
       const {id,staffId,dateStr,slot,createdAt,hours}=step.data;
-      const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt,...(hours!==undefined?{hours}:{})}:e));
+      const current=pool.find(e=>e.id===id);
+      if(!current)return{undo:null,pool};
       try{
         await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt,...(hours!==undefined?{hours}:{})},`?id=eq.${id}`);
-        return current?{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt,prevHours:current.hours}}:null;
+        return{undo:{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt,prevHours:current.hours}},pool:pool.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt,...(hours!==undefined?{hours}:{})}:e)};
       }catch(err){
-        setError("Redo failed - reverted.");
-        if(current)setEntries(prev=>prev.map(e=>e.id===id?current:e));
-        return null;
+        setError("Redo failed - not reverted.");
+        return{undo:null,pool};
       }
     }
     if(step.type==="moveMultiple"){
-      const prevStates=step.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt,prevHours:cur.hours}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const s=step.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,...(s.hours!==undefined?{hours:s.hours}:{})}:e;}));
+      const known=step.data.states.filter(s=>pool.some(e=>e.id===s.id));
+      if(known.length===0)return{undo:null,pool};
+      const prevStates=known.map(s=>{const cur=pool.find(e=>e.id===s.id);return {id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt,prevHours:cur.hours};});
       try{
-        await Promise.all(step.data.states.map(({id,staffId,dateStr,slot,createdAt,hours})=>
+        await Promise.all(known.map(({id,staffId,dateStr,slot,createdAt,hours})=>
           db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt,...(hours!==undefined?{hours}:{})},`?id=eq.${id}`)
         ));
-        return{type:"moveMultiple",data:{prevStates}};
+        return{undo:{type:"moveMultiple",data:{prevStates}},pool:pool.map(e=>{const s=known.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,...(s.hours!==undefined?{hours:s.hours}:{})}:e;})};
       }catch(err){
-        setError("Redo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,hours:ps.prevHours}:e;}));
-        return null;
+        setError("Redo failed - not reverted.");
+        return{undo:null,pool};
       }
     }
     if(step.type==="deleteMultiple"||step.type==="unscheduleItem"){
       const{ids}=step.data;
-      const deletedEntries=entries.filter(e=>ids.includes(e.id));
-      setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
+      const deletedEntries=pool.filter(e=>ids.includes(e.id));
       try{
         await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
-        return{type:step.type,data:{deletedEntries}};
+        return{undo:{type:step.type,data:{deletedEntries}},pool:pool.filter(e=>!ids.includes(e.id))};
       }catch(err){
-        setError("Redo failed - restored.");
-        setEntries(prev=>[...prev,...deletedEntries]);
-        return null;
+        setError("Redo failed - not restored.");
+        return{undo:null,pool};
       }
     }
-    return null;
+    return{undo:null,pool};
+  }
+
+  // After a bundle (or single step) finishes restoring/reapplying
+  // positions, re-settle every item it touched via the same unlock+
+  // recalculate path every FORWARD mutation already goes through - undo/
+  // redo must not just trust that the raw snapshots it replayed add up to
+  // a correct state, since a step's snapshot can be an intermediate value
+  // captured mid-cascade rather than the final-correct one (see
+  // TESTING_NOTES.md, bug 2A #7). Silent, like the ambient correction pass:
+  // this settling isn't itself a new undo-able user action.
+  async function resettleItemsAfterUndoRedo(pool, subItemIds){
+    for(const subItemId of subItemIds){
+      pool=await unlockAllLocksInItem(subItemId,pool,undefined,true);
+      pool=await recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool),undefined,true);
+    }
+    return pool;
   }
 
   async function handleUndo() {
     if(undoStack.length===0) return;
     const last=undoStack[undoStack.length-1];
     setUndoStack(prev=>prev.slice(0,-1));
-    // Every branch applies its change to the screen first and talks to the
-    // server in the background, same as drag/copy/delete - rolling back (and
-    // popping the redo entry it just pushed) if the save actually fails.
-    if(last.type==="addEntries") {
-      const removed=entries.filter(e=>last.data.ids.includes(e.id));
-      const rows=removed.map(entryFields);
-      setEntries(prev=>prev.filter(e=>!last.data.ids.includes(e.id)));
-      setRedoStack(prev=>[...prev,{type:"addEntries",data:{rows}}]);
-      try{
-        await Promise.all(last.data.ids.map(id=>db("DELETE","entries",null,`?id=eq.${id}`)));
-      }catch(e){
-        setError("Undo failed - restored.");
-        setEntries(prev=>[...prev,...removed]);
-        setRedoStack(prev=>prev.slice(0,-1));
-      }
-    } else if(last.type==="editEntry") {
-      const e=last.data.prev;
-      const current=entries.find(en=>en.id===e.id);
-      setEntries(prev=>prev.map(en=>en.id===e.id?e:en));
-      if(current)setRedoStack(prev=>[...prev,{type:"editEntry",data:{state:current}}]);
-      try{
-        await db("PATCH","entries",{staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked},`?id=eq.${e.id}`);
-      }catch(err){
-        setError("Undo failed - reverted.");
-        if(current){setEntries(prev=>prev.map(en=>en.id===e.id?current:en));setRedoStack(prev=>prev.slice(0,-1));}
-      }
-    } else if(last.type==="deleteEntry") {
-      const e=last.data.entry;
-      const tempId=`temp_undo_${Date.now()}`;
-      setEntries(prev=>[...prev,{...e,id:tempId}]);
-      try{
-        const [inserted]=await db("POST","entries",[entryFields(e)]);
-        const real=mapInsertedEntry(inserted);
-        setEntries(prev=>prev.map(en=>en.id===tempId?real:en));
-        setRedoStack(prev=>[...prev,{type:"deleteEntry",data:{id:real.id}}]);
-      }catch(err){
-        setError("Undo failed.");
-        setEntries(prev=>prev.filter(en=>en.id!==tempId));
-      }
-    } else if(last.type==="moveEntry") {
-      const {id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours}=last.data;
-      const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId:prevStaffId,dateStr:prevDateStr,slot:prevSlot,createdAt:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})}:e));
-      if(current)setRedoStack(prev=>[...prev,{type:"moveEntry",data:{id,staffId:current.staffId,dateStr:current.dateStr,slot:current.slot,createdAt:current.createdAt,hours:current.hours}}]);
-      try{
-        await db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})},`?id=eq.${id}`);
-      }catch(err){
-        setError("Undo failed - reverted.");
-        if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setRedoStack(prev=>prev.slice(0,-1));}
-      }
-    } else if(last.type==="moveMultiple") {
-      const states=last.data.prevStates.map(ps=>{const cur=entries.find(e=>e.id===ps.id);return cur?{id:ps.id,staffId:cur.staffId,dateStr:cur.dateStr,slot:cur.slot,createdAt:cur.createdAt,hours:cur.hours}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const ps=last.data.prevStates.find(x=>x.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,...(ps.prevHours!==undefined?{hours:ps.prevHours}:{})}:e;}));
-      setRedoStack(prev=>[...prev,{type:"moveMultiple",data:{states}}]);
-      try{
-        await Promise.all(last.data.prevStates.map(({id,prevStaffId,prevDateStr,prevSlot,prevCreatedAt,prevHours})=>
-          db("PATCH","entries",{staff_id:prevStaffId,date_str:prevDateStr,slot:prevSlot,created_at:prevCreatedAt,...(prevHours!==undefined?{hours:prevHours}:{})},`?id=eq.${id}`)
-        ));
-      }catch(err){
-        setError("Undo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const s=states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,hours:s.hours}:e;}));
-        setRedoStack(prev=>prev.slice(0,-1));
-      }
-    } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
-      // Re-insert all of them in a single batched request, not one at a time
-      const tempMap=last.data.deletedEntries.map((en,i)=>({tempId:`temp_undo_${Date.now()}_${i}`,en}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,en})=>({...en,id:tempId}))]);
-      const tempIds=tempMap.map(t=>t.tempId);
-      try{
-        const inserted=await db("POST","entries",last.data.deletedEntries.map(entryFields));
-        const mapped=inserted.map(mapInsertedEntry);
-        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
-        setRedoStack(prev=>[...prev,{type:last.type,data:{ids:mapped.map(e=>e.id)}}]);
-      }catch(err){
-        setError("Undo failed.");
-        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
-      }
-    } else if(last.type==="bundle") {
+    if(last.type==="bundle") {
       // Unwind the most recently applied part of the bundle first, so a
-      // primary edit plus the same-day adjustment it triggered undo in the
-      // same order they'd naturally reverse in - one click, not two. Steps
-      // run ONE AT A TIME (not Promise.all) because two steps in the same
-      // bundle can target the SAME entry (e.g. a lock-clear then an hours
-      // change from the item-wide recalc it triggered) - firing their PATCH/
-      // DELETE calls concurrently let whichever one's network round-trip
-      // happened to land last silently win, regardless of which was meant
-      // to be authoritative, corrupting the final state or leaving a stray
-      // entry behind.
+      // primary edit plus the same-day adjustment it triggered undoes in
+      // the same order they'd naturally reverse in - one click, not two.
+      // Steps run ONE AT A TIME (not Promise.all) because two steps in the
+      // same bundle can target the SAME entry (e.g. a lock-clear then an
+      // hours change from the item-wide recalc it triggered) - firing
+      // their PATCH/DELETE calls concurrently let whichever one's network
+      // round-trip happened to land last silently win, regardless of which
+      // was meant to be authoritative, corrupting the final state or
+      // leaving a stray entry behind.
       const redoSteps=[];
-      for(const step of [...last.data.steps].reverse()){
-        const r=await applyUndoStep(step);
-        if(r)redoSteps.push(r);
+      const idMap=new Map();
+      const touchedItems=new Set();
+      let pool=entries;
+      for(const rawStep of [...last.data.steps].reverse()){
+        const step=remapStepIds(rawStep,idMap);
+        stepSubItemIds(step,pool).forEach(id=>touchedItems.add(id));
+        const {redo,pool:nextPool,idRemap}=await applyUndoStep(step,pool);
+        pool=nextPool;
+        if(redo){redoSteps.push(redo);(idRemap||[]).forEach(([o,n])=>idMap.set(o,n));}
       }
       if(redoSteps.length>0)setRedoStack(prev=>[...prev,{type:"bundle",data:{steps:redoSteps.reverse()}}]);
+      if(touchedItems.size>0)pool=await resettleItemsAfterUndoRedo(pool,touchedItems);
+      setEntries(()=>pool);
+    } else {
+      const touchedItems=stepSubItemIds(last,entries);
+      const {redo,pool:poolAfter}=await applyUndoStep(last,entries);
+      if(redo)setRedoStack(prev=>[...prev,redo]);
+      let pool=poolAfter;
+      if(touchedItems.size>0)pool=await resettleItemsAfterUndoRedo(pool,touchedItems);
+      setEntries(()=>pool);
     }
   }
 
@@ -1540,88 +1531,32 @@ function MainApp({currentUser,onLogout}) {
     if(redoStack.length===0) return;
     const last=redoStack[redoStack.length-1];
     setRedoStack(prev=>prev.slice(0,-1));
-    if(last.type==="addEntries") {
-      const tempMap=last.data.rows.map((row,i)=>({tempId:`temp_redo_${Date.now()}_${i}`,row}));
-      setEntries(prev=>[...prev,...tempMap.map(({tempId,row})=>({id:tempId,staffId:row.staff_id,jobId:row.job_id,subItemId:row.sub_item_id,dateStr:row.date_str,slot:row.slot,hours:Number(row.hours),miscNote:row.misc_note||null,createdAt:new Date().toISOString(),hoursLocked:!!row.hours_locked}))]);
-      const tempIds=tempMap.map(t=>t.tempId);
-      try{
-        const inserted=await db("POST","entries",last.data.rows);
-        const mapped=inserted.map(mapInsertedEntry);
-        setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...mapped]);
-        setUndoStack(prev=>[...prev,{type:"addEntries",data:{ids:mapped.map(e=>e.id)}}]);
-      }catch(err){
-        setError("Redo failed.");
-        setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
-      }
-    } else if(last.type==="editEntry") {
-      const s=last.data.state;
-      const current=entries.find(en=>en.id===s.id);
-      setEntries(prev=>prev.map(en=>en.id===s.id?s:en));
-      if(current)setUndoStack(prev=>[...prev,{type:"editEntry",data:{prev:current}}]);
-      try{
-        await db("PATCH","entries",{staff_id:s.staffId,job_id:s.jobId,sub_item_id:s.subItemId,date_str:s.dateStr,slot:s.slot,hours:s.hours,misc_note:s.miscNote,hours_locked:!!s.hoursLocked},`?id=eq.${s.id}`);
-      }catch(err){
-        setError("Redo failed - reverted.");
-        if(current){setEntries(prev=>prev.map(en=>en.id===s.id?current:en));setUndoStack(prev=>prev.slice(0,-1));}
-      }
-    } else if(last.type==="deleteEntry") {
-      const {id}=last.data;
-      const entry=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.filter(e=>e.id!==id));
-      if(entry)setUndoStack(prev=>[...prev,{type:"deleteEntry",data:{entry}}]);
-      try{
-        await db("DELETE","entries",null,`?id=eq.${id}`);
-      }catch(err){
-        setError("Redo failed - restored.");
-        if(entry){setEntries(prev=>[...prev,entry]);setUndoStack(prev=>prev.slice(0,-1));}
-      }
-    } else if(last.type==="moveEntry") {
-      const {id,staffId,dateStr,slot,createdAt,hours}=last.data;
-      const current=entries.find(e=>e.id===id);
-      setEntries(prev=>prev.map(e=>e.id===id?{...e,staffId,dateStr,slot,createdAt,...(hours!==undefined?{hours}:{})}:e));
-      if(current)setUndoStack(prev=>[...prev,{type:"moveEntry",data:{id,prevStaffId:current.staffId,prevDateStr:current.dateStr,prevSlot:current.slot,prevCreatedAt:current.createdAt,prevHours:current.hours}}]);
-      try{
-        await db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt,...(hours!==undefined?{hours}:{})},`?id=eq.${id}`);
-      }catch(err){
-        setError("Redo failed - reverted.");
-        if(current){setEntries(prev=>prev.map(e=>e.id===id?current:e));setUndoStack(prev=>prev.slice(0,-1));}
-      }
-    } else if(last.type==="moveMultiple") {
-      const prevStates=last.data.states.map(s=>{const cur=entries.find(e=>e.id===s.id);return cur?{id:s.id,prevStaffId:cur.staffId,prevDateStr:cur.dateStr,prevSlot:cur.slot,prevCreatedAt:cur.createdAt,prevHours:cur.hours}:null;}).filter(Boolean);
-      setEntries(prev=>prev.map(e=>{const s=last.data.states.find(x=>x.id===e.id);return s?{...e,staffId:s.staffId,dateStr:s.dateStr,slot:s.slot,createdAt:s.createdAt,...(s.hours!==undefined?{hours:s.hours}:{})}:e;}));
-      setUndoStack(prev=>[...prev,{type:"moveMultiple",data:{prevStates}}]);
-      try{
-        await Promise.all(last.data.states.map(({id,staffId,dateStr,slot,createdAt,hours})=>
-          db("PATCH","entries",{staff_id:staffId,date_str:dateStr,slot,created_at:createdAt,...(hours!==undefined?{hours}:{})},`?id=eq.${id}`)
-        ));
-      }catch(err){
-        setError("Redo failed - reverted.");
-        setEntries(prev=>prev.map(e=>{const ps=prevStates.find(p=>p.id===e.id);return ps?{...e,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,hours:ps.prevHours}:e;}));
-        setUndoStack(prev=>prev.slice(0,-1));
-      }
-    } else if(last.type==="deleteMultiple"||last.type==="unscheduleItem") {
-      const {ids}=last.data;
-      const deletedEntries=entries.filter(e=>ids.includes(e.id));
-      setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));
-      setUndoStack(prev=>[...prev,{type:last.type,data:{deletedEntries}}]);
-      try{
-        await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);
-      }catch(err){
-        setError("Redo failed - restored.");
-        setEntries(prev=>[...prev,...deletedEntries]);
-        setUndoStack(prev=>prev.slice(0,-1));
-      }
-    } else if(last.type==="bundle") {
+    if(last.type==="bundle") {
       // Reapply in the original forward order (primary, then the cascaded
       // adjustment), mirroring how the bundle was first built. Sequential
       // for the same reason as the undo side - steps sharing an entry must
       // not race each other's network calls.
       const undoSteps=[];
-      for(const step of last.data.steps){
-        const r=await applyRedoStep(step);
-        if(r)undoSteps.push(r);
+      const idMap=new Map();
+      const touchedItems=new Set();
+      let pool=entries;
+      for(const rawStep of last.data.steps){
+        const step=remapStepIds(rawStep,idMap);
+        stepSubItemIds(step,pool).forEach(id=>touchedItems.add(id));
+        const {undo,pool:nextPool,idRemap}=await applyRedoStep(step,pool);
+        pool=nextPool;
+        if(undo){undoSteps.push(undo);(idRemap||[]).forEach(([o,n])=>idMap.set(o,n));}
       }
       if(undoSteps.length>0)setUndoStack(prev=>[...prev,{type:"bundle",data:{steps:undoSteps}}]);
+      if(touchedItems.size>0)pool=await resettleItemsAfterUndoRedo(pool,touchedItems);
+      setEntries(()=>pool);
+    } else {
+      const touchedItems=stepSubItemIds(last,entries);
+      const {undo,pool:poolAfter}=await applyRedoStep(last,entries);
+      if(undo)setUndoStack(prev=>[...prev,undo]);
+      let pool=poolAfter;
+      if(touchedItems.size>0)pool=await resettleItemsAfterUndoRedo(pool,touchedItems);
+      setEntries(()=>pool);
     }
   }
   const [copyMode,setCopyMode]=useState(false); // tap-to-copy, arms via Select toolbar's Copy button
@@ -1807,16 +1742,13 @@ function MainApp({currentUser,onLogout}) {
   // locked there is stale: it's unlocked and folded back into the normal
   // split, anchored by the new arrival instead. Returns the pool with those
   // entries reflected as unlocked, for whatever runs next to see.
-  async function unlockStaleLocksAt(subItemId,dateStr,excludeId,pool){
+  async function unlockStaleLocksAt(subItemId,dateStr,excludeId,pool,token,silent){
     const competitors=pool.filter(x=>x.subItemId===subItemId&&x.dateStr===dateStr&&x.id!==excludeId&&x.hoursLocked);
     if(competitors.length===0)return pool;
-    const jobs=competitors.map(c=>{
-      pushUndo("editEntry",{prev:c});
-      return db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`);
-    });
+    if(!silent)competitors.forEach(c=>pushUndo("editEntry",{prev:c},token));
     const ids=new Set(competitors.map(c=>c.id));
     setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
-    await Promise.all(jobs);
+    await Promise.all(competitors.map(c=>db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`)));
     return pool.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e);
   }
   // Same idea, but for a whole batch of arrivals at once (a multi-day
@@ -1825,13 +1757,13 @@ function MainApp({currentUser,onLogout}) {
   // unlockStaleLocksAt sequentially per arrival, which on a big schedule
   // meant dozens of redundant full-pool scans and renders for what's almost
   // always a no-op (nothing locked to begin with).
-  async function unlockStaleLocksAtMany(subItemId,arrivals,pool){
+  async function unlockStaleLocksAtMany(subItemId,arrivals,pool,token,silent){
     const excludeIds=new Set(arrivals.map(a=>a.excludeId));
     const dateSet=new Set(arrivals.map(a=>a.dateStr));
     const competitors=pool.filter(x=>x.subItemId===subItemId&&dateSet.has(x.dateStr)&&!excludeIds.has(x.id)&&x.hoursLocked);
     if(competitors.length===0)return pool;
     const ids=new Set(competitors.map(c=>c.id));
-    competitors.forEach(c=>pushUndo("editEntry",{prev:c}));
+    if(!silent)competitors.forEach(c=>pushUndo("editEntry",{prev:c},token));
     setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
     await Promise.all(competitors.map(c=>db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`)));
     return pool.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e);
@@ -1845,11 +1777,15 @@ function MainApp({currentUser,onLogout}) {
   // actually touched can keep reserving its hours out of the total while the
   // rest of the item is redistributed around it, letting the item's stored
   // total run over its real budget.
-  async function unlockAllLocksInItem(subItemId,pool){
+  // `token`: shared with the mutation this is part of, so its lock-clear(s)
+  // bundle into the same one-click undo. `silent`: true for the post-undo/
+  // redo settling pass, which shouldn't record any undo history of its own
+  // (same as the ambient correction pass).
+  async function unlockAllLocksInItem(subItemId,pool,token,silent){
     const locked=pool.filter(x=>x.subItemId===subItemId&&x.hoursLocked);
     if(locked.length===0)return pool;
     const ids=new Set(locked.map(c=>c.id));
-    locked.forEach(c=>pushUndo("editEntry",{prev:c}));
+    if(!silent)locked.forEach(c=>pushUndo("editEntry",{prev:c},token));
     setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
     await Promise.all(locked.map(c=>db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`)));
     return pool.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e);
@@ -1873,7 +1809,13 @@ function MainApp({currentUser,onLogout}) {
   // OTHER day's entry that settles at ~0 as a knock-on effect is left
   // showing "0h" rather than silently deleted, since that's a less direct,
   // less obviously-undoable consequence to be removing data over.
-  async function recalculateItem(subItemId,pool,epicenterDates){
+  // `token`: shared with the mutation this is part of, so its correction(s)
+  // bundle into the same one-click undo. `silent`: true for the post-undo/
+  // redo settling pass, which shouldn't record any undo history of its own
+  // (same as the ambient correction pass). Returns the pool with whatever
+  // corrections were applied, so a caller settling several items in a row
+  // (see resettleItemsAfterUndoRedo) can thread it forward.
+  async function recalculateItem(subItemId,pool,epicenterDates,token,silent){
     const plan=computeItemPlan(subItemId,pool);
     const epi=new Set(epicenterDates||[]);
     // A big multi-day, multi-staff schedule can touch dozens of entries in
@@ -1893,9 +1835,11 @@ function MainApp({currentUser,onLogout}) {
       if(newHours===0&&epi.has(current.dateStr))toDelete.push(current);
       else toPatch.push({entry:current,newHours});
     });
-    if(toDelete.length===0&&toPatch.length===0)return;
-    toDelete.forEach(e=>pushUndo("deleteEntry",{entry:e}));
-    toPatch.forEach(({entry})=>pushUndo("editEntry",{prev:entry}));
+    if(toDelete.length===0&&toPatch.length===0)return pool;
+    if(!silent){
+      toDelete.forEach(e=>pushUndo("deleteEntry",{entry:e},token));
+      toPatch.forEach(({entry})=>pushUndo("editEntry",{prev:entry},token));
+    }
     const deleteIds=new Set(toDelete.map(e=>e.id));
     const patchMap=new Map(toPatch.map(({entry,newHours})=>[entry.id,newHours]));
     setEntries(prev=>prev.filter(e=>!deleteIds.has(e.id)).map(e=>patchMap.has(e.id)?{...e,hours:patchMap.get(e.id)}:e));
@@ -1904,6 +1848,7 @@ function MainApp({currentUser,onLogout}) {
       ...toPatch.map(({entry,newHours})=>db("PATCH","entries",{hours:newHours},`?id=eq.${entry.id}`)),
     ];
     await Promise.all(jobs);
+    return pool.filter(e=>!deleteIds.has(e.id)).map(e=>patchMap.has(e.id)?{...e,hours:patchMap.get(e.id)}:e);
   }
 
   async function saveEntry(data,extraEntries){
@@ -1949,7 +1894,8 @@ function MainApp({currentUser,onLogout}) {
         }
         const inserted=await db("POST","entries",buildRows(valid));
         const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked}));
-        pushUndo("addEntries",{ids:newMapped.map(e=>e.id)});
+        const token=Symbol("saveEntry-new");
+        pushUndo("addEntries",{ids:newMapped.map(e=>e.id)},token);
         setEntries(prev=>[...prev,...newMapped]);
         if(data.entryType!=="misc"&&data.subItemId&&newMapped.length>0){
           if(data.autoFill){
@@ -1960,19 +1906,13 @@ function MainApp({currentUser,onLogout}) {
             // silently over-budget until the next unrelated change.
             let pool=[...entries,...newMapped];
             const touchedDates=[...new Set(newMapped.map(m=>m.dateStr))];
-            bundlingRef.current=true;
-            try{
-              pool=await unlockStaleLocksAtMany(data.subItemId,newMapped.map(m=>({dateStr:m.dateStr,excludeId:m.id})),pool);
-              await recalculateItem(data.subItemId,pool,touchedDates);
-            }finally{bundlingRef.current=false;}
+            pool=await unlockStaleLocksAtMany(data.subItemId,newMapped.map(m=>({dateStr:m.dateStr,excludeId:m.id})),pool,token);
+            await recalculateItem(data.subItemId,pool,touchedDates,token);
           }else if(newMapped.length===1){
             const created=newMapped[0];
-            bundlingRef.current=true;
-            try{
-              let pool=[...entries,...newMapped];
-              pool=await unlockStaleLocksAt(data.subItemId,created.dateStr,created.id,pool);
-              await recalculateItem(data.subItemId,pool,[created.dateStr]);
-            }finally{bundlingRef.current=false;}
+            let pool=[...entries,...newMapped];
+            pool=await unlockStaleLocksAt(data.subItemId,created.dateStr,created.id,pool,token);
+            await recalculateItem(data.subItemId,pool,[created.dateStr],token);
           }
         }
       } else {
@@ -2006,26 +1946,24 @@ function MainApp({currentUser,onLogout}) {
           hours_locked:hoursLocked,
           ...(newCreatedAt?{created_at:newCreatedAt}:{})
         },`?id=eq.${data.id}`);
-        if(prevEntry) pushUndo("editEntry",{prev:prevEntry});
+        const token=Symbol("saveEntry-edit");
+        if(prevEntry) pushUndo("editEntry",{prev:prevEntry},token);
         setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
         if(prevEntry){
-          bundlingRef.current=true;
-          try{
-            if(hoursLocked&&data.subItemId){
-              let pool=entries.map(e=>e.id===data.id?{...e,staffId:data.staffId,subItemId:data.subItemId,dateStr:data.dateStr,slot:data.slot,hours:data.hours,hoursLocked:true}:e);
-              pool=await unlockStaleLocksAt(data.subItemId,data.dateStr,data.id,pool);
-              const epicenters=[data.dateStr];
-              if(prevEntry.subItemId===data.subItemId&&prevEntry.dateStr!==data.dateStr)epicenters.push(prevEntry.dateStr);
-              await recalculateItem(data.subItemId,pool,epicenters);
-            }
-            // The entry moved off a DIFFERENT item entirely (changed job/item,
-            // or converted to a misc/no-item entry) - that old item's day just
-            // lost an entry and needs its own recalculation too.
-            if(prevEntry.subItemId&&prevEntry.subItemId!==data.subItemId){
-              const oldPool=entries.filter(e=>e.id!==data.id);
-              await recalculateItem(prevEntry.subItemId,oldPool,[prevEntry.dateStr]);
-            }
-          }finally{bundlingRef.current=false;}
+          if(hoursLocked&&data.subItemId){
+            let pool=entries.map(e=>e.id===data.id?{...e,staffId:data.staffId,subItemId:data.subItemId,dateStr:data.dateStr,slot:data.slot,hours:data.hours,hoursLocked:true}:e);
+            pool=await unlockStaleLocksAt(data.subItemId,data.dateStr,data.id,pool,token);
+            const epicenters=[data.dateStr];
+            if(prevEntry.subItemId===data.subItemId&&prevEntry.dateStr!==data.dateStr)epicenters.push(prevEntry.dateStr);
+            await recalculateItem(data.subItemId,pool,epicenters,token);
+          }
+          // The entry moved off a DIFFERENT item entirely (changed job/item,
+          // or converted to a misc/no-item entry) - that old item's day just
+          // lost an entry and needs its own recalculation too.
+          if(prevEntry.subItemId&&prevEntry.subItemId!==data.subItemId){
+            const oldPool=entries.filter(e=>e.id!==data.id);
+            await recalculateItem(prevEntry.subItemId,oldPool,[prevEntry.dateStr],token);
+          }
         }
         }
       }
@@ -2037,19 +1975,17 @@ function MainApp({currentUser,onLogout}) {
   async function removeEntry(id){
     const entry=entries.find(e=>e.id===id);
     if(!entry)return;
+    const token=Symbol("removeEntry");
     // Disappear immediately - don't make the user wait on the delete to
     // round-trip before the modal closes and the entry is gone.
-    pushUndo("deleteEntry",{entry});
+    pushUndo("deleteEntry",{entry},token);
     setEntries(prev=>prev.filter(e=>e.id!==id));
     setEntryModal(null);
     try{
       await db("DELETE","entries",null,`?id=eq.${id}`);
       if(entry.subItemId){
-        bundlingRef.current=true;
-        try{
-          const pool=entries.filter(e=>e.id!==id);
-          await recalculateItem(entry.subItemId,pool,[entry.dateStr]);
-        }finally{bundlingRef.current=false;}
+        const pool=entries.filter(e=>e.id!==id);
+        await recalculateItem(entry.subItemId,pool,[entry.dateStr],token);
       }
     }catch(e){
       setError("Failed to remove entry - restored.");
@@ -2225,7 +2161,8 @@ function MainApp({currentUser,onLogout}) {
         const en=entries.find(x=>x.id===id);
         return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot,prevCreatedAt:en.createdAt,prevHours:en.hours};
       });
-      pushUndo("moveMultiple",{prevStates});
+      const token=Symbol("performGroupMove");
+      pushUndo("moveMultiple",{prevStates},token);
       // Moving these entries makes them the newest arrivals wherever they
       // land, for capacity-conflict purposes - an old entry dragged into a
       // fresh conflict shouldn't still "win" on its original creation date.
@@ -2290,18 +2227,15 @@ function MainApp({currentUser,onLogout}) {
           arrivals.push({id,dateStr:u.newDate});
         });
         if(Object.keys(byItem).length>0){
-          bundlingRef.current=true;
-          try{
-            // Typically only a handful of distinct items are touched by one
-            // move, so this outer loop stays cheap either way - the real
-            // cost was the PER-ENTRY loop this replaces, batched below into
-            // one pass per item instead of one per arrival.
-            let pool=poolAfter;
-            for(const subItemId of Object.keys(byItemArrivals)){
-              pool=await unlockAllLocksInItem(subItemId,pool);
-            }
-            await Promise.all(Object.keys(byItem).map(subItemId=>recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool))));
-          }finally{bundlingRef.current=false;}
+          // Typically only a handful of distinct items are touched by one
+          // move, so this outer loop stays cheap either way - the real
+          // cost was the PER-ENTRY loop this replaces, batched below into
+          // one pass per item instead of one per arrival.
+          let pool=poolAfter;
+          for(const subItemId of Object.keys(byItemArrivals)){
+            pool=await unlockAllLocksInItem(subItemId,pool,token);
+          }
+          await Promise.all(Object.keys(byItem).map(subItemId=>recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool),token)));
         }
       }catch(err){
         setError("Failed to move entries - reverted.");
@@ -2387,7 +2321,8 @@ function MainApp({currentUser,onLogout}) {
         const inserted=await db("POST","entries",rows);
         const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
-        pushUndo("addEntries",{ids:newEntries.map(e=>e.id)});
+        const token=Symbol("performGroupCopy");
+        pushUndo("addEntries",{ids:newEntries.map(e=>e.id)},token);
         // Each copy carries its own source's hours over verbatim - for any
         // that landed on a day its item is already scheduled on, recalculate
         // that item/day so the whole group settles to the right split rather
@@ -2403,13 +2338,10 @@ function MainApp({currentUser,onLogout}) {
           arrivals.push({dateStr:newDate,excludeId:newEntry.id});
         });
         if(Object.keys(byItem).length>0){
-          bundlingRef.current=true;
-          try{
-            for(const subItemId of Object.keys(byItemArrivals)){
-              pool=await unlockAllLocksInItem(subItemId,pool);
-            }
-            await Promise.all(Object.keys(byItem).map(subItemId=>recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool))));
-          }finally{bundlingRef.current=false;}
+          for(const subItemId of Object.keys(byItemArrivals)){
+            pool=await unlockAllLocksInItem(subItemId,pool,token);
+          }
+          await Promise.all(Object.keys(byItem).map(subItemId=>recalculateItem(subItemId,pool,allDatesForItem(subItemId,pool),token)));
         }
       }catch(err){
         setError("Failed to copy entries.");
@@ -2454,17 +2386,15 @@ function MainApp({currentUser,onLogout}) {
         const i=inserted[0];
         const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked};
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
-        pushUndo("addEntries",{ids:[newEntry.id]});
+        const token=Symbol("handleDrop-copy");
+        pushUndo("addEntries",{ids:[newEntry.id]},token);
         // The copy just carries the source's hours over verbatim - if that
         // lands it on a day its item is already scheduled on, recalculate
         // that item/day rather than leaving the source untouched.
         if(!entry.miscNote&&entry.subItemId){
-          bundlingRef.current=true;
-          try{
-            let pool=[...entries,newEntry];
-            pool=await unlockAllLocksInItem(entry.subItemId,pool);
-            await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
-          }finally{bundlingRef.current=false;}
+          let pool=[...entries,newEntry];
+          pool=await unlockAllLocksInItem(entry.subItemId,pool,token);
+          await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool),token);
         }
       }catch(err){
         setError("Failed to copy entry.");
@@ -2501,7 +2431,8 @@ function MainApp({currentUser,onLogout}) {
     const newHours=((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest)
       ?(Number(staff.find(s=>s.id===toStaffId)?.productiveHours)||8)
       :entry.hours;
-    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt,prevHours:prevState.hours});
+    const token=Symbol("handleDrop-move");
+    pushUndo("moveEntry",{id:entry.id,prevStaffId:prevState.staffId,prevDateStr:prevState.dateStr,prevSlot:prevState.slot,prevCreatedAt:prevState.createdAt,prevHours:prevState.hours},token);
     // Dropping it here makes it the newest arrival at this day/slot for
     // capacity-conflict purposes - an old entry dragged into a fresh
     // conflict shouldn't still "win" on its original creation date.
@@ -2517,12 +2448,9 @@ function MainApp({currentUser,onLogout}) {
       // recalculate that item at both its new and old day, same as any
       // other mutation. This is the fix for moves never triggering a recalc.
       if(entry.subItemId){
-        bundlingRef.current=true;
-        try{
-          let pool=entries.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:newHours}:en);
-          pool=await unlockAllLocksInItem(entry.subItemId,pool);
-          await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
-        }finally{bundlingRef.current=false;}
+        let pool=entries.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:newHours}:en);
+        pool=await unlockAllLocksInItem(entry.subItemId,pool,token);
+        await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool),token);
       }
     }catch(err){
       setError("Failed to move entry - change reverted.");
@@ -2675,9 +2603,10 @@ function MainApp({currentUser,onLogout}) {
   async function deleteEntriesByIds(ids){
     if(ids.length===0)return;
     const deletedEntries=ids.map(id=>entries.find(e=>e.id===id)).filter(Boolean);
+    const token=Symbol("deleteEntriesByIds");
     // Clear them immediately - don't make the user wait on the delete to
     // round-trip before the selection disappears.
-    pushUndo("deleteMultiple",{deletedEntries});
+    pushUndo("deleteMultiple",{deletedEntries},token);
     const idSet=new Set(ids);
     setEntries(prev=>prev.filter(e=>!idSet.has(e.id)));
     setSelectedEntries(new Set());
@@ -2694,9 +2623,7 @@ function MainApp({currentUser,onLogout}) {
         set.add(e.dateStr);
       });
       if(Object.keys(byItem).length>0){
-        bundlingRef.current=true;
-        try{await Promise.all(Object.entries(byItem).map(([subItemId,dates])=>recalculateItem(subItemId,pool,[...dates])));}
-        finally{bundlingRef.current=false;}
+        await Promise.all(Object.entries(byItem).map(([subItemId,dates])=>recalculateItem(subItemId,pool,[...dates],token)));
       }
     }catch(e){
       setError("Failed to delete entries - restored.");
