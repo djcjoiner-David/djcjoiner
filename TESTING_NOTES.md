@@ -205,13 +205,33 @@ applied. Re-check against current `src/App.jsx` before use.)*
     to the user.
 
 ### 2B. Agreed fix decisions
-1. **Zero-hours manual edit** (bug #3): route through the same delete path
-   `removeEntry` uses, instead of PATCHing `hours:0, hours_locked:true`.
-2. **Undo/redo engine** (bugs #1, #2, #7, #8, #9): scope bundling per
-   action (not a single shared boolean); fix ID continuity across steps in
-   the same bundle; re-run `recalculateItem` after a bundle finishes
-   restoring positions; batch on-screen updates within one bundle so
-   intermediate states don't visibly flicker.
+1. ✅ **FIXED. Zero-hours manual edit** (bug #3): route through the same
+   delete path `removeEntry` uses, instead of PATCHing
+   `hours:0, hours_locked:true`.
+2. ✅ **FIXED. Undo/redo engine** (bugs #1, #2, #7, #8, #9): `bundlingRef`
+   replaced with a per-action `Symbol()` token threaded through every
+   `pushUndo` call an action makes (directly or via `unlockStaleLocksAt`/
+   `unlockAllLocksInItem`/`recalculateItem`, which now take an optional
+   `token` + `silent` param) - a step only merges into the stack-top if that
+   entry carries the SAME token, so two separate actions can never merge
+   even if their async cascades overlap in time. `applyUndoStep`/
+   `applyRedoStep` were rewritten to take and return a `pool` (this action's
+   running view of the entries) instead of reading the component's own
+   stale `entries` closure, and `remapStepIds` fixes up any later step in
+   the same bundle that referenced an id a `deleteEntry`/`addEntries` step
+   just recreated under a new one. After a bundle (or single step) finishes
+   restoring positions, `resettleItemsAfterUndoRedo` silently re-runs
+   `unlockAllLocksInItem`+`recalculateItem` on every item it touched (same
+   as every forward mutation), instead of trusting the raw snapshots to
+   already be correct. `handleUndo`/`handleRedo` now share ALL their
+   per-type logic with `applyUndoStep`/`applyRedoStep` (previously
+   duplicated), and a bundle's steps no longer render to the screen one at
+   a time - one combined `setEntries` after the whole action settles.
+   Verified live via Playwright: a drag that makes the moved entry
+   self-delete + cascade a sibling's hours, then Undo/Redo, restores
+   everything exactly (including the id-swap case); two genuinely separate
+   actions with an artificially-overlapping in-flight network delay still
+   get two independent undo entries, not one merged click.
 3. **Cross-item lock conflict** (bug #4, and the modal trap in bug #5): NOT
    an automatic cross-item cascade/auto-unlock. Instead:
    (a) show the entry as Overcommitted *and* display the actual
