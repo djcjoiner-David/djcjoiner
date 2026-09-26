@@ -1977,6 +1977,15 @@ function MainApp({currentUser,onLogout}) {
         }
       } else {
         const prevEntry=entries.find(e=>e.id===data.id);
+        // A job entry manually set to zero (or negative) hours means "no
+        // work here" - remove it outright via the same path the Remove
+        // button uses, instead of patching it to a locked zero. A locked
+        // zero-hour entry is invisible to computeItemPlan (which skips
+        // locked entries entirely), so it would otherwise sit there
+        // forever, never cleaned up.
+        if(data.entryType!=="misc"&&Number(data.hours)<=0){
+          await removeEntry(data.id);
+        } else {
         // Moving an entry to a new day/slot makes it the newest arrival there
         // for capacity-conflict purposes - otherwise an old entry dragged into
         // a fresh conflict would still "win" on its original creation date,
@@ -2017,6 +2026,7 @@ function MainApp({currentUser,onLogout}) {
               await recalculateItem(prevEntry.subItemId,oldPool,[prevEntry.dateStr]);
             }
           }finally{bundlingRef.current=false;}
+        }
         }
       }
       setEntryModal(null);setTab("schedule");
