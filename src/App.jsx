@@ -732,7 +732,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp}) {
   // An entry the background correction has reduced to nothing (e.g. another
   // staff member now covers the whole day/budget) shouldn't be labelled
   // "over-run" or any other budget-math term - it has zero real hours left,
@@ -765,7 +765,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
       onDragEnd={editable?onDragEnd:undefined}
       onClick={editable?onClick:undefined}
       onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isCatchUp?"dashed":"solid"} ${isCatchUp?"#0891B2":job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {isMobile?(
         <>
@@ -773,6 +773,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
           <div style={{fontSize:11,fontWeight:500,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",lineHeight:1.25}}>
             {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
+          {isCatchUp&&<div style={{fontSize:10,fontWeight:700,color:"#0891B2",lineHeight:1.3,whiteSpace:"nowrap"}}>↺ Catch-up</div>}
           {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted{showShortfall?` · ${itemShortfall}h short`:""}</div>}
         </>
       ):(
@@ -781,6 +782,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
           <div style={{fontSize:10,fontWeight:400,color:conflict?"#EF4444":job.textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>
             {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
+          {isCatchUp&&<div style={{fontSize:9,fontWeight:700,color:"#0891B2",lineHeight:1.3,whiteSpace:"nowrap"}}>↺ Catch-up</div>}
           {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted{showShortfall?` · ${itemShortfall}h short`:""}</div>}
         </>
       )}
@@ -3007,7 +3009,7 @@ function MainApp({currentUser,onLogout}) {
                             return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
                           }
                           const meta=computeJobEntryMeta(e)||{};
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall}/>;
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp}/>;
                         }
                         return(
                           <td key={di}
