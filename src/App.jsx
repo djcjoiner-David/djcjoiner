@@ -2054,26 +2054,51 @@ function MainApp({currentUser,onLogout}) {
         return[id,staffOrderIds[newIdx]];
       }));
 
-      const prevStates=idsToMove.map(id=>{
-        const en=entries.find(x=>x.id===id);
-        return{id,prevStaffId:en.staffId,prevDateStr:en.dateStr,prevSlot:en.slot,prevCreatedAt:en.createdAt,prevHours:en.hours};
-      });
       // Moving these entries makes them the newest arrivals wherever they
       // land, for capacity-conflict purposes - an old entry dragged into a
       // fresh conflict shouldn't still "win" on its original creation date.
       const movedAt=new Date().toISOString();
+      // A group move must land on the item's own consistent slot row (see
+      // idToSlot above) - if that exact cell is already held by an
+      // unrelated entry, the newcomer doesn't get to bump it. The existing
+      // occupant is relocated to that day's OTHER slot instead (unlocked
+      // and demoted the same way any fresh cross-item edit demotes a
+      // sibling), so its own item settles around the new arrival. If the
+      // other slot is ALSO taken, there's nowhere to put either of them
+      // without a real collision - that one placement is dropped instead,
+      // and the shortfall it creates is picked up automatically below by
+      // extendItemIfShort scheduling an extra day further out.
+      const movingIds=new Set(idsToMove);
+      const intendedCells=new Map(idsToMove.map(id=>[`${idToStaff[id]}|${idToDate[id]}|${idToSlot[id]}`,id]));
+      const skippedIds=new Set();
+      const displacements=[]; // {blocker, newSlot}
+      idsToMove.forEach(id=>{
+        const newStaffId=idToStaff[id],newDate=idToDate[id],newSlot=idToSlot[id];
+        const blocker=entries.find(e=>e.staffId===newStaffId&&e.dateStr===newDate&&e.slot===newSlot&&!movingIds.has(e.id));
+        if(!blocker)return;
+        const otherSlot=newSlot===0?1:0;
+        const otherTakenByMove=intendedCells.has(`${newStaffId}|${newDate}|${otherSlot}`);
+        const otherBlocker=entries.find(e=>e.staffId===newStaffId&&e.dateStr===newDate&&e.slot===otherSlot&&!movingIds.has(e.id));
+        if(!otherTakenByMove&&!otherBlocker)displacements.push({blocker,newSlot:otherSlot});
+        else skippedIds.add(id);
+      });
+      const activeIds=idsToMove.filter(id=>!skippedIds.has(id));
+      if(activeIds.length===0){
+        setError("Couldn't move - every destination slot is already taken.");
+        return;
+      }
       // Same restoration as a single-entry drag (see handleDrop): if the one
       // entry being moved was capped by a same-day sibling at its old spot,
       // or was simply using its old staff member's whole day outright (no
       // sibling involved), and its new spot has no sibling, give it the new
       // staff member's whole day back instead of carrying over the old
-      // number. Only applied for a single selected entry - a genuine
+      // number. Only applied for a single surviving entry - a genuine
       // multi-entry group move can shift several mutually-dependent entries
       // together, where "was it capped" gets a lot less clear-cut, so those
       // keep their hours as-is like before.
       let newHoursById={};
-      if(idsToMove.length===1){
-        const id=idsToMove[0];
+      if(activeIds.length===1){
+        const id=activeIds[0];
         const en=entries.find(x=>x.id===id);
         const newStaffId=idToStaff[id],newDate=idToDate[id],newSlot=idToSlot[id];
         const oldSibling=entries.find(o=>o.id!==id&&o.staffId===en.staffId&&o.dateStr===en.dateStr&&o.slot!==en.slot);
@@ -2090,29 +2115,38 @@ function MainApp({currentUser,onLogout}) {
           newHoursById[id]=Number(staff.find(s=>s.id===newStaffId)?.productiveHours)||8;
         }
       }
-      const updates=idsToMove.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id],newHours:newHoursById[id]}));
+      const updates=activeIds.map(id=>({id,newDate:idToDate[id],newStaffId:idToStaff[id],newSlot:idToSlot[id],newHours:newHoursById[id]}));
+      const applyMoves=pool=>pool
+        .filter(e=>!skippedIds.has(e.id))
+        .map(x=>{
+          const u=updates.find(u=>u.id===x.id);
+          if(u)return{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt,...(u.newHours!==undefined?{hours:u.newHours}:{})};
+          const d=displacements.find(d=>d.blocker.id===x.id);
+          if(d)return{...x,slot:d.newSlot,hoursLocked:false,createdAt:movedAt};
+          return x;
+        });
       // Land the whole group immediately - don't make the user wait for every
       // PATCH to round-trip before the drop appears to take effect.
-      setEntries(prev=>prev.map(x=>{
-        const u=updates.find(u=>u.id===x.id);
-        return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt,...(u.newHours!==undefined?{hours:u.newHours}:{})}:x;
-      }));
+      setEntries(applyMoves);
       setSelectedEntries(new Set());
       setSelectionMode(false);
       setMoveMode(false);
       try{
-        await Promise.all(updates.map(({id,newDate,newStaffId,newSlot,newHours})=>
-          db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt,...(newHours!==undefined?{hours:newHours}:{})},`?id=eq.${id}`)
-        ));
+        await Promise.all([
+          ...updates.map(({id,newDate,newStaffId,newSlot,newHours})=>
+            db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt,...(newHours!==undefined?{hours:newHours}:{})},`?id=eq.${id}`)
+          ),
+          ...displacements.map(({blocker,newSlot})=>
+            db("PATCH","entries",{slot:newSlot,hours_locked:false,created_at:movedAt},`?id=eq.${blocker.id}`)
+          ),
+          ...[...skippedIds].map(id=>db("DELETE","entries",null,`?id=eq.${id}`)),
+        ]);
         // A move can land one or more of these entries on a day their item is
         // shared with another staff member - recalculate every affected item,
         // at both its old and new day, the same as any other mutation.
-        let pool=_u.map(x=>{
-          const u=updates.find(u=>u.id===x.id);
-          return u?{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt,...(u.newHours!==undefined?{hours:u.newHours}:{})}:x;
-        });
+        let pool=applyMoves(_u);
         const byItem={},byItemArrivals={};
-        idsToMove.forEach(id=>{
+        activeIds.forEach(id=>{
           const before=_u.find(x=>x.id===id);
           const u=updates.find(u=>u.id===id);
           if(!before?.subItemId||!u)return;
@@ -2120,6 +2154,15 @@ function MainApp({currentUser,onLogout}) {
           set.add(before.dateStr);set.add(u.newDate);
           const arrivals=byItemArrivals[before.subItemId]=byItemArrivals[before.subItemId]||[];
           arrivals.push({id,dateStr:u.newDate});
+        });
+        // A displaced blocker's own item needs resettling around its new
+        // slot too, exactly like any other cross-item edit.
+        displacements.forEach(({blocker})=>{
+          if(!blocker.subItemId)return;
+          const set=byItem[blocker.subItemId]=byItem[blocker.subItemId]||new Set();
+          set.add(blocker.dateStr);
+          const arrivals=byItemArrivals[blocker.subItemId]=byItemArrivals[blocker.subItemId]||[];
+          arrivals.push({id:blocker.id,dateStr:blocker.dateStr});
         });
         if(Object.keys(byItem).length>0){
           // Typically only a handful of distinct items are touched by one
@@ -2134,20 +2177,19 @@ function MainApp({currentUser,onLogout}) {
             let p=await recalculateItem(subItemId,settledPool,allDatesForItem(subItemId,settledPool));
             // Moving staff onto an item's existing days can leave it short
             // of its total budget if the new staff have less combined daily
-            // capacity than who was there before - extend the schedule
+            // capacity than who was there before, or a destination
+            // conflict dropped a placement outright - extend the schedule
             // forward to cover it rather than silently dropping the rest.
             p=await extendItemIfShort(subItemId,p);
             return {subItemId,pool:p};
           }));
           pool=mergeItemPools(settledPool,branches);
         }
+        if(skippedIds.size>0)setError(`${skippedIds.size} placement${skippedIds.size===1?"":"s"} couldn't land - both slots were already taken. Extending the schedule to cover it.`);
         pushUndoSnapshot(_u,pool);
       }catch(err){
         setError("Failed to move entries - reverted.");
-        setEntries(prev=>prev.map(x=>{
-          const ps=prevStates.find(p=>p.id===x.id);
-          return ps?{...x,staffId:ps.prevStaffId,dateStr:ps.prevDateStr,slot:ps.prevSlot,createdAt:ps.prevCreatedAt,hours:ps.prevHours}:x;
-        }));
+        setEntries(()=>_u);
       }
     }catch(err){setError("Failed to move entries.");}
   }
