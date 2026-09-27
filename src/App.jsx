@@ -1286,6 +1286,11 @@ function MainApp({currentUser,onLogout}) {
   // their original created_at explicitly set), and cells in both whose
   // fields differ are patched onto whichever row currently occupies that
   // cell.
+  // Returns {ok, pool}: ok is false if any of the sync calls failed, in
+  // which case pool is just `current` unchanged. Callers must only pop/push
+  // the undo/redo stacks when ok is true - popping first and hoping the
+  // sync works is what let a failed (or overlapping) click silently consume
+  // the wrong stack entry.
   async function applyEntriesSnapshot(current, target){
     const byCellCur=new Map(current.map(e=>[cellKey(e),e]));
     const byCellTgt=new Map(target.map(e=>[cellKey(e),e]));
@@ -1308,29 +1313,43 @@ function MainApp({currentUser,onLogout}) {
       const patchedIds=new Set(toPatch.map(({cur})=>cur.id));
       const untouched=current.filter(e=>byCellTgt.has(cellKey(e))&&!patchedIds.has(e.id));
       const patched=toPatch.map(({cur,target})=>({...target,id:cur.id}));
-      return [...untouched,...patched,...created];
+      return {ok:true,pool:[...untouched,...patched,...created]};
     }catch(err){
       setError("Undo/redo failed - please refresh.");
-      return current;
+      return {ok:false,pool:current};
     }
   }
 
+  // Guards against a second Undo/Redo click landing while the first is
+  // still mid-flight (network round trip) - without this, the second click
+  // reads `entries`/the stacks before the first click's own updates have
+  // committed, and can act on the wrong stack entry entirely.
+  const undoRedoBusyRef=useRef(false);
+
   async function handleUndo() {
-    if(undoStack.length===0) return;
+    if(undoStack.length===0||undoRedoBusyRef.current) return;
+    undoRedoBusyRef.current=true;
     const {before,after}=undoStack[undoStack.length-1];
-    setUndoStack(prev=>prev.slice(0,-1));
-    const pool=await applyEntriesSnapshot(entries,before);
-    setRedoStack(prev=>[...prev.slice(-19),{before,after}]);
-    setEntries(()=>pool);
+    const {ok,pool}=await applyEntriesSnapshot(entries,before);
+    if(ok){
+      setUndoStack(prev=>prev.slice(0,-1));
+      setRedoStack(prev=>[...prev.slice(-19),{before,after}]);
+      setEntries(()=>pool);
+    }
+    undoRedoBusyRef.current=false;
   }
 
   async function handleRedo() {
-    if(redoStack.length===0) return;
+    if(redoStack.length===0||undoRedoBusyRef.current) return;
+    undoRedoBusyRef.current=true;
     const {before,after}=redoStack[redoStack.length-1];
-    setRedoStack(prev=>prev.slice(0,-1));
-    const pool=await applyEntriesSnapshot(entries,after);
-    setUndoStack(prev=>[...prev.slice(-19),{before,after}]);
-    setEntries(()=>pool);
+    const {ok,pool}=await applyEntriesSnapshot(entries,after);
+    if(ok){
+      setRedoStack(prev=>prev.slice(0,-1));
+      setUndoStack(prev=>[...prev.slice(-19),{before,after}]);
+      setEntries(()=>pool);
+    }
+    undoRedoBusyRef.current=false;
   }
   const [copyMode,setCopyMode]=useState(false); // tap-to-copy, arms via Select toolbar's Copy button
   const [selectedEntries,setSelectedEntries]=useState(new Set()); // for multi-select
