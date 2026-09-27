@@ -1562,6 +1562,31 @@ function MainApp({currentUser,onLogout}) {
     await Promise.all(competitors.map(c=>db("PATCH","entries",{hours_locked:false},`?id=eq.${c.id}`)));
     return pool.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e);
   }
+  // unlockStaleLocksAt only ever clears a lock WITHIN the same joinery item -
+  // it never touches the other slot's entry when that's a different job/item
+  // entirely. A manual edit is the newest deliberate word on how that
+  // person's day is split, so whatever's sitting locked in the OTHER slot
+  // that same day is stale the same way a same-item sibling would be:
+  // unlock it and let its own item's recalculateItem fold it back into that
+  // item's normal budget split, anchored by this edit instead.
+  // Unlocking alone isn't enough: the day/slot capacity math (wasFirst) picks
+  // a winner by createdAt, and the sibling being unlocked here might still be
+  // the chronologically-earlier entry, letting it claim the whole day and
+  // ignore the value just typed into the OTHER slot. So this also bumps the
+  // sibling's createdAt to now - the same "just arrived" treatment a drag/
+  // move gives an entry landing on a new day (see handleDrop) - so it's
+  // always the one that yields to this edit's fresh, deliberate number,
+  // never the other way around.
+  async function unlockSiblingSlot(pool,staffId,dateStr,slot,excludeId){
+    const sibling=pool.find(e=>e.staffId===staffId&&e.dateStr===dateStr&&e.slot===slot&&e.id!==excludeId);
+    if(!sibling||!sibling.hoursLocked)return pool;
+    const now=new Date().toISOString();
+    setEntries(prev=>prev.map(e=>e.id===sibling.id?{...e,hoursLocked:false,createdAt:now}:e));
+    await db("PATCH","entries",{hours_locked:false,created_at:now},`?id=eq.${sibling.id}`);
+    let next=pool.map(e=>e.id===sibling.id?{...e,hoursLocked:false,createdAt:now}:e);
+    if(sibling.subItemId)next=await recalculateItem(sibling.subItemId,next,[dateStr]);
+    return next;
+  }
   // A lock only ever protects an entry from a same-day-same-item sibling -
   // it's never meant to survive the item itself being reshuffled. Whenever a
   // move or copy touches ANY entry in an item, every lock in that whole item
@@ -1764,6 +1789,10 @@ function MainApp({currentUser,onLogout}) {
             pool=await recalculateItem(data.subItemId,pool,[created.dateStr]);
           }
         }
+        if(data.entryType!=="misc"&&!data.autoFill&&newMapped.length===1){
+          const created=newMapped[0];
+          pool=await unlockSiblingSlot(pool,created.staffId,created.dateStr,created.slot===0?1:0,created.id);
+        }
         pushUndoSnapshot(_u,pool);
       } else {
         const prevEntry=entries.find(e=>e.id===data.id);
@@ -1815,6 +1844,7 @@ function MainApp({currentUser,onLogout}) {
             pool=[...afterOld,movedEntry];
           }
         }
+        if(hoursLocked)pool=await unlockSiblingSlot(pool,data.staffId,data.dateStr,data.slot===0?1:0,data.id);
         pushUndoSnapshot(_u,pool);
         }
       }
