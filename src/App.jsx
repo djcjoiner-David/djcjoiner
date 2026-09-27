@@ -2258,17 +2258,36 @@ function MainApp({currentUser,onLogout}) {
       // duplication, not a fresh deliberate choice of hours, so it always
       // starts open to the normal budget math (which is exactly what lets
       // recalculateItem settle it and the source into a real split below).
-      const rows=toInsert.map(({en,newDate,newSlot,newStaffId})=>({
+      // EXCEPT: a copy that would push its item over a budget it's already
+      // fully used lands as Catch-up Hours instead of being silently zeroed
+      // out and deleted by the ambient pass - the exact scenario Catch-up
+      // Hours was built for (see the ESE modal's own version of this
+      // check). Tracked running per item, since copying several entries
+      // onto the same item in one action can each push it further over.
+      const itemUsedSoFar={};
+      const isCatchUpFlags=toInsert.map(({en})=>{
+        if(en.miscNote||!en.subItemId)return false;
+        const si=subItems.find(s=>s.id===en.subItemId);
+        if(!si)return false;
+        if(itemUsedSoFar[en.subItemId]===undefined){
+          itemUsedSoFar[en.subItemId]=_u.filter(e=>e.subItemId===en.subItemId&&!e.miscNote&&!e.isCatchUp).reduce((s,e)=>s+(Number(e.hours)||0),0);
+        }
+        const hrs=Number(en.hours)||0;
+        if(itemUsedSoFar[en.subItemId]+hrs>(Number(si.totalHours)||0)+0.05)return true;
+        itemUsedSoFar[en.subItemId]+=hrs;
+        return false;
+      });
+      const rows=toInsert.map(({en,newDate,newSlot,newStaffId},idx)=>({
         staff_id:newStaffId,job_id:en.jobId||null,sub_item_id:en.subItemId||null,
         date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null,
-        hours_locked:false
+        hours_locked:false,is_catch_up:isCatchUpFlags[idx]
       }));
       // Show the pasted copies immediately with temporary ids, swapped for the
       // real ones once the server confirms - removed again if the save fails.
       const tempEntries=toInsert.map(({en,newDate,newSlot,newStaffId},i)=>({
         id:`temp_copy_${Date.now()}_${i}`,staffId:newStaffId,jobId:en.jobId||null,subItemId:en.subItemId||null,
         dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString(),
-        hoursLocked:false
+        hoursLocked:false,isCatchUp:isCatchUpFlags[i]
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
@@ -2290,7 +2309,7 @@ function MainApp({currentUser,onLogout}) {
         const byItem={},byItemArrivals={};
         toInsert.forEach(({en,newDate},idx)=>{
           const newEntry=newEntries[idx];
-          if(en.miscNote||!en.subItemId||!newEntry)return;
+          if(en.miscNote||!en.subItemId||!newEntry||isCatchUpFlags[idx])return;
           const set=byItem[en.subItemId]=byItem[en.subItemId]||new Set();
           set.add(newDate);
           const arrivals=byItemArrivals[en.subItemId]=byItemArrivals[en.subItemId]||[];
@@ -2309,6 +2328,14 @@ function MainApp({currentUser,onLogout}) {
           pool=mergeItemPools(settledPool,branches);
         }
         pushUndoSnapshot(_u,pool);
+        // A single copy that landed as Catch-up Hours needs a look - open
+        // its own entry straight into the ESE modal so the number can be
+        // checked/adjusted right away, rather than leaving it to be found
+        // later. A multi-entry group copy that mixes in a catch-up result
+        // is left as-is for now (no auto-open) - see TESTING_NOTES.md.
+        if(toInsert.length===1&&isCatchUpFlags[0]&&newEntries[0]){
+          openEditEntry(newEntries[0]);
+        }
       }catch(err){
         setError("Failed to copy entries.");
         setEntries(prev=>prev.filter(e=>!tempIds.includes(e.id)));
@@ -2342,27 +2369,40 @@ function MainApp({currentUser,onLogout}) {
         return;
       }
       // Same as performGroupCopy: a copy never inherits the source's lock,
-      // so it's always open to the normal budget math.
+      // so it's always open to the normal budget math - unless it would
+      // push its item over a budget it's already fully used, in which case
+      // it lands as Catch-up Hours instead (see performGroupCopy).
       const _u=snapshotEntries(entries);
+      let entryIsCatchUp=false;
+      if(!entry.miscNote&&entry.subItemId){
+        const si=subItems.find(s=>s.id===entry.subItemId);
+        if(si){
+          const used=_u.filter(e=>e.subItemId===entry.subItemId&&!e.miscNote&&!e.isCatchUp).reduce((s,e)=>s+(Number(e.hours)||0),0);
+          if(used+(Number(entry.hours)||0)>(Number(si.totalHours)||0)+0.05)entryIsCatchUp=true;
+        }
+      }
       const tempId=`temp_copy_${Date.now()}`;
-      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString(),hoursLocked:false};
+      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString(),hoursLocked:false,isCatchUp:entryIsCatchUp};
       setEntries(prev=>[...prev,tempEntry]);
       dragEntry.current=null;
       try{
-        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:false}]);
+        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:false,is_catch_up:entryIsCatchUp}]);
         const i=inserted[0];
         const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked,isCatchUp:!!i.is_catch_up};
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
         // The copy just carries the source's hours over verbatim - if that
         // lands it on a day its item is already scheduled on, recalculate
-        // that item/day rather than leaving the source untouched.
+        // that item/day rather than leaving the source untouched. A
+        // Catch-up copy skips this entirely - it's deliberately outside
+        // the item's budget math.
         let pool=[..._u,newEntry];
-        if(!entry.miscNote&&entry.subItemId){
+        if(!entry.miscNote&&entry.subItemId&&!entryIsCatchUp){
           pool=await unlockAllLocksInItem(entry.subItemId,pool);
           pool=await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
           pool=await extendItemIfShort(entry.subItemId,pool);
         }
         pushUndoSnapshot(_u,pool);
+        if(entryIsCatchUp)openEditEntry(newEntry);
       }catch(err){
         setError("Failed to copy entry.");
         setEntries(prev=>prev.filter(en=>en.id!==tempId));
