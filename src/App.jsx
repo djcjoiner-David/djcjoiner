@@ -1565,21 +1565,24 @@ function MainApp({currentUser,onLogout}) {
   // unlockStaleLocksAt only ever clears a lock WITHIN the same joinery item -
   // it never touches the other slot's entry when that's a different job/item
   // entirely. A manual edit is the newest deliberate word on how that
-  // person's day is split, so whatever's sitting locked in the OTHER slot
-  // that same day is stale the same way a same-item sibling would be:
-  // unlock it and let its own item's recalculateItem fold it back into that
+  // person's day is split, so whatever's sitting in the OTHER slot that same
+  // day is stale the same way a same-item sibling would be: unlock it (if
+  // locked) and let its own item's recalculateItem fold it back into that
   // item's normal budget split, anchored by this edit instead.
-  // Unlocking alone isn't enough: the day/slot capacity math (wasFirst) picks
-  // a winner by createdAt, and the sibling being unlocked here might still be
-  // the chronologically-earlier entry, letting it claim the whole day and
-  // ignore the value just typed into the OTHER slot. So this also bumps the
-  // sibling's createdAt to now - the same "just arrived" treatment a drag/
-  // move gives an entry landing on a new day (see handleDrop) - so it's
-  // always the one that yields to this edit's fresh, deliberate number,
-  // never the other way around.
+  // This always bumps the sibling's createdAt to now, whether or not it was
+  // locked - the day/slot capacity math (wasScheduledFirst) picks a winner
+  // by createdAt, and an UNLOCKED sibling that simply happened to be created
+  // earlier (e.g. an old auto-filled entry that was never touched again)
+  // wins that tie-break just as absolutely as a locked one, permanently
+  // ignoring whatever gets typed into the other slot from then on - the
+  // TJ Pantry/Harries case, where Harries (created first) kept claiming the
+  // whole day no matter what Pantry was corrected to. Bumping createdAt is
+  // the same "just arrived" treatment a drag/move gives an entry landing on
+  // a new day (see handleDrop), so the sibling is always the one that yields
+  // to this edit's fresh, deliberate number, never the other way around.
   async function unlockSiblingSlot(pool,staffId,dateStr,slot,excludeId){
     const sibling=pool.find(e=>e.staffId===staffId&&e.dateStr===dateStr&&e.slot===slot&&e.id!==excludeId);
-    if(!sibling||!sibling.hoursLocked)return pool;
+    if(!sibling)return pool;
     const now=new Date().toISOString();
     setEntries(prev=>prev.map(e=>e.id===sibling.id?{...e,hoursLocked:false,createdAt:now}:e));
     await db("PATCH","entries",{hours_locked:false,created_at:now},`?id=eq.${sibling.id}`);
