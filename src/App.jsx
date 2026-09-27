@@ -2443,7 +2443,15 @@ function MainApp({currentUser,onLogout}) {
     // manually-set hours silently forced back down by this pass moments
     // after being corrected by hand, making the correction impossible to
     // ever make stick.
-    return afterSpecial.map(e=>(specialHours[e.id]!==undefined||e.hoursLocked)?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))*2)/2});
+    // A Misc entry needs the exact same protection, but can never carry
+    // hoursLocked at all (see saveEntry) - it's never tracked against an
+    // item's hour budget in the first place, so this pass has no business
+    // deriving its hours from one. Without this, ANY Misc entry that loses
+    // the same-day tie-break to its sibling got silently reclamped back down
+    // every time entries changed, including the instant it was saved -
+    // making it look like the Hours field flatly refused to accept a new
+    // value, when really it kept being overwritten a moment later.
+    return afterSpecial.map(e=>(specialHours[e.id]!==undefined||e.hoursLocked||e.miscNote||!e.subItemId)?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))*2)/2});
   }
   // Correcting one item's finishing entry can change how much capacity a
   // DIFFERENT item's entry has left that same day (when two items share a
