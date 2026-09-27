@@ -2061,13 +2061,19 @@ function MainApp({currentUser,onLogout}) {
       // A group move must land on the item's own consistent slot row (see
       // idToSlot above) - if that exact cell is already held by an
       // unrelated entry, the newcomer doesn't get to bump it. The existing
-      // occupant is relocated to that day's OTHER slot instead (unlocked
-      // and demoted the same way any fresh cross-item edit demotes a
-      // sibling), so its own item settles around the new arrival. If the
-      // other slot is ALSO taken, there's nowhere to put either of them
-      // without a real collision - that one placement is dropped instead,
-      // and the shortfall it creates is picked up automatically below by
+      // occupant is relocated to that day's OTHER slot instead, so its own
+      // item settles around the new arrival. If the other slot is ALSO
+      // taken, there's nowhere to put either of them without a real
+      // collision - that one placement is dropped instead, and the
+      // shortfall it creates is picked up automatically below by
       // extendItemIfShort scheduling an extra day further out.
+      // Unlike unlockSiblingSlot (a fresh EDIT deliberately taking priority
+      // right now), the displaced entry here was never touched - only its
+      // slot needs to change to make room, so its scheduling priority stays
+      // exactly as it was (no created_at bump, no forced unlock). The
+      // MOVING entry already gets `movedAt` as its own created_at below,
+      // which is what correctly makes IT the newest arrival that has to
+      // yield to whatever was already there - not the other way around.
       const movingIds=new Set(idsToMove);
       const intendedCells=new Map(idsToMove.map(id=>[`${idToStaff[id]}|${idToDate[id]}|${idToSlot[id]}`,id]));
       const skippedIds=new Set();
@@ -2122,7 +2128,7 @@ function MainApp({currentUser,onLogout}) {
           const u=updates.find(u=>u.id===x.id);
           if(u)return{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt,...(u.newHours!==undefined?{hours:u.newHours}:{})};
           const d=displacements.find(d=>d.blocker.id===x.id);
-          if(d)return{...x,slot:d.newSlot,hoursLocked:false,createdAt:movedAt};
+          if(d)return{...x,slot:d.newSlot};
           return x;
         });
       // Land the whole group immediately - don't make the user wait for every
@@ -2137,7 +2143,7 @@ function MainApp({currentUser,onLogout}) {
             db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt,...(newHours!==undefined?{hours:newHours}:{})},`?id=eq.${id}`)
           ),
           ...displacements.map(({blocker,newSlot})=>
-            db("PATCH","entries",{slot:newSlot,hours_locked:false,created_at:movedAt},`?id=eq.${blocker.id}`)
+            db("PATCH","entries",{slot:newSlot},`?id=eq.${blocker.id}`)
           ),
           ...[...skippedIds].map(id=>db("DELETE","entries",null,`?id=eq.${id}`)),
         ]);
