@@ -325,6 +325,19 @@ look rather than being folded into any of the four above.
    plain per-cell diff for the common case, falling back to id-based
    matching only for the cells that are actually doubled up).
 
+2. **Multi-entry group copy doesn't auto-open the ESE modal for a Catch-up
+   result.** `performGroupCopy` and the single-entry ctrl+drag copy path
+   now both correctly land a copy that would push its item over an
+   already-fully-used budget as Catch-up Hours (`is_catch_up:true`)
+   instead of silently zeroing it out and deleting it. For a single-entry
+   copy, the ESE modal auto-opens on the new Catch-up entry so the number
+   can be checked right away. A multi-entry GROUP copy (several selected
+   entries pasted at once) that mixes in one or more Catch-up results
+   currently does NOT auto-open anything for them - they're correctly
+   tagged and excluded from budget math, just left to be found and
+   reviewed later like any other entry. Low priority: the reported
+   scenario was always a single-entry copy.
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
