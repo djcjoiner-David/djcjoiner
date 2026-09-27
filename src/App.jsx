@@ -293,8 +293,8 @@ function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); re
 
 // Shared between undo and redo: the row shape the API expects for an insert,
 // and the entry shape the app uses once that insert comes back with an id.
-function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked}; }
-function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at,hoursLocked:!!inserted.hours_locked}; }
+function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked,is_catch_up:!!e.isCatchUp}; }
+function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at,hoursLocked:!!inserted.hours_locked,isCatchUp:!!inserted.is_catch_up}; }
 
 // Lays out a total across consecutive weekdays at a daily rate. When
 // staffId/slot/entries are supplied, it also checks what that person
@@ -1417,7 +1417,7 @@ function MainApp({currentUser,onLogout}) {
       }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color,completed:!!j.completed})));
       setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
-      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked})));
+      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up})));
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -1493,7 +1493,11 @@ function MainApp({currentUser,onLogout}) {
   function computeItemPlan(subItemId,pool){
     const si=subItems.find(s=>s.id===subItemId);
     if(!si)return{plan:{},remaining:0};
-    const itemEntries=pool.filter(e=>e.subItemId===subItemId&&!e.miscNote);
+    // Catch-up Hours entries (isCatchUp) are logged against this item for
+    // visibility but were explicitly agreed NOT to count against its
+    // budget - the item's entire hour total is already accounted for
+    // elsewhere, so this walk must never see them at all.
+    const itemEntries=pool.filter(e=>e.subItemId===subItemId&&!e.miscNote&&!e.isCatchUp);
     // A locked entry commits its hours out of the item's total budget
     // regardless of WHERE it falls in the date order - reserve every locked
     // entry's share up front, across the whole item, before splitting
@@ -1761,7 +1765,8 @@ function MainApp({currentUser,onLogout}) {
           // subItemId, so recalculateItem/computeItemPlan never see it
           // regardless of this flag). A Misc entry manually typed in
           // (autoFill off) needs the exact same protection a job entry gets.
-          hours_locked:!data.autoFill
+          hours_locked:!data.autoFill,
+          is_catch_up:!!data.isCatchUp
         }));
         if(conflicts.length>0){
           setSaving(false);
@@ -1770,7 +1775,7 @@ function MainApp({currentUser,onLogout}) {
             onConfirm:async()=>{
               setSaving(true);
               const inserted=await db("POST","entries",buildRows(valid));
-              const confirmMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked}));
+              const confirmMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up}));
               setEntries(prev=>[...prev,...confirmMapped]);
               pushUndoSnapshot(_u,[..._u,...confirmMapped]);
               setConflictAlert(null);setEntryModal(null);setTab("schedule");setSaving(false);
@@ -1780,7 +1785,7 @@ function MainApp({currentUser,onLogout}) {
           return;
         }
         const inserted=await db("POST","entries",buildRows(valid));
-        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked}));
+        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up}));
         setEntries(prev=>[...prev,...newMapped]);
         let pool=[..._u,...newMapped];
         if(data.entryType!=="misc"&&data.subItemId&&newMapped.length>0){
@@ -2272,7 +2277,7 @@ function MainApp({currentUser,onLogout}) {
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
-        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked}));
+        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked,isCatchUp:!!i.is_catch_up}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         // Each copy carries its own source's hours over verbatim - for any
         // that landed on a day its item is already scheduled on, recalculate
@@ -2343,7 +2348,7 @@ function MainApp({currentUser,onLogout}) {
       try{
         const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:false}]);
         const i=inserted[0];
-        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked};
+        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked,isCatchUp:!!i.is_catch_up};
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
         // The copy just carries the source's hours over verbatim - if that
         // lands it on a day its item is already scheduled on, recalculate
@@ -2454,7 +2459,11 @@ function MainApp({currentUser,onLogout}) {
   function oneCorrectionPass(working){
     const bySubItem={};
     working.forEach(e=>{
-      if(e.miscNote||!e.subItemId)return;
+      // Catch-up Hours entries never enter the item-budget math (see
+      // computeItemPlan) - excluded here too, so the ambient pass can't
+      // assign one a "special" completing/under-cap role derived from a
+      // budget it was deliberately never counted against.
+      if(e.miscNote||!e.subItemId||e.isCatchUp)return;
       (bySubItem[e.subItemId]=bySubItem[e.subItemId]||[]).push(e);
     });
     // Built once per pass instead of every effectiveEntryHours/
@@ -2892,10 +2901,14 @@ function MainApp({currentUser,onLogout}) {
                         // so both the entry's own block AND a companion empty slot (to flag
                         // leftover capacity once a job wraps up early) can use it.
                         function computeJobEntryMeta(e){
-                          if(!e||e.miscNote||!e.subItemId)return null;
+                          // A Catch-up Hours entry was deliberately scheduled outside this
+                          // item's budget tracking (see computeItemPlan) - it never plays
+                          // the completing/under-cap/shortfall role itself, and its hours
+                          // never count toward another entry's version of that math either.
+                          if(!e||e.miscNote||!e.subItemId||e.isCatchUp)return null;
                           const si=subItems.find(s=>s.id===e.subItemId);
                           if(!si)return null;
-                          const siEntries=entries.filter(x=>x.subItemId===si.id).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+                          const siEntries=entries.filter(x=>x.subItemId===si.id&&!x.isCatchUp).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
                           const myIndex=siEntries.findIndex(x=>x.id===e.id);
                           // Walk the sub-item's entries in date order and find the one that first
                           // reaches (or passes) the total budget - that's the "completing" entry.
@@ -3103,7 +3116,10 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
   return (
     <>
       {jobs.map(job=>{
-        const jobEntries=entries.filter(e=>e.jobId===job.id&&!e.miscNote);
+        // Catch-up Hours entries are logged against an item for visibility
+        // in the entry modal, but were explicitly agreed to stay invisible
+        // to every item/job-level hour total, including this summary.
+        const jobEntries=entries.filter(e=>e.jobId===job.id&&!e.miscNote&&!e.isCatchUp);
         const jobSubs=subItems.filter(s=>s.jobId===job.id).sort((a,b)=>{
           const aS=a.name.trim().endsWith(" S")?0:a.name.trim().endsWith(" W")?1:2;
           const bS=b.name.trim().endsWith(" S")?0:b.name.trim().endsWith(" W")?1:2;
@@ -3192,6 +3208,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   });
   const [autoFill,setAutoFill]=useState(data.autoFill!==false);
   const [staggerConfirm,setStaggerConfirm]=useState(null); // {message,combined,staffId}
+  const [catchUpPrompt,setCatchUpPrompt]=useState(null); // {combined,staffId}
 
   function set(k,v){setForm(f=>({...f,[k]:v}));}
   const jobSubs=subItems.filter(s=>s.jobId===form.jobId);
@@ -3199,6 +3216,14 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   const productiveHours=selectedStaff?.productiveHours||8;
   const selectedSub=jobSubs.find(s=>s.id===form.subItemId);
   const totalHours=form.totalHours||selectedSub?.totalHours||0;
+  // Raw stored hours already scheduled against this item, same definition
+  // computeItemPlan uses (excluding this entry itself if editing, and
+  // excluding Catch-up Hours entries - they were deliberately agreed to
+  // sit outside this budget entirely). Used both to warn before creating a
+  // NEW entry that would push the item over budget, and to show what's
+  // already logged as catch-up alongside it.
+  const itemBudgetUsed=form.subItemId?entries.filter(e=>e.subItemId===form.subItemId&&!e.miscNote&&!e.isCatchUp&&e.id!==form.id).reduce((s,e)=>s+(Number(e.hours)||0),0):0;
+  const itemCatchUpLogged=form.subItemId?entries.filter(e=>e.subItemId===form.subItemId&&e.isCatchUp).reduce((s,e)=>s+(Number(e.hours)||0),0):0;
 
   function handleJobChange(jobId){const subs=subItems.filter(s=>s.jobId===jobId);const first=subs[0];setForm(f=>({...f,jobId,subItemId:first?.id||"",totalHours:first?.totalHours||0}));}
   function handleSubChange(subItemId){const sub=jobSubs.find(s=>s.id===subItemId);setForm(f=>({...f,subItemId,totalHours:sub?.totalHours||f.totalHours}));}
@@ -3289,6 +3314,18 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid,slot:form.slot});
         }
       });
+      // A brand-new, manually-typed job entry that would push this item
+      // past its total budget has nowhere to go under the normal budget
+      // system - offer Catch-up Hours (logged against the item, but never
+      // counted in its budget) instead of silently letting recalculateItem
+      // zero it back out moments after save.
+      if(form.mode==="new"&&form.entryType!=="misc"&&form.subItemId&&!autoFill&&!form.isCatchUp){
+        const newHoursTotal=combined.reduce((s,c)=>s+(Number(c.hours)||0),0);
+        if(itemBudgetUsed+newHoursTotal>totalHours+0.05){
+          setCatchUpPrompt({combined,staffId:staffToSchedule[0]});
+          return;
+        }
+      }
       onSave({...form,staffId:staffToSchedule[0],autoFill},combined);
     }
   }
@@ -3368,6 +3405,11 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                   {jobSubs.map(s=><option key={s.id} value={s.id}>{s.name}{s.totalHours?` (${s.totalHours}h budget)`:""}</option>)}
                   <option value="">General / no item</option>
                 </Sel>
+              )}
+              {form.subItemId&&itemCatchUpLogged>0&&(
+                <div style={{fontSize:11,color:"#64748B",marginTop:4}}>
+                  + {itemCatchUpLogged}h Catch-up Hours logged for this item (not counted in its {totalHours}h budget)
+                </div>
               )}
               {form.mode==="new"&&(
                 <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155",marginTop:8}}>
@@ -3490,6 +3532,9 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     {staggerConfirm&&<ConfirmModal title="⚠ Schedule Confirmation" message={staggerConfirm.message} confirmLabel="Schedule Anyway" cancelLabel="Go Back"
       onConfirm={()=>{onSave({...form,staffId:staggerConfirm.staffId,autoFill},staggerConfirm.combined);setStaggerConfirm(null);}}
       onCancel={()=>setStaggerConfirm(null)}/>}
+    {catchUpPrompt&&<ConfirmModal title="⚠ All hours allocated" message={`All ${totalHours}h for "${selectedSub?.name}" ${totalHours===1?"is":"are"} already scheduled. Add ${catchUpPrompt.combined.reduce((s,c)=>s+(Number(c.hours)||0),0)}h as Catch-up Hours instead? They'll be logged against this item but won't count toward its ${totalHours}h budget.`} confirmLabel="Add Catch-up Hours" cancelLabel="Cancel"
+      onConfirm={()=>{onSave({...form,staffId:catchUpPrompt.staffId,autoFill,isCatchUp:true},catchUpPrompt.combined);setCatchUpPrompt(null);}}
+      onCancel={()=>setCatchUpPrompt(null)}/>}
     </>
   );
 }
