@@ -1844,7 +1844,10 @@ function MainApp({currentUser,onLogout}) {
             pool=[...afterOld,movedEntry];
           }
         }
-        if(hoursLocked)pool=await unlockSiblingSlot(pool,data.staffId,data.dateStr,data.slot===0?1:0,data.id);
+        // A Misc entry never carries hoursLocked (see above), but it's just
+        // as deliberate a manual edit as a locked job entry - the sibling
+        // slot's own item should unlock and settle around it too.
+        pool=await unlockSiblingSlot(pool,data.staffId,data.dateStr,data.slot===0?1:0,data.id);
         pushUndoSnapshot(_u,pool);
         }
       }
@@ -3142,16 +3145,18 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   const sameDayStaffId=form.staffIds[0]||form.staffId;
   const otherSlotEntry=entries.find(e=>e.staffId===sameDayStaffId&&e.dateStr===form.dateStr&&e.slot===(form.slot===0?1:0)&&e.id!==form.id);
   const mineIfEditing=form.mode==="edit"?entries.find(e=>e.id===form.id):null;
-  // Editing an already-LOCKED entry is a deliberate manual correction, not a
+  // Editing an EXISTING entry (locked or not - a Misc entry can never be
+  // locked at all, see saveEntry) is a deliberate manual correction, not a
   // fresh scheduling choice - it may be exactly the fix for a cross-item
   // conflict (a different job filled the sibling slot after this one was
-  // locked, leaving it Overcommitted with no automatic repair path - see
+  // saved, leaving it Overcommitted with no automatic repair path - see
   // TESTING_NOTES.md, bug 2A #4/#5). Capping it to whatever the sibling
   // CURRENTLY claims would make it impossible to type the corrected value,
-  // since the sibling is likely getting its own separate correcting edit
-  // right after this one. A brand-new or still-unlocked entry keeps the
-  // normal cap, so it can't accidentally create a fresh overcommitment.
-  const editingLockedEntry=!!mineIfEditing?.hoursLocked;
+  // since saving this edit unlocks and recalculates that sibling anyway (see
+  // unlockSiblingSlot). A brand-new entry keeps the normal cap, so it can't
+  // accidentally create a fresh overcommitment before anyone's chosen how to
+  // split the day.
+  const editingLockedEntry=!!mineIfEditing;
   const maxHours=(()=>{
     if(!otherSlotEntry||editingLockedEntry)return productiveHours;
     if(mineIfEditing&&wasScheduledFirst(mineIfEditing,otherSlotEntry))return productiveHours;
@@ -3357,7 +3362,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             <div style={{width:130}}>
               <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
-              {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day already has {otherSlotEntry.hours}h - you may need to adjust it too</div>}
+              {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day has {otherSlotEntry.hours}h - it'll recalculate automatically once you save</div>}
             </div>
           ):autoFill&&form.mode==="new"?(
             <div>
@@ -3399,7 +3404,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             <div style={{width:130}}>
               <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
-              {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day already has {otherSlotEntry.hours}h - you may need to adjust it too</div>}
+              {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day has {otherSlotEntry.hours}h - it'll recalculate automatically once you save</div>}
             </div>
           )}
         </div>
