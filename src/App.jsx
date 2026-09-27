@@ -1751,7 +1751,14 @@ function MainApp({currentUser,onLogout}) {
           sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
           date_str:dateStr,slot:slot!==undefined?slot:data.slot,hours,
           misc_note:data.entryType==="misc"?data.miscNote:null,
-          hours_locked:data.entryType!=="misc"&&!data.autoFill
+          // Locking is about protecting a deliberately-typed number from the
+          // ambient pass and handing off correctly to a sibling slot (see
+          // oneCorrectionPass/unlockSiblingSlot) - nothing to do with the
+          // job-budget math a Misc entry never enters anyway (it has no
+          // subItemId, so recalculateItem/computeItemPlan never see it
+          // regardless of this flag). A Misc entry manually typed in
+          // (autoFill off) needs the exact same protection a job entry gets.
+          hours_locked:!data.autoFill
         }));
         if(conflicts.length>0){
           setSaving(false);
@@ -1812,10 +1819,13 @@ function MainApp({currentUser,onLogout}) {
         const relocated=prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.slot!==data.slot);
         const newCreatedAt=relocated?new Date().toISOString():undefined;
         // Saving an edit through this modal is always a deliberate choice of
-        // hours, so it locks the entry - the background correction pass will
-        // leave it as the person set it instead of re-deriving it from the
-        // item's remaining budget on the very next pass.
-        const hoursLocked=data.entryType!=="misc";
+        // hours, so it locks the entry - job or Misc alike - the background
+        // correction pass will leave it as the person set it instead of
+        // re-deriving it from the item's remaining budget on the very next
+        // pass (a Misc entry has no budget to derive from regardless - this
+        // is purely what protects it from the same-day effective-hours
+        // capping step, see oneCorrectionPass).
+        const hoursLocked=true;
         await db("PATCH","entries",{
           staff_id:data.staffId,
           job_id:data.jobId||null,
@@ -2443,15 +2453,13 @@ function MainApp({currentUser,onLogout}) {
     // manually-set hours silently forced back down by this pass moments
     // after being corrected by hand, making the correction impossible to
     // ever make stick.
-    // A Misc entry needs the exact same protection, but can never carry
-    // hoursLocked at all (see saveEntry) - it's never tracked against an
-    // item's hour budget in the first place, so this pass has no business
-    // deriving its hours from one. Without this, ANY Misc entry that loses
-    // the same-day tie-break to its sibling got silently reclamped back down
-    // every time entries changed, including the instant it was saved -
-    // making it look like the Hours field flatly refused to accept a new
-    // value, when really it kept being overwritten a moment later.
-    return afterSpecial.map(e=>(specialHours[e.id]!==undefined||e.hoursLocked||e.miscNote||!e.subItemId)?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))*2)/2});
+    // A Misc entry now locks on manual save exactly like a job entry (see
+    // saveEntry) purely so it gets this same protection - it never enters
+    // the job-budget math above regardless (no subItemId), so locking it
+    // has no other effect. This is what unlockSiblingSlot unlocks when the
+    // OTHER slot gets its own fresh edit, letting this same step correctly
+    // shrink the now-unlocked Misc entry back down to fit.
+    return afterSpecial.map(e=>(specialHours[e.id]!==undefined||e.hoursLocked)?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))*2)/2});
   }
   // Correcting one item's finishing entry can change how much capacity a
   // DIFFERENT item's entry has left that same day (when two items share a
