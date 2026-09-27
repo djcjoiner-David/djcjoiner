@@ -824,13 +824,14 @@ function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours}) {
   // of showing a plain "+", with the same pale grey used elsewhere in the
   // app (e.g. Saturday columns). Misc entries carry their own solid border,
   // so the shared grey tone doesn't need to compete with that for contrast.
-  // Shows the actual number left, not just that some is available.
+  // Deliberately doesn't show the actual number left - that would let staff
+  // reverse-engineer each other's efficiency from leftover capacity.
   return (
     <div onClick={onClick}
       style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.3,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
       onMouseEnter={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
       onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
-      {isDropTarget?"↓":available?(<><div>{availableHours} Hours</div><div>Available</div></>):"+"}
+      {isDropTarget?"↓":available?(<div>Hours Available</div>):"+"}
     </div>
   );
 }
