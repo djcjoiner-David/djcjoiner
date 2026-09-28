@@ -364,7 +364,6 @@ look rather than being folded into any of the four above.
    number for this item/entry, and separately the move's `newHours`
    logic possibly misjudging this as a non-shared move in some case
    `sharedItemAtDest` doesn't catch.
-
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
