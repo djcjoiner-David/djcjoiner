@@ -461,6 +461,14 @@ look rather than being folded into any of the four above.
    with `dateStr>=todayStr`; if any exist, block the action and show an
    error naming how many/which, instead of calling the PATCH.
 
+4. **Users button's little head icon should match the button's text
+   colour.** `App.jsx` ~line 2744: `👥 Users` - the button already sets
+   `color:theme.heading` on itself, but an emoji glyph renders in its
+   own native colour regardless of CSS `color`, so the icon and text
+   don't match. Fix direction: swap the emoji for an inline SVG people-
+   icon using `fill="currentColor"` (or `stroke="currentColor"`), which
+   inherits the button's `color` exactly like the text does.
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
