@@ -378,6 +378,57 @@ look rather than being folded into any of the four above.
    row - likely needs the same per-person capping `buildGroupAutoFill`
    already does for the autofill case.
 
+6. **HIGH PRIORITY - `effectiveEntryHours` only ever shrinks a non-
+   "completing" entry's hours, never re-derives them upward - so a
+   staff efficiency edit can permanently corrupt stored hours, including
+   on OTHER staff's entries in a shared item.** Root cause confirmed via
+   code trace, live-reproduced:
+   - Editing a staff member's productive hours (Staff modal) DOES trigger
+     the app's ambient background correction (`useEffect` at `App.jsx`
+     ~line 2609, deps `[entries,staff,subItems,canEdit]` - runs on every
+     `staff` change, not just schedule edits). This is correct/intended
+     per the user (staff hours changes SHOULD recalculate shared items).
+   - The bug: `effectiveEntryHours` (`App.jsx` ~line 264) computes
+     `const myHours=Number(e.hours)||0;` then only ever clamps it DOWN
+     (`Math.min(myHours,...)`) toward whatever the current cap allows -
+     it never derives a fresh value from real current constraints for a
+     non-"completing" entry. Only the ONE "completing" entry per item
+     (`oneCorrectionPass`'s `specialHours` logic) gets properly re-
+     derived from actual remaining budget; every other entry in that
+     item is capped-down-only, permanently, even after the constraint
+     that shrank it is later removed.
+   - Live repro: David's productive hours dropped 7h→6h - his entry got
+     PATCHED (persisted, not just displayed) down to 6h by the ambient
+     pass. Raising it back to 7h did NOT restore it - still stuck at 6h,
+     confirmed via reopening its own ESE modal.
+   - Cross-contamination: David shares "Laundry"/"Mudroom" with Mark on
+     Tue 6th, and "Mudroom"/"Pantry" with Mark on Wed 7th (same joinery
+     items, different staff). Because `oneCorrectionPass` groups purely
+     `bySubItem` (item), not by staff, David's edit rippled the shared
+     items' recalculation into Mark's entries too - Mark's own Wed-7th
+     Pantry and Mudroom entries changed to "Overcommitted" and "0.5h
+     under" respectively, without Mark himself being touched at all.
+     Since this ripple is built on top of David's already-wrong stuck
+     6h value, some/all of Mark's new numbers may themselves be wrong
+     as a downstream consequence, not a separate bug in their own right
+     - needs re-checking once the root cause is fixed.
+   - User's confirmed intent: staff efficiency edits SHOULD recalculate
+     shared items (not be scoped to only that one staff member) - the
+     fix needs to make that recalculation actually correct in both
+     directions (up AND down), not disable it.
+   - NOT fixed now - deliberately deferred: `effectiveEntryHours` is
+     used throughout the app (undo/redo, sibling locking/capping,
+     Catch-up Hours exclusions all depend on it), so a fix here has real
+     regression risk across everything tested this session. Needs a
+     dedicated pass with a full regression run, not a mid-session patch.
+   - Fix direction (needs more thought before starting): the
+     "completing entry" role's remaining-budget-based re-derivation
+     already does the right thing (line 2554-2556) - the non-special
+     capping step (line 2575) likely needs the same treatment: derive
+     from current real constraints (what's actually left of the item's
+     budget / the day's capacity) rather than clamping the entry's own
+     possibly-stale stored value.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
