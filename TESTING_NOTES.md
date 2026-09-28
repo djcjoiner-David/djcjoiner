@@ -376,16 +376,15 @@ look rather than being folded into any of the four above.
    Currently 10 colours (`JOB_COLOUR_PRESETS`, `App.jsx` ~line 592-601:
    red, orange, lime, green, yellow, cyan, blue, violet, fuchsia, pink),
    picked in strict order by `nextPreset()` (~line 2665):
-   `JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length]`. User asked
-   whether an 11th colour is needed for "skip one" to work correctly -
-   yes: with 10 colours (even), stepping by 2 only ever visits 5 of the
-   10 before repeating (10 and 2 share a factor of 2), so half the
-   palette would never get used as a default. With 11 colours (a prime
-   number), stepping by 2 visits all 11 before repeating - full coverage,
-   no early repeats, maximally spread. Fix direction: add one more preset
-   colour, then change `nextPreset()` to step by 2:
-   `JOB_COLOUR_PRESETS[(jobs.length*2)%JOB_COLOUR_PRESETS.length]`. Needs
-   an 11th colour choice from the user before building.
+   `JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length]`.
+   RESOLVED DESIGN (supersedes the earlier "add an 11th colour" idea):
+   no new colour needed. Walk all 5 even-indexed colours first (0,2,4,6,8
+   - red,lime,yellow,blue,fuchsia), then all 5 odd-indexed (1,3,5,7,9 -
+   orange,green,cyan,violet,pink), then repeat. Every consecutive job
+   still gets a maximally-separated colour, and all 10 get used before
+   any repeat. Fix direction: build a fixed order array
+   `[0,2,4,6,8,1,3,5,7,9]` and index into it with
+   `JOB_COLOUR_PRESETS[ORDER[jobs.length%10]]`.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
