@@ -338,6 +338,18 @@ look rather than being folded into any of the four above.
    reviewed later like any other entry. Low priority: the reported
    scenario was always a single-entry copy.
 
+3. **Dragging (moving) a Catch-up entry recalculates its hours to the
+   destination staff's max instead of leaving it untouched.** Reproduced
+   live: dragged Jenny's Wed-14 Catch-up entry to a new day/staff (Mary) -
+   it landed recalculated to Mary's max hours instead of keeping its
+   original fixed number. Root cause: `handleDrop`'s single-entry move
+   branch (`src/App.jsx` ~line 2439, the `newHours` snap-to-cap logic for
+   `wasCappedByOldSibling||wasOldStaffFullDay`) doesn't check `isCatchUp`
+   at all - a Catch-up entry's hours are a deliberate fixed number, never
+   derived from any staff's cap, same as a locked entry. Likely fix:
+   skip the whole `newHours` recalculation and keep `entry.hours` as-is
+   whenever `entry.isCatchUp` is true.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
