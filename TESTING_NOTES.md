@@ -469,6 +469,15 @@ look rather than being folded into any of the four above.
    icon using `fill="currentColor"` (or `stroke="currentColor"`), which
    inherits the button's `color` exactly like the text does.
 
+5. **Admin needs the ability to set/change password for an existing
+   user.** Currently `UserManagementModal` (`App.jsx` ~line 924+) only
+   sets a password at creation time (`form.password`, "Add New User"
+   section) - the existing-users table above it (~line 1020) has only a
+   role dropdown and Remove, no way to view or reset a password once
+   set. Fix direction: add a password field + save action to each
+   existing user's row (or a small edit affordance opening one), wired
+   to a `PATCH` on `user_roles` for that user's `id`.
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
