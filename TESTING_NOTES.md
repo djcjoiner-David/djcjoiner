@@ -350,6 +350,21 @@ look rather than being folded into any of the four above.
    skip the whole `newHours` recalculation and keep `entry.hours` as-is
    whenever `entry.isCatchUp` is true.
 
+4. **Living W, TJ, Slot 1, Wed 14th shows 46h on the grid - should show
+   its real 3.5h (matches the ESE modal).** Not yet known when this
+   started. Live-tested: dragging the entry to a new day made it display
+   the correct 3.5h; dragging it back to its original position brought
+   the wrong 46h back. User's correction on the move-behavior test this
+   was found during (2C item #3 test): this entry is a SIBLING entry
+   (shares a day/budget split with another staff member on the same
+   item) - it should NOT recalculate to the destination staff's max on a
+   plain move, regardless of whether the destination looks "empty".
+   Needs investigation: likely the flat "total budget" placeholder
+   display (`computeJobEntryMeta`/`totalBudget`) picking up a wrong
+   number for this item/entry, and separately the move's `newHours`
+   logic possibly misjudging this as a non-shared move in some case
+   `sharedItemAtDest` doesn't catch.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
