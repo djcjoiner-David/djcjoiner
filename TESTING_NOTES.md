@@ -478,6 +478,22 @@ look rather than being folded into any of the four above.
    existing user's row (or a small edit affordance opening one), wired
    to a `PATCH` on `user_roles` for that user's `id`.
 
+6. **Prompt to close a job once its most recent scheduled date is a
+   month old, instead of just silently archiving it.** Currently a job
+   whose latest entry is >1 month old just moves to the passive
+   "Archived Jobs" section of Job Summary (`App.jsx` ~line 1440-1457,
+   `oneMonthAgo`/`archivedJobs`) - nothing actively tells the user. Do
+   NOT auto-archive/auto-complete - keep the existing passive archived
+   bucket exactly as-is, this is an ADDITIONAL prompt on top of it.
+   Same visual style as the existing `ConfirmModal` component (`App.jsx`
+   ~line 683, e.g. the Catch-up Hours pop-up). Exact wording:
+   "Job {jobNo}, {jobName} most recent scheduled date is {date, e.g.
+   dd/mmm}. Do you want to close this Job?" - Confirm marks it
+   Completed (same as `toggleJobCompleted`), Cancel dismisses and
+   leaves it as-is (presumably not re-prompted again this session, to
+   avoid nagging - needs a decision on whether to re-prompt on every
+   load or just once per job).
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
