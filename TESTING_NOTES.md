@@ -338,6 +338,12 @@ look rather than being folded into any of the four above.
    reviewed later like any other entry. Low priority: the reported
    scenario was always a single-entry copy.
 
+### 2F. UI/UX changes logged for a later batch (not yet built)
+
+1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
+   `App.jsx` line ~1180: `const [viewWeeks,setViewWeeks]=useState(2);` → change
+   the initial value to `4`. One-line change, low risk.
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
