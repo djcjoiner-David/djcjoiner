@@ -304,8 +304,10 @@ look rather than being folded into any of the four above.
 
 ### 2E. Logged for a later fix batch (not yet fixed)
 
-1. **Undo/redo can't correctly represent a deliberately-duplicated cell.**
-   The undo/redo engine (`applyEntriesSnapshot`, `cellKey`) diffs snapshots by
+1. **HIGH PRIORITY - CONFIRMED REAL DATA LOSS. Undo/redo can't correctly
+   represent a deliberately-duplicated cell, and can now permanently
+   delete one of the two entries with no recovery path.** The undo/redo
+   engine (`applyEntriesSnapshot`, `cellKey`) diffs snapshots by
    `staffId|dateStr|slot`, assuming at most one entry per cell - true for
    every normal mutation, but the app has a separate, intentional feature
    (`saveEntry`'s "new" branch, the `conflictAlert`/"Schedule Anyway" confirm
@@ -316,10 +318,24 @@ look rather than being folded into any of the four above.
    entries, `cellKey`-based diffing can only "see" one of them (a `Map`
    silently keeps the last one written), so undoing/redoing an action that
    touches that state drops the other entry from consideration instead of
-   restoring both. Reproduced live: a pre-fix group move (see 2A/2B below,
-   "group-move destination collision") left two entries stacked in one
-   cell; Undo could not cleanly separate them back to their original,
-   distinct positions.
+   restoring both.
+   Originally reproduced against a pre-fix group move (see 2A/2B below,
+   "group-move destination collision") that left two entries stacked in
+   one cell - Undo could not cleanly separate them back to their
+   original, distinct positions.
+   RE-CONFIRMED LIVE, WORSE THAN ORIGINALLY SCOPED: with a genuine
+   Conflict pair on the grid (two entries sharing one cell via "Schedule
+   Anyway"), dragging ONE of them to a new slot worked correctly. But
+   clicking Undo twice afterward made the OTHER entry (the one that
+   caused the conflict, never touched by the drag) vanish outright - a
+   real `DELETE`, not a display glitch: Job Summary confirmed its whole
+   item as fully unscheduled again. The Undo button then greyed out
+   with no further Undo/Redo available to recover it - permanent data
+   loss with the stack exhausted. This time the missing entry was a
+   disposable test entry so nothing needed manually restoring, but a
+   real production entry lost this way would need to be manually
+   recreated from memory, with no way to recover the original via the
+   app itself.
    Likely fix direction: key the diff by entry `id` instead of by cell
    whenever `conflictKeys` shows more than one entry sharing that cell (a
    plain per-cell diff for the common case, falling back to id-based
