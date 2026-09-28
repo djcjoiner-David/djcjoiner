@@ -399,6 +399,17 @@ look rather than being folded into any of the four above.
    `[0,2,4,6,8,1,3,5,7,9]` and index into it with
    `JOB_COLOUR_PRESETS[ORDER[jobs.length%10]]`.
 
+3. **New rule: a job cannot be marked Completed while it has entries
+   scheduled forward of today.** Not a bug found in testing - a new
+   business rule from the user. Reasoning: a job is never actually
+   finished if there's still future work scheduled against it, so
+   completing it in that state doesn't reflect reality. Fix direction:
+   `toggleJobCompleted(id,completed)` (`App.jsx` ~line 1978) - when
+   `completed` is being set to `true`, check `entries` for any row on
+   this job (`jobId===id` or, for items, `subItemId` under this job)
+   with `dateStr>=todayStr`; if any exist, block the action and show an
+   error naming how many/which, instead of calling the PATCH.
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
