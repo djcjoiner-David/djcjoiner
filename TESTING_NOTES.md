@@ -350,11 +350,40 @@ look rather than being folded into any of the four above.
    skip the whole `newHours` recalculation and keep `entry.hours` as-is
    whenever `entry.isCatchUp` is true.
 
+4. **Living W, TJ, Slot 1, Wed 14th shows 46h on the grid - should show
+   its real 3.5h (matches the ESE modal).** Not yet known when this
+   started. Live-tested: dragging the entry to a new day made it display
+   the correct 3.5h; dragging it back to its original position brought
+   the wrong 46h back. User's correction on the move-behavior test this
+   was found during (2C item #3 test): this entry is a SIBLING entry
+   (shares a day/budget split with another staff member on the same
+   item) - it should NOT recalculate to the destination staff's max on a
+   plain move, regardless of whether the destination looks "empty".
+   Needs investigation: likely the flat "total budget" placeholder
+   display (`computeJobEntryMeta`/`totalBudget`) picking up a wrong
+   number for this item/entry, and separately the move's `newHours`
+   logic possibly misjudging this as a non-shared move in some case
+   `sharedItemAtDest` doesn't catch.
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
    `App.jsx` line ~1180: `const [viewWeeks,setViewWeeks]=useState(2);` → change
    the initial value to `4`. One-line change, low risk.
+
+2. **Add Job modal's default colour should skip one instead of cycling
+   sequentially, to make consecutive jobs more visually distinct.**
+   Currently 10 colours (`JOB_COLOUR_PRESETS`, `App.jsx` ~line 592-601:
+   red, orange, lime, green, yellow, cyan, blue, violet, fuchsia, pink),
+   picked in strict order by `nextPreset()` (~line 2665):
+   `JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length]`.
+   RESOLVED DESIGN (supersedes the earlier "add an 11th colour" idea):
+   no new colour needed. Walk all 5 even-indexed colours first (0,2,4,6,8
+   - red,lime,yellow,blue,fuchsia), then all 5 odd-indexed (1,3,5,7,9 -
+   orange,green,cyan,violet,pink), then repeat. Every consecutive job
+   still gets a maximally-separated colour, and all 10 get used before
+   any repeat. Fix direction: build a fixed order array
+   `[0,2,4,6,8,1,3,5,7,9]` and index into it with
+   `JOB_COLOUR_PRESETS[ORDER[jobs.length%10]]`.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed

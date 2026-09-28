@@ -454,15 +454,25 @@ const SEARCH_HORIZON_DAYS=3650;
 // because the other slot's search happens to be tried first."
 function slotSearchOrder(preferredSlot){ return preferredSlot===1?[1,0]:[0,1]; }
 
-function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot) {
+function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff) {
   const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
   let cur=parseISO(startStr);
   for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
     if(!isWeekend(cur)){
       const ds=isoDate(cur);
       for(const slot of slotSearchOrder(preferredSlot)){
-        const conflict=staffIds.some(sid=>entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===slot));
-        if(!conflict)return{dateStr:ds,slot};
+        // Not just whether the slot itself is literally empty - a sibling
+        // slot that already uses this person's whole day leaves genuinely
+        // 0h here, which isn't actually "available" (same capacity check
+        // personalBlockFits uses for the auto-fill/group case).
+        const ok=staffIds.every(sid=>{
+          const slotTaken=entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===slot);
+          if(slotTaken)return false;
+          const ph=Number(staff?.find(s=>s.id===sid)?.productiveHours)||8;
+          const usedElsewhere=entries.filter(e=>e.staffId===sid&&e.dateStr===ds&&e.slot!==slot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+          return Math.max(0,Math.round((ph-usedElsewhere)*2)/2)>0.001;
+        });
+        if(ok)return{dateStr:ds,slot};
       }
     }
     cur=addDays(cur,1);
@@ -3502,7 +3512,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                     setForm(f=>({...f,dateStr,slot}));
                   }
                 } else {
-                  const{dateStr,slot}=nextAvailableDate(ids,entries,todayStr,form.slot);
+                  const{dateStr,slot}=nextAvailableDate(ids,entries,todayStr,form.slot,staff);
                   setForm(f=>({...f,dateStr,slot}));
                 }
               }} style={{width:"100%",padding:"7px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:12,cursor:"pointer",marginBottom:14}}>
