@@ -364,6 +364,20 @@ look rather than being folded into any of the four above.
    number for this item/entry, and separately the move's `newHours`
    logic possibly misjudging this as a non-shared move in some case
    `sharedItemAtDest` doesn't catch.
+
+5. **Manual (non-autofill) multi-staff entry can overcommit a staff member
+   past their own daily cap.** Reproduced live: selected 3 staff with
+   different productive-hours caps (7.5h, 6h, 4.5h) for one manual entry,
+   used "First Available" - it landed all three on the same day at the
+   SAME 7.5h figure, exceeding the 6h and 4.5h staff's own caps. The
+   manual multi-staff path applies one shared hours value to everyone
+   instead of capping each person to their own `productiveHours`. User's
+   own assessment: unlikely combo in real use (multi-staff + manual entry
+   + mismatched caps), so low priority. Needs investigation into where
+   the manual (non-autofill) multi-staff save path builds each staff's
+   row - likely needs the same per-person capping `buildGroupAutoFill`
+   already does for the autofill case.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
