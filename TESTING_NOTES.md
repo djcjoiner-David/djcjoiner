@@ -452,6 +452,29 @@ look rather than being folded into any of the four above.
      `nextAvailableDate`/`nextAvailableBlockDate`) and shows the real
      date in the button label, then uses it if clicked.
 
+8. **Mobile layout shows wrong hours/labels for Catch-up entries -
+   desktop is correct, phone is not.** Not yet investigated (logged
+   raw, per explicit instruction to stop mobile testing here and keep
+   desktop the focus for now). `JobBlock`'s `hoursLabel` calculation is
+   shared code (not inside the `isMobile` branch), so on paper mobile
+   and desktop should show identical values - the fact that they don't
+   means there's a real discrepancy somewhere not yet found. Four live
+   examples, all Wed-14th-ish entries in the "Living W"/"Laundry"
+   items, desktop (correct) vs phone (wrong):
+   - Ian, Laundry, Slot 2, 13 Oct: desktop "Catch-up 2h" → phone
+     "Overrun", no hours shown at all.
+   - Mary, Living, Slot 1, 14th: desktop "4h" → phone "0.5h".
+   - Mary, Living, Slot 2, 14th: desktop "Catch-up 2h" → phone "46h"
+     (the item's flat total-budget placeholder number).
+   - TJ, Living, Slot 2, 14th: desktop "Catch-up 1.5h" → phone "46h"
+     (same item-total placeholder).
+   Needs investigation into why/how the mobile render path is landing
+   on a different `computeJobEntryMeta`/`isCatchUp` result than desktop
+   for the exact same entries - possibly a stale/cached mobile-specific
+   render, a viewport-driven recompute ordering issue, or a genuinely
+   separate code path not yet found. Explicitly deferred until desktop
+   is fully tested and stable - do not start mobile work before then.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
