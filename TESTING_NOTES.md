@@ -429,6 +429,29 @@ look rather than being folded into any of the four above.
      budget / the day's capacity) rather than clamping the entry's own
      possibly-stale stored value.
 
+7. **Auto-fill silently walks past the requested start day if it's
+   occupied, instead of flagging a conflict.** `buildAutoFill` (`App.jsx`
+   ~line 316) treats "day/slot is taken → try the next day" as one
+   blanket rule with no distinction between the STARTING day (what the
+   user actually picked/clicked) and later days within a multi-day
+   spread. Live repro: manually picked Mark, Slot 1, 01 Oct (already
+   occupied), Auto-fill left ON (the default), hit Save - no conflict
+   prompt at all, the entry silently landed on 13 Oct instead, with
+   nothing telling the user it had skipped two weeks forward.
+   Discussed and agreed design:
+   - Mid-spread skipping (day 3 of a 5-day spread being occupied, skip
+     to day 4) is correct and stays exactly as-is - only "First
+     Available" should ever cause the search itself; that's not this.
+   - When the START day/slot (the one actually selected in the form) is
+     occupied, raise the existing "⚠ Scheduling Conflict" `ConfirmModal`
+     instead of silently continuing the search.
+   - That prompt gets a THIRD option alongside the current two: keep
+     "Schedule Anyway" (proceeds there regardless, current behaviour)
+     and "Go Back"/Cancel, and add "Schedule First Available (dd/mmm)"
+     - computes the actual next open day/slot up front (reusing
+     `nextAvailableDate`/`nextAvailableBlockDate`) and shows the real
+     date in the button label, then uses it if clicked.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
