@@ -371,6 +371,22 @@ look rather than being folded into any of the four above.
    `App.jsx` line ~1180: `const [viewWeeks,setViewWeeks]=useState(2);` → change
    the initial value to `4`. One-line change, low risk.
 
+2. **Add Job modal's default colour should skip one instead of cycling
+   sequentially, to make consecutive jobs more visually distinct.**
+   Currently 10 colours (`JOB_COLOUR_PRESETS`, `App.jsx` ~line 592-601:
+   red, orange, lime, green, yellow, cyan, blue, violet, fuchsia, pink),
+   picked in strict order by `nextPreset()` (~line 2665):
+   `JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length]`. User asked
+   whether an 11th colour is needed for "skip one" to work correctly -
+   yes: with 10 colours (even), stepping by 2 only ever visits 5 of the
+   10 before repeating (10 and 2 share a factor of 2), so half the
+   palette would never get used as a default. With 11 colours (a prime
+   number), stepping by 2 visits all 11 before repeating - full coverage,
+   no early repeats, maximally spread. Fix direction: add one more preset
+   colour, then change `nextPreset()` to step by 2:
+   `JOB_COLOUR_PRESETS[(jobs.length*2)%JOB_COLOUR_PRESETS.length]`. Needs
+   an 11th colour choice from the user before building.
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
