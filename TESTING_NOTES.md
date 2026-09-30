@@ -304,8 +304,10 @@ look rather than being folded into any of the four above.
 
 ### 2E. Logged for a later fix batch (not yet fixed)
 
-1. **Undo/redo can't correctly represent a deliberately-duplicated cell.**
-   The undo/redo engine (`applyEntriesSnapshot`, `cellKey`) diffs snapshots by
+1. **HIGH PRIORITY - CONFIRMED REAL DATA LOSS. Undo/redo can't correctly
+   represent a deliberately-duplicated cell, and can now permanently
+   delete one of the two entries with no recovery path.** The undo/redo
+   engine (`applyEntriesSnapshot`, `cellKey`) diffs snapshots by
    `staffId|dateStr|slot`, assuming at most one entry per cell - true for
    every normal mutation, but the app has a separate, intentional feature
    (`saveEntry`'s "new" branch, the `conflictAlert`/"Schedule Anyway" confirm
@@ -316,10 +318,24 @@ look rather than being folded into any of the four above.
    entries, `cellKey`-based diffing can only "see" one of them (a `Map`
    silently keeps the last one written), so undoing/redoing an action that
    touches that state drops the other entry from consideration instead of
-   restoring both. Reproduced live: a pre-fix group move (see 2A/2B below,
-   "group-move destination collision") left two entries stacked in one
-   cell; Undo could not cleanly separate them back to their original,
-   distinct positions.
+   restoring both.
+   Originally reproduced against a pre-fix group move (see 2A/2B below,
+   "group-move destination collision") that left two entries stacked in
+   one cell - Undo could not cleanly separate them back to their
+   original, distinct positions.
+   RE-CONFIRMED LIVE, WORSE THAN ORIGINALLY SCOPED: with a genuine
+   Conflict pair on the grid (two entries sharing one cell via "Schedule
+   Anyway"), dragging ONE of them to a new slot worked correctly. But
+   clicking Undo twice afterward made the OTHER entry (the one that
+   caused the conflict, never touched by the drag) vanish outright - a
+   real `DELETE`, not a display glitch: Job Summary confirmed its whole
+   item as fully unscheduled again. The Undo button then greyed out
+   with no further Undo/Redo available to recover it - permanent data
+   loss with the stack exhausted. This time the missing entry was a
+   disposable test entry so nothing needed manually restoring, but a
+   real production entry lost this way would need to be manually
+   recreated from memory, with no way to recover the original via the
+   app itself.
    Likely fix direction: key the diff by entry `id` instead of by cell
    whenever `conflictKeys` shows more than one entry sharing that cell (a
    plain per-cell diff for the common case, falling back to id-based
@@ -364,6 +380,117 @@ look rather than being folded into any of the four above.
    number for this item/entry, and separately the move's `newHours`
    logic possibly misjudging this as a non-shared move in some case
    `sharedItemAtDest` doesn't catch.
+
+5. **Manual (non-autofill) multi-staff entry can overcommit a staff member
+   past their own daily cap.** Reproduced live: selected 3 staff with
+   different productive-hours caps (7.5h, 6h, 4.5h) for one manual entry,
+   used "First Available" - it landed all three on the same day at the
+   SAME 7.5h figure, exceeding the 6h and 4.5h staff's own caps. The
+   manual multi-staff path applies one shared hours value to everyone
+   instead of capping each person to their own `productiveHours`. User's
+   own assessment: unlikely combo in real use (multi-staff + manual entry
+   + mismatched caps), so low priority. Needs investigation into where
+   the manual (non-autofill) multi-staff save path builds each staff's
+   row - likely needs the same per-person capping `buildGroupAutoFill`
+   already does for the autofill case.
+
+6. **HIGH PRIORITY - `effectiveEntryHours` only ever shrinks a non-
+   "completing" entry's hours, never re-derives them upward - so a
+   staff efficiency edit can permanently corrupt stored hours, including
+   on OTHER staff's entries in a shared item.** Root cause confirmed via
+   code trace, live-reproduced:
+   - Editing a staff member's productive hours (Staff modal) DOES trigger
+     the app's ambient background correction (`useEffect` at `App.jsx`
+     ~line 2609, deps `[entries,staff,subItems,canEdit]` - runs on every
+     `staff` change, not just schedule edits). This is correct/intended
+     per the user (staff hours changes SHOULD recalculate shared items).
+   - The bug: `effectiveEntryHours` (`App.jsx` ~line 264) computes
+     `const myHours=Number(e.hours)||0;` then only ever clamps it DOWN
+     (`Math.min(myHours,...)`) toward whatever the current cap allows -
+     it never derives a fresh value from real current constraints for a
+     non-"completing" entry. Only the ONE "completing" entry per item
+     (`oneCorrectionPass`'s `specialHours` logic) gets properly re-
+     derived from actual remaining budget; every other entry in that
+     item is capped-down-only, permanently, even after the constraint
+     that shrank it is later removed.
+   - Live repro: David's productive hours dropped 7h→6h - his entry got
+     PATCHED (persisted, not just displayed) down to 6h by the ambient
+     pass. Raising it back to 7h did NOT restore it - still stuck at 6h,
+     confirmed via reopening its own ESE modal.
+   - Cross-contamination: David shares "Laundry"/"Mudroom" with Mark on
+     Tue 6th, and "Mudroom"/"Pantry" with Mark on Wed 7th (same joinery
+     items, different staff). Because `oneCorrectionPass` groups purely
+     `bySubItem` (item), not by staff, David's edit rippled the shared
+     items' recalculation into Mark's entries too - Mark's own Wed-7th
+     Pantry and Mudroom entries changed to "Overcommitted" and "0.5h
+     under" respectively, without Mark himself being touched at all.
+     Since this ripple is built on top of David's already-wrong stuck
+     6h value, some/all of Mark's new numbers may themselves be wrong
+     as a downstream consequence, not a separate bug in their own right
+     - needs re-checking once the root cause is fixed.
+   - User's confirmed intent: staff efficiency edits SHOULD recalculate
+     shared items (not be scoped to only that one staff member) - the
+     fix needs to make that recalculation actually correct in both
+     directions (up AND down), not disable it.
+   - NOT fixed now - deliberately deferred: `effectiveEntryHours` is
+     used throughout the app (undo/redo, sibling locking/capping,
+     Catch-up Hours exclusions all depend on it), so a fix here has real
+     regression risk across everything tested this session. Needs a
+     dedicated pass with a full regression run, not a mid-session patch.
+   - Fix direction (needs more thought before starting): the
+     "completing entry" role's remaining-budget-based re-derivation
+     already does the right thing (line 2554-2556) - the non-special
+     capping step (line 2575) likely needs the same treatment: derive
+     from current real constraints (what's actually left of the item's
+     budget / the day's capacity) rather than clamping the entry's own
+     possibly-stale stored value.
+
+7. **Auto-fill silently walks past the requested start day if it's
+   occupied, instead of flagging a conflict.** `buildAutoFill` (`App.jsx`
+   ~line 316) treats "day/slot is taken → try the next day" as one
+   blanket rule with no distinction between the STARTING day (what the
+   user actually picked/clicked) and later days within a multi-day
+   spread. Live repro: manually picked Mark, Slot 1, 01 Oct (already
+   occupied), Auto-fill left ON (the default), hit Save - no conflict
+   prompt at all, the entry silently landed on 13 Oct instead, with
+   nothing telling the user it had skipped two weeks forward.
+   Discussed and agreed design:
+   - Mid-spread skipping (day 3 of a 5-day spread being occupied, skip
+     to day 4) is correct and stays exactly as-is - only "First
+     Available" should ever cause the search itself; that's not this.
+   - When the START day/slot (the one actually selected in the form) is
+     occupied, raise the existing "⚠ Scheduling Conflict" `ConfirmModal`
+     instead of silently continuing the search.
+   - That prompt gets a THIRD option alongside the current two: keep
+     "Schedule Anyway" (proceeds there regardless, current behaviour)
+     and "Go Back"/Cancel, and add "Schedule First Available (dd/mmm)"
+     - computes the actual next open day/slot up front (reusing
+     `nextAvailableDate`/`nextAvailableBlockDate`) and shows the real
+     date in the button label, then uses it if clicked.
+
+8. **Mobile layout shows wrong hours/labels for Catch-up entries -
+   desktop is correct, phone is not.** Not yet investigated (logged
+   raw, per explicit instruction to stop mobile testing here and keep
+   desktop the focus for now). `JobBlock`'s `hoursLabel` calculation is
+   shared code (not inside the `isMobile` branch), so on paper mobile
+   and desktop should show identical values - the fact that they don't
+   means there's a real discrepancy somewhere not yet found. Four live
+   examples, all Wed-14th-ish entries in the "Living W"/"Laundry"
+   items, desktop (correct) vs phone (wrong):
+   - Ian, Laundry, Slot 2, 13 Oct: desktop "Catch-up 2h" → phone
+     "Overrun", no hours shown at all.
+   - Mary, Living, Slot 1, 14th: desktop "4h" → phone "0.5h".
+   - Mary, Living, Slot 2, 14th: desktop "Catch-up 2h" → phone "46h"
+     (the item's flat total-budget placeholder number).
+   - TJ, Living, Slot 2, 14th: desktop "Catch-up 1.5h" → phone "46h"
+     (same item-total placeholder).
+   Needs investigation into why/how the mobile render path is landing
+   on a different `computeJobEntryMeta`/`isCatchUp` result than desktop
+   for the exact same entries - possibly a stale/cached mobile-specific
+   render, a viewport-driven recompute ordering issue, or a genuinely
+   separate code path not yet found. Explicitly deferred until desktop
+   is fully tested and stable - do not start mobile work before then.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
@@ -384,6 +511,50 @@ look rather than being folded into any of the four above.
    any repeat. Fix direction: build a fixed order array
    `[0,2,4,6,8,1,3,5,7,9]` and index into it with
    `JOB_COLOUR_PRESETS[ORDER[jobs.length%10]]`.
+
+3. **New rule: a job cannot be marked Completed while it has entries
+   scheduled forward of today.** Not a bug found in testing - a new
+   business rule from the user. Reasoning: a job is never actually
+   finished if there's still future work scheduled against it, so
+   completing it in that state doesn't reflect reality. Fix direction:
+   `toggleJobCompleted(id,completed)` (`App.jsx` ~line 1978) - when
+   `completed` is being set to `true`, check `entries` for any row on
+   this job (`jobId===id` or, for items, `subItemId` under this job)
+   with `dateStr>=todayStr`; if any exist, block the action and show an
+   error naming how many/which, instead of calling the PATCH.
+
+4. **Users button's little head icon should match the button's text
+   colour.** `App.jsx` ~line 2744: `👥 Users` - the button already sets
+   `color:theme.heading` on itself, but an emoji glyph renders in its
+   own native colour regardless of CSS `color`, so the icon and text
+   don't match. Fix direction: swap the emoji for an inline SVG people-
+   icon using `fill="currentColor"` (or `stroke="currentColor"`), which
+   inherits the button's `color` exactly like the text does.
+
+5. **Admin needs the ability to set/change password for an existing
+   user.** Currently `UserManagementModal` (`App.jsx` ~line 924+) only
+   sets a password at creation time (`form.password`, "Add New User"
+   section) - the existing-users table above it (~line 1020) has only a
+   role dropdown and Remove, no way to view or reset a password once
+   set. Fix direction: add a password field + save action to each
+   existing user's row (or a small edit affordance opening one), wired
+   to a `PATCH` on `user_roles` for that user's `id`.
+
+6. **Prompt to close a job once its most recent scheduled date is a
+   month old, instead of just silently archiving it.** Currently a job
+   whose latest entry is >1 month old just moves to the passive
+   "Archived Jobs" section of Job Summary (`App.jsx` ~line 1440-1457,
+   `oneMonthAgo`/`archivedJobs`) - nothing actively tells the user. Do
+   NOT auto-archive/auto-complete - keep the existing passive archived
+   bucket exactly as-is, this is an ADDITIONAL prompt on top of it.
+   Same visual style as the existing `ConfirmModal` component (`App.jsx`
+   ~line 683, e.g. the Catch-up Hours pop-up). Exact wording:
+   "Job {jobNo}, {jobName} most recent scheduled date is {date, e.g.
+   dd/mmm}. Do you want to close this Job?" - Confirm marks it
+   Completed (same as `toggleJobCompleted`), Cancel dismisses and
+   leaves it as-is (presumably not re-prompted again this session, to
+   avoid nagging - needs a decision on whether to re-prompt on every
+   load or just once per job).
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
