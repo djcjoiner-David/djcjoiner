@@ -967,6 +967,18 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
     setUsers(prev=>prev.map(u=>u.id===id?{...u,role}:u));
   }
 
+  const [resetPasswordId,setResetPasswordId]=useState(null);
+  const [resetPasswordValue,setResetPasswordValue]=useState("");
+  async function savePassword(id){
+    if(!resetPasswordValue){setError("Enter a new password.");return;}
+    setSaving(true);setError("");
+    try{
+      await db("PATCH","user_roles",{password:resetPasswordValue},`?id=eq.${id}`);
+      setResetPasswordId(null);setResetPasswordValue("");
+    }catch(e){setError("Failed to update password.");}
+    setSaving(false);
+  }
+
   const roleColors={admin:{bg:"#FEF3C7",color:"#92400E"},manager:{bg:"#DBEAFE",color:"#1D4ED8"},staff:{bg:"#F0FDF4",color:"#15803D"}};
 
   return (
@@ -1007,7 +1019,7 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:24}}>
             <thead>
               <tr style={{background:"#F8FAFC",borderBottom:"1px solid #E2E8F0"}}>
-                {["Name","Email","Role",""].map((h,i)=>(
+                {["Name","Email","Role","",""].map((h,i)=>(
                   <th key={i} style={{padding:"8px 12px",textAlign:"left",fontWeight:600,color:"#64748B",fontSize:12}}>{h}</th>
                 ))}
               </tr>
@@ -1024,6 +1036,18 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
                       <option value="manager">Manager</option>
                       <option value="staff">Staff</option>
                     </select>
+                  </td>
+                  <td style={{padding:"8px 12px"}}>
+                    {resetPasswordId===u.id?(
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <input type="text" autoFocus value={resetPasswordValue} onChange={e=>setResetPasswordValue(e.target.value)} placeholder="New password"
+                          style={{padding:"3px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,width:120}}/>
+                        <button onClick={()=>savePassword(u.id)} disabled={saving} style={{background:"none",border:"1px solid #BBF7D0",color:"#15803D",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:12}}>Save</button>
+                        <button onClick={()=>{setResetPasswordId(null);setResetPasswordValue("");}} style={{background:"none",border:"1px solid #E2E8F0",color:"#94A3B8",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:12}}>Cancel</button>
+                      </div>
+                    ):(
+                      <button onClick={()=>{setResetPasswordId(u.id);setResetPasswordValue("");}} style={{background:"none",border:"1px solid #CBD5E1",color:"#475569",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:12}}>Reset Password</button>
+                    )}
                   </td>
                   <td style={{padding:"8px 12px"}}>
                     <button onClick={()=>removeUser(u.id)} style={{background:"none",border:"1px solid #FECACA",color:"#EF4444",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:12}}>Remove</button>
@@ -1451,10 +1475,26 @@ function MainApp({currentUser,onLogout}) {
       const je=entries.filter(e=>e.jobId===job.id);
       if(!je.length){active.push(job);continue;}
       const maxDate=je.map(e=>e.dateStr).sort().reverse()[0];
-      if(maxDate<threshold)archived.push(job);else active.push(job);
+      if(maxDate<threshold)archived.push({...job,maxDate});else active.push(job);
     }
     return {activeJobs:active,archivedJobs:archived,completedJobs:completed};
   },[jobs,entries,threshold]);
+
+  // Once a job's most recent scheduled date has aged a month old, it's
+  // moved to the passive Archived Jobs bucket above - but nothing actively
+  // told the user, so it could sit there unnoticed indefinitely. This
+  // prompts for each one (one at a time), on top of that unchanged passive
+  // bucket, without ever auto-closing it on its own. Dismissing "asks
+  // again" only within this session (a fresh reload re-prompts) rather
+  // than nagging on every render.
+  const [idleJobPrompt,setIdleJobPrompt]=useState(null); // {job}
+  const dismissedIdleJobsRef=useRef(new Set());
+  useEffect(()=>{
+    if(idleJobPrompt||!canEdit)return;
+    const next=archivedJobs.find(j=>!dismissedIdleJobsRef.current.has(j.id));
+    if(next)setIdleJobPrompt({job:next});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[archivedJobs,canEdit]);
 
   const visibleDays=useMemo(()=>{
     const days=[];
@@ -1976,6 +2016,16 @@ function MainApp({currentUser,onLogout}) {
   // touches any entry, so the Schedule tab keeps showing its history exactly
   // as before. Reopening just flips the same flag back.
   async function toggleJobCompleted(id,completed){
+    // A job is never actually finished if there's still future work
+    // scheduled against it - completing it in that state wouldn't reflect
+    // reality, so it's blocked outright rather than just discouraged.
+    if(completed){
+      const futureCount=entries.filter(e=>e.jobId===id&&e.dateStr>=todayStr).length;
+      if(futureCount>0){
+        setError(`Can't close this job - it still has ${futureCount} entr${futureCount===1?"y":"ies"} scheduled from today onward.`);
+        return;
+      }
+    }
     setSaving(true);
     try{
       await db("PATCH","jobs",{completed},`?id=eq.${id}`);
@@ -3155,6 +3205,9 @@ function MainApp({currentUser,onLogout}) {
         </Modal>
       )}
       {conflictAlert&&<ConfirmModal title="⚠ Scheduling Conflict" message={conflictAlert.message} cancelLabel="Go Back" confirmLabel="Schedule Anyway" danger onConfirm={conflictAlert.onConfirm} onCancel={conflictAlert.onCancel}/>}
+      {idleJobPrompt&&<ConfirmModal title="Job idle a month" message={`Job ${idleJobPrompt.job.jobNo}, ${idleJobPrompt.job.name} most recent scheduled date is ${formatDate(parseISO(idleJobPrompt.job.maxDate))}. Do you want to close this Job?`} confirmLabel="Close Job" cancelLabel="Not Yet"
+        onConfirm={()=>{toggleJobCompleted(idleJobPrompt.job.id,true);dismissedIdleJobsRef.current.add(idleJobPrompt.job.id);setIdleJobPrompt(null);}}
+        onCancel={()=>{dismissedIdleJobsRef.current.add(idleJobPrompt.job.id);setIdleJobPrompt(null);}}/>}
       {confirmDialog&&<ConfirmModal {...confirmDialog} onCancel={()=>setConfirmDialog(null)}/>}
       {contextMenu&&(
         <div onClick={e=>e.stopPropagation()}
