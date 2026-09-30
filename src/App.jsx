@@ -1187,7 +1187,7 @@ function MainApp({currentUser,onLogout}) {
     catch{setError("Could not save the tagline - it'll reset next time the page loads.");}
   }
 
-  const [viewWeeks,setViewWeeks]=useState(2);
+  const [viewWeeks,setViewWeeks]=useState(4);
   const [anchorDate,setAnchorDate]=useState(()=>mondayOf(TODAY));
 
   const [staff,setStaff]=useState([]);
@@ -2672,7 +2672,12 @@ function MainApp({currentUser,onLogout}) {
     return deleteEntriesByIds([...selectedEntries]);
   }
 
-  function nextPreset(){return JOB_COLOUR_PRESETS[jobs.length%JOB_COLOUR_PRESETS.length];}
+  // Walk all 5 even-indexed presets first, then all 5 odd-indexed, then
+  // repeat - every consecutive job gets a maximally-separated colour, and
+  // all 10 get used before any repeat (unlike a plain step-by-2, which
+  // would only ever visit half of an even-sized palette).
+  const JOB_COLOUR_ORDER=[0,2,4,6,8,1,3,5,7,9];
+  function nextPreset(){return JOB_COLOUR_PRESETS[JOB_COLOUR_ORDER[jobs.length%JOB_COLOUR_PRESETS.length]];}
 
   const moveAnchor=useMemo(()=>{
     if(selectedEntries.size===0)return null;
@@ -2741,7 +2746,10 @@ function MainApp({currentUser,onLogout}) {
                 style={{padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.4)}`,background:"transparent",color:theme.heading}}
                 onMouseEnter={e=>{e.currentTarget.style.borderColor=theme.heading;}}
                 onMouseLeave={e=>{e.currentTarget.style.borderColor=hexToRgba(theme.heading,0.4);}}>
-                👥 Users
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{display:"inline-block",verticalAlign:"-2px",marginRight:5}}>
+                  <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                </svg>
+                Users
               </button>
             )}
             {isManager&&!isMobile&&(
