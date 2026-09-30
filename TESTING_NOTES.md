@@ -445,28 +445,31 @@ look rather than being folded into any of the four above.
      budget / the day's capacity) rather than clamping the entry's own
      possibly-stale stored value.
 
-7. **Auto-fill silently walks past the requested start day if it's
-   occupied, instead of flagging a conflict.** `buildAutoFill` (`App.jsx`
-   ~line 316) treats "day/slot is taken → try the next day" as one
-   blanket rule with no distinction between the STARTING day (what the
-   user actually picked/clicked) and later days within a multi-day
-   spread. Live repro: manually picked Mark, Slot 1, 01 Oct (already
-   occupied), Auto-fill left ON (the default), hit Save - no conflict
-   prompt at all, the entry silently landed on 13 Oct instead, with
-   nothing telling the user it had skipped two weeks forward.
-   Discussed and agreed design:
+7. **FIXED.** Auto-fill silently walked past the requested start day if
+   it was occupied, instead of flagging a conflict. `buildAutoFill`
+   (`App.jsx` ~line 316) treats "day/slot is taken → try the next day"
+   as one blanket rule with no distinction between the STARTING day
+   (what the user actually picked/clicked) and later days within a
+   multi-day spread. Live repro: manually picked Mark, Slot 1, 01 Oct
+   (already occupied), Auto-fill left ON (the default), hit Save - no
+   conflict prompt at all, the entry silently landed on 13 Oct instead,
+   with nothing telling the user it had skipped two weeks forward.
    - Mid-spread skipping (day 3 of a 5-day spread being occupied, skip
      to day 4) is correct and stays exactly as-is - only "First
      Available" should ever cause the search itself; that's not this.
    - When the START day/slot (the one actually selected in the form) is
-     occupied, raise the existing "⚠ Scheduling Conflict" `ConfirmModal`
-     instead of silently continuing the search.
-   - That prompt gets a THIRD option alongside the current two: keep
-     "Schedule Anyway" (proceeds there regardless, current behaviour)
-     and "Go Back"/Cancel, and add "Schedule First Available (dd/mmm)"
-     - computes the actual next open day/slot up front (reusing
-     `nextAvailableDate`/`nextAvailableBlockDate`) and shows the real
-     date in the button label, then uses it if clicked.
+     occupied, a new pre-check (`personalBlockFits`/`nextAvailableDate`,
+     both pre-existing helpers) now raises a "⚠ No Room That Day"
+     `ConfirmModal` before any save happens, instead of silently
+     continuing the search.
+   - Shipped with only TWO options: "Schedule First Available (dd/mmm)"
+     (computes and uses the real next open day/slot) and "Go Back". The
+     originally-discussed THIRD option, "Schedule Anyway" (deliberately
+     creating a Conflict-pair entry at the occupied slot), was dropped
+     for now - confirmed with the user - because item 1 above (HIGH
+     PRIORITY, duplicate-cell undo data loss) makes deliberately
+     creating a new Conflict pair unsafe until that's fixed. Re-add
+     "Schedule Anyway" once item 1 ships.
 
 8. **Mobile layout shows wrong hours/labels for Catch-up entries -
    desktop is correct, phone is not.** Not yet investigated (logged

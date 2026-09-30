@@ -3333,6 +3333,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   const [autoFill,setAutoFill]=useState(data.autoFill!==false);
   const [staggerConfirm,setStaggerConfirm]=useState(null); // {message,combined,staffId}
   const [catchUpPrompt,setCatchUpPrompt]=useState(null); // {combined,staffId}
+  const [startConflictPrompt,setStartConflictPrompt]=useState(null); // {availDate,availLabel}
 
   function set(k,v){setForm(f=>({...f,[k]:v}));}
   const jobSubs=subItems.filter(s=>s.jobId===form.jobId);
@@ -3397,6 +3398,22 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     if(staffToSchedule.length===0)return;
     if(form.entryType==="misc"){if(!form.miscNote.trim())return;}
     else if(!form.jobId)return;
+
+    // Auto-fill silently walks past the exact day/slot picked in the form
+    // if it's already occupied, landing wherever it first finds real room -
+    // fine for the auto-search a "First Available" click already asked
+    // for, but surprising when someone deliberately picked this day
+    // themselves. Single-staff only (the reported scenario) - flag it and
+    // let them choose, rather than silently jumping however far forward.
+    if(form.mode==="new"&&autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length===1){
+      const sid=staffToSchedule[0];
+      const ph=Number(staff.find(s=>s.id===sid)?.productiveHours)||8;
+      if(!personalBlockFits(sid,ph,form.slot,entries,form.dateStr)){
+        const avail=nextAvailableDate([sid],entries,form.dateStr,form.slot,staff);
+        setStartConflictPrompt({sid,ph,availDate:avail.dateStr,availSlot:avail.slot,availLabel:formatDate(parseISO(avail.dateStr))});
+        return;
+      }
+    }
 
     if(autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length>1){
       // One coordinated day-by-day walk across everyone selected, instead of
@@ -3670,6 +3687,15 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     {catchUpPrompt&&<ConfirmModal title="⚠ All hours allocated" message={`All ${totalHours}h for "${selectedSub?.name}" ${totalHours===1?"is":"are"} already scheduled. Add ${catchUpPrompt.combined.reduce((s,c)=>s+(Number(c.hours)||0),0)}h as Catch-up Hours instead? They'll be logged against this item but won't count toward its ${totalHours}h budget.`} confirmLabel="Add Catch-up Hours" cancelLabel="Cancel"
       onConfirm={()=>{onSave({...form,staffId:catchUpPrompt.staffId,autoFill,isCatchUp:true},catchUpPrompt.combined);setCatchUpPrompt(null);}}
       onCancel={()=>setCatchUpPrompt(null)}/>}
+    {startConflictPrompt&&<ConfirmModal title="⚠ No Room That Day" message={`${staff.find(s=>s.id===startConflictPrompt.sid)?.name} has no room left on ${formatDate(parseISO(form.dateStr))} - first available is ${startConflictPrompt.availLabel}. Schedule there instead?`} confirmLabel={`Schedule First Available (${startConflictPrompt.availLabel})`} cancelLabel="Go Back"
+      onConfirm={()=>{
+        const {sid,ph,availDate,availSlot}=startConflictPrompt;
+        const fills=buildAutoFill(availDate,form.totalHours,ph,sid,availSlot,entries,form.subItemId);
+        const combined=fills.map(p=>({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
+        onSave({...form,staffId:sid,dateStr:availDate,slot:availSlot,autoFill},combined);
+        setStartConflictPrompt(null);
+      }}
+      onCancel={()=>setStartConflictPrompt(null)}/>}
     </>
   );
 }
