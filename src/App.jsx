@@ -2185,7 +2185,9 @@ function MainApp({currentUser,onLogout}) {
         // the same joinery item - that's a shared/split budget day, and the
         // background correction pass is what should work out the real split.
         const sharedItemAtDest=en.subItemId&&entries.some(o=>o.id!==id&&o.subItemId===en.subItemId&&o.dateStr===newDate&&o.staffId!==newStaffId);
-        if((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest){
+        // A Catch-up entry's hours are a deliberate fixed number, never
+        // derived from any staff's cap - never touched by this restoration.
+        if((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest&&!en.isCatchUp){
           newHoursById[id]=Number(staff.find(s=>s.id===newStaffId)?.productiveHours)||8;
         }
       }
@@ -2391,10 +2393,16 @@ function MainApp({currentUser,onLogout}) {
         // A single copy that landed as Catch-up Hours needs a look - open
         // its own entry straight into the ESE modal so the number can be
         // checked/adjusted right away, rather than leaving it to be found
-        // later. A multi-entry group copy that mixes in a catch-up result
-        // is left as-is for now (no auto-open) - see TESTING_NOTES.md.
-        if(toInsert.length===1&&isCatchUpFlags[0]&&newEntries[0]){
+        // later. A multi-entry group copy could mean several different
+        // items each with their own Catch-up result - queuing that many
+        // modals in a row is more machinery (and more to get wrong) than
+        // it's worth, so it gets a plain count notice instead, pointing at
+        // the grid to review them.
+        const catchUpCount=isCatchUpFlags.filter(Boolean).length;
+        if(toInsert.length===1&&catchUpCount===1&&newEntries[0]){
           openEditEntry(newEntries[0]);
+        }else if(catchUpCount>0){
+          setError(`Pasted ${toInsert.length} - ${catchUpCount} logged as Catch-up Hours (already fully budgeted). Review them on the grid.`);
         }
       }catch(err){
         setError("Failed to copy entries.");
@@ -2496,7 +2504,9 @@ function MainApp({currentUser,onLogout}) {
     // real split from the budget, the same way it does for any other
     // multi-staff item.
     const sharedItemAtDest=entry.subItemId&&entries.some(o=>o.id!==entry.id&&o.subItemId===entry.subItemId&&o.dateStr===toDateStr&&o.staffId!==toStaffId);
-    const newHours=((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest)
+    // A Catch-up entry's hours are a deliberate fixed number, never derived
+    // from any staff's cap - never touched by this restoration.
+    const newHours=((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest&&!entry.isCatchUp)
       ?(Number(staff.find(s=>s.id===toStaffId)?.productiveHours)||8)
       :entry.hours;
     // Dropping it here makes it the newest arrival at this day/slot for
@@ -3425,7 +3435,17 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           const fills=buildAutoFill(form.dateStr,form.totalHours,ph,sid,form.slot,entries,form.subItemId);
           fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
         } else {
-          combined.push({dateStr:form.dateStr,hours:form.hours,staffId:sid,slot:form.slot});
+          // A manual (non-autofill) multi-staff entry shares one typed
+          // Hours value across the form, but each person's own day can
+          // only ever hold up to their own cap minus whatever their own
+          // sibling slot already has - applying the same figure to
+          // everyone regardless could overcommit anyone with a lower cap
+          // or less room that day than whichever staff member the field
+          // was actually validated against.
+          const otherEntry=entries.find(e=>e.staffId===sid&&e.dateStr===form.dateStr&&e.slot!==form.slot);
+          const otherHrs=otherEntry?Math.min(Number(otherEntry.hours)||0,ph):0;
+          const personalMax=Math.max(0,Math.round((ph-otherHrs)*2)/2);
+          combined.push({dateStr:form.dateStr,hours:Math.min(Number(form.hours)||0,personalMax),staffId:sid,slot:form.slot});
         }
       });
       // A brand-new, manually-typed job entry that would push this item
