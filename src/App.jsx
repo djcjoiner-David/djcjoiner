@@ -742,7 +742,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isPersonalLastEntry,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isGenuinePartial,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp}) {
   // An entry the background correction has reduced to nothing (e.g. another
   // staff member now covers the whole day/budget) shouldn't be labelled
   // "over-run" or any other budget-math term - it has zero real hours left,
@@ -757,7 +757,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
     :isOverRun?"over-run"
     :isUnderCap?`${underAmount}h under`
     :isCompletingEntry?`${budgetRemaining}h`
-    :isPersonalLastEntry?`${hours}h`
+    :isGenuinePartial?`${hours}h`
     :(totalBudget?`${totalBudget}h`:`${hours}h`);
   const flagColor=isOverRun||isUnderCap?"#D97706":undefined;
   // Only meaningful for a LOCKED Overcommitted entry - that's the case with
@@ -3079,20 +3079,16 @@ function MainApp({currentUser,onLogout}) {
                               budgetRemaining=Math.max(0,Math.round(remainingBefore*2)/2);
                             }
                           }
-                          // When more than one person is scheduled against the same item, each of
-                          // them has their OWN last entry for it - not just whichever one entry the
-                          // walk above picks as the single item-wide completing/under one. Every
-                          // other staff member's own final entry should show their real, actual
-                          // stored hours instead of the flat total-budget placeholder, the same way
-                          // the one "special" entry does - but only when that real number is
-                          // actually a genuine partial/tail value (less than the full day this
-                          // person could work). A last entry that happens to land on a completely
-                          // full, uncapped day isn't telling you anything different from an
-                          // ordinary interior day, so it shows the same placeholder those do.
-                          const myStaffEntries=siEntries.filter(x=>x.staffId===e.staffId);
-                          const myLastEntry=myStaffEntries[myStaffEntries.length-1];
+                          // Any entry whose real hours don't use up the full day this person
+                          // could work - whether it's their own tail entry, or a day they're
+                          // sharing the item's budget with another staff member (a "sibling"
+                          // split) - should show its real, actual stored hours instead of the
+                          // flat total-budget placeholder, the same way the one "special" entry
+                          // does. A day that happens to be a completely full, uncapped day isn't
+                          // telling you anything different from an ordinary interior day, so it
+                          // still shows the same placeholder those do.
                           const myMaxThisDay=maxPossibleHours(e,entries,staff);
-                          const isPersonalLastEntry=!isSpecialEntry&&!isOverRun&&myLastEntry?.id===e.id&&(Number(e.hours)||0)<myMaxThisDay-0.05;
+                          const isGenuinePartial=!isSpecialEntry&&!isOverRun&&(Number(e.hours)||0)<myMaxThisDay-0.05;
                           // How many hours this ITEM as a whole still needs to reach its
                           // total budget, using everyone's real effective hours (not raw
                           // stored ones) - `cumulative` is exactly that sum, since the walk
@@ -3102,7 +3098,7 @@ function MainApp({currentUser,onLogout}) {
                           // repair path and isn't ever the "special" completing/under-cap
                           // entry above, so this is the only place its shortfall surfaces.
                           const itemShortfall=Math.max(0,Math.round((si.totalHours-cumulative)*2)/2);
-                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isPersonalLastEntry,isLocked:!!e.hoursLocked,itemShortfall};
+                          return {totalBudget,isSpecialEntry,isOverRun,isCompletingEntry,budgetRemaining,isUnderCap,underAmount,isGenuinePartial,isLocked:!!e.hoursLocked,itemShortfall};
                         }
                         // Whenever this staff member doesn't have every hour of their day
                         // used/allocated - whatever sits in the other slot, job or misc, for
@@ -3128,7 +3124,7 @@ function MainApp({currentUser,onLogout}) {
                             return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
                           }
                           const meta=computeJobEntryMeta(e)||{};
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isPersonalLastEntry={meta.isPersonalLastEntry} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp}/>;
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isGenuinePartial={meta.isGenuinePartial} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp}/>;
                         }
                         return(
                           <td key={di}
