@@ -2589,6 +2589,18 @@ function MainApp({currentUser,onLogout}) {
     const otherOf=(index,e)=>index.get(`${e.staffId}|${e.dateStr}|${e.slot===0?1:0}`);
     const workingIndex=slotIndexFor(working);
     const specialHours={}; // entryId -> newHours
+    // An unlocked, non-"special" entry can safely be re-derived UPWARD (not
+    // just clamped down) from the day's current real capacity when it's the
+    // ONLY such entry in its item - nothing else in that item depends on
+    // exactly how much it contributes, so there's no other entry's budget
+    // share it could steal from or double up with. The moment a second
+    // unlocked, non-special entry exists in the same item (e.g. two staff
+    // splitting one day's worth of an item's remaining budget between them),
+    // growing either one independently from its own day-capacity ceiling -
+    // which knows nothing about the item's shared budget - could double-
+    // count hours the other one is also drawing from, so both stay on the
+    // existing shrink-only clamp instead.
+    const regrowableIds=new Set();
     Object.values(bySubItem).forEach(siEntries=>{
       const si=subItems.find(s=>s.id===siEntries[0].subItemId);
       if(!si)return;
@@ -2606,8 +2618,10 @@ function MainApp({currentUser,onLogout}) {
       // never plays the "special" (completing/under-cap) role. If that's
       // where the role would otherwise land, there's simply nothing left
       // for this pass to derive for the item right now.
-      if(sorted[rawSpecialIdx].hoursLocked)return;
-      const specialIdx=rawSpecialIdx;
+      const specialIdx=sorted[rawSpecialIdx].hoursLocked?-1:rawSpecialIdx;
+      const nonSpecialUnlocked=sorted.filter((e,i)=>i!==specialIdx&&!e.hoursLocked);
+      if(nonSpecialUnlocked.length===1)regrowableIds.add(nonSpecialUnlocked[0].id);
+      if(specialIdx===-1)return;
       const special=sorted[specialIdx];
       const remainingBefore=si.totalHours-befores[specialIdx];
       const maxPossible=completeIdx===-1?maxPossibleHours(special,working,staff,otherOf(workingIndex,special)):Infinity;
@@ -2632,7 +2646,18 @@ function MainApp({currentUser,onLogout}) {
     // has no other effect. This is what unlockSiblingSlot unlocks when the
     // OTHER slot gets its own fresh edit, letting this same step correctly
     // shrink the now-unlocked Misc entry back down to fit.
-    return afterSpecial.map(e=>(specialHours[e.id]!==undefined||e.hoursLocked)?e:{...e,hours:Math.round(effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))*2)/2});
+    return afterSpecial.map(e=>{
+      if(specialHours[e.id]!==undefined||e.hoursLocked)return e;
+      // The sole non-special, unlocked entry in its item: safe to re-derive
+      // straight from current day capacity, so a staff efficiency edit that
+      // shrank it can also restore it once the constraint is lifted again -
+      // see the regrowableIds comment above for why this only applies when
+      // it's the only such entry.
+      const newHours=regrowableIds.has(e.id)
+        ?maxPossibleHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))
+        :effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e));
+      return {...e,hours:Math.round(newHours*2)/2};
+    });
   }
   // Correcting one item's finishing entry can change how much capacity a
   // DIFFERENT item's entry has left that same day (when two items share a
