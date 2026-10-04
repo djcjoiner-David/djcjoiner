@@ -617,8 +617,8 @@ look rather than being folded into any of the four above.
     - Test: `test-copy-partial-budget.mjs` (was the known-bug file) -
       fails on main before this change, passes after.
 
-12. **Adding work to someone with no hours left that day never warns -
-    except auto-fill.** Found by a read-only check (pretend data): David
+12. **FIXED (no-room conflict PR). (Was: adding work to someone with no
+    hours left that day never warned - except auto-fill.)** Found by a read-only check (pretend data): David
     (7h/day) has a full 7h in slot 1 on a day; work is put into his empty
     slot 2 six different ways:
     1. New entry, auto-fill off: Hours box locks at 0, saving creates an
@@ -645,7 +645,44 @@ look rather than being folded into any of the four above.
       `claude/auto-delete-zero-hours`) then only ever applies to an entry
       emptied by its own item's budget being used up elsewhere - never to
       one squeezed out by a different job, since that's now a conflict.
-    - Not yet built.
+    - Agreed case by case with the user (Mon 5 Oct example: David 7h/day,
+      slot 1 full 7h; work put into his empty slot 2):
+      1. New manual entry: the Hours box accepts the typed number; Save
+         shows the pop-up. Go Back = back to the form, nothing saved.
+         Schedule Anyway = saved at the typed hours (David 11h).
+      2. Drag one entry: pop-up on drop. Go Back = entry stays where it
+         was. Schedule Anyway = it moves, keeping its full hours.
+      3. Ctrl-drag copy: pop-up on drop. Go Back = no copy. Schedule
+         Anyway = copy made at full hours (Catch-up only if its item's
+         budget is already full - 2E #11).
+      4. Group move: ONE pop-up for the whole group listing every full
+         day. Go Back = nothing moves. Schedule Anyway = whole group moves;
+         full-day ones keep their hours. All or nothing, never split.
+      5. Group copy: same as 4, for copies.
+      In every Schedule Anyway case: both of that person's entries that day
+      show the red "⚠ Conflict", and the app never shrinks or deletes
+      either one.
+    - Some room but not enough (e.g. 2h left, 7.5h entry dragged in): stays
+      as today - cut to the 2h that fits, the other 5.5h added as a new day
+      at the end of the item's schedule ("Extended by 1 day" message). The
+      pop-up is only for 0h left. (User: "Try that".)
+    - What shipped: `noRoomDays`/`askNoRoom` in `App.jsx`, called from all
+      5 paths before anything is saved (saveEntry's new branch,
+      handleDrop's move and copy, performGroupMove, performGroupCopy).
+      Schedule Anyway saves those placements `hours_locked:true` at their
+      full hours; `unlockAllLocksInItem` skips them (new `keepIds`) and a
+      new entry's sibling slot isn't unlocked, so nothing shrinks or
+      deletes either entry. `overMaxDays` shows the red "⚠ Conflict" on
+      both of the person's entries that day (both slots filled, a locked
+      entry among them, stored hours over their daily max). The entry
+      form's Hours box accepts a number for a NEW entry on a no-room day
+      (`hoursInputMax`); with some room it's still capped to what fits.
+    - Test: `test-no-room-conflict.mjs` (all 5 ways x Go Back / Schedule
+      Anyway, red conflict, still intact after a later grid action, and
+      the some-room case unchanged) - fails on main before this change
+      (no pop-up anywhere), passes after. `test-group-move-displace.mjs`
+      updated: its blocker now leaves room that day (a full-day blocker is
+      now this pop-up).
 
 13. **FIXED (PR #61). An entry left with 0h now deletes
     itself** - the user's rule, restoring the behaviour that existed for
