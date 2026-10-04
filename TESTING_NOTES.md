@@ -547,7 +547,7 @@ look rather than being folded into any of the four above.
      knock-on, since that only happens when the lock is lost.
    - Not yet fixed - waiting on the user's go-ahead.
 
-10. **HIGH PRIORITY - CONFIRMED, LIVE ON MAIN. Batch 6's "regrow" rule
+10. **FIXED (PR #60). (Was: HIGH PRIORITY, live on main.) Batch 6's "regrow" rule
     rewrites correct stored hours just by opening the app.** Found while
     rebuilding the regression suite. Introduced by PR #57 (Batch 6).
     `oneCorrectionPass` (`App.jsx` ~line 2634, `regrowableIds`) grows the
@@ -574,7 +574,7 @@ look rather than being folded into any of the four above.
       over its budget (grow only by what the item still actually needs).
     - User's decision: fix B (keep the grow-back, but make it safe), plus
       the app must never recalculate just from being opened.
-    - FIX BUILT AND TESTED, NOT YET SHIPPED (no PR yet, per the user):
+    - SHIPPED in PR #60 (squash-merged to main as 902134f, verified on main):
       1. The background check skips the schedule exactly as loaded from
          the database (`loadedStateRef` in `App.jsx`), so opening the app
          or pressing Refresh never saves anything. Every load is
