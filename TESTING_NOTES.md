@@ -740,6 +740,23 @@ look rather than being folded into any of the four above.
       and grows Thu 15 for David and Ian (4.5h each) - still 36h.
     - USER'S DECISION: no change - a single drag stays as it is.
 
+15. **A manual hours edit shrinks the person's OTHER entry that day
+    instead of flagging them as over their day.** Found in the user's
+    live testing (Ian, Mon 19): Ian 7.5h/day had Driscoll Laundry W 7h in
+    slot 2. Copying David's same-item entry onto Ian's slot 1 correctly
+    landed as Catch-up (0.5h, what fit) and opened its form; changing it
+    to 4h and saving cut Ian's Laundry from 7h to 3.5h ("3.5h under")
+    instead of keeping 7h and showing Ian as over his day. Recreated
+    exactly on pretend data.
+    - Cause: the rule from PRs #35/#39 - saving a manual edit unlocks the
+      other slot's entry and re-dates it so it yields (`unlockSiblingSlot`
+      in `saveEntry`), shrinking it to fit around the typed number.
+    - USER'S DECISION: (b) - for EVERY manual hours edit, the other entry
+      is never shrunk; if the day goes over the person's max it's flagged
+      instead. This replaces the #35/#39 rule.
+    - Still to agree with the user before building: exactly how it's
+      flagged (pop-up first, or save and show red Conflict).
+
 ### 2G. Regression test suite (tests/)
 Rebuilt from scratch this session (the old scratchpad suite was lost with
 an earlier container) and kept in the repo so it can't be lost again. Run
