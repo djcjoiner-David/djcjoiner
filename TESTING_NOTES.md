@@ -394,56 +394,49 @@ look rather than being folded into any of the four above.
    row - likely needs the same per-person capping `buildGroupAutoFill`
    already does for the autofill case.
 
-6. **HIGH PRIORITY - `effectiveEntryHours` only ever shrinks a non-
-   "completing" entry's hours, never re-derives them upward - so a
-   staff efficiency edit can permanently corrupt stored hours, including
-   on OTHER staff's entries in a shared item.** Root cause confirmed via
-   code trace, live-reproduced:
-   - Editing a staff member's productive hours (Staff modal) DOES trigger
-     the app's ambient background correction (`useEffect` at `App.jsx`
-     ~line 2609, deps `[entries,staff,subItems,canEdit]` - runs on every
-     `staff` change, not just schedule edits). This is correct/intended
-     per the user (staff hours changes SHOULD recalculate shared items).
-   - The bug: `effectiveEntryHours` (`App.jsx` ~line 264) computes
-     `const myHours=Number(e.hours)||0;` then only ever clamps it DOWN
-     (`Math.min(myHours,...)`) toward whatever the current cap allows -
-     it never derives a fresh value from real current constraints for a
-     non-"completing" entry. Only the ONE "completing" entry per item
-     (`oneCorrectionPass`'s `specialHours` logic) gets properly re-
-     derived from actual remaining budget; every other entry in that
-     item is capped-down-only, permanently, even after the constraint
-     that shrank it is later removed.
-   - Live repro: David's productive hours dropped 7h→6h - his entry got
-     PATCHED (persisted, not just displayed) down to 6h by the ambient
-     pass. Raising it back to 7h did NOT restore it - still stuck at 6h,
-     confirmed via reopening its own ESE modal.
-   - Cross-contamination: David shares "Laundry"/"Mudroom" with Mark on
-     Tue 6th, and "Mudroom"/"Pantry" with Mark on Wed 7th (same joinery
-     items, different staff). Because `oneCorrectionPass` groups purely
-     `bySubItem` (item), not by staff, David's edit rippled the shared
-     items' recalculation into Mark's entries too - Mark's own Wed-7th
-     Pantry and Mudroom entries changed to "Overcommitted" and "0.5h
-     under" respectively, without Mark himself being touched at all.
-     Since this ripple is built on top of David's already-wrong stuck
-     6h value, some/all of Mark's new numbers may themselves be wrong
-     as a downstream consequence, not a separate bug in their own right
-     - needs re-checking once the root cause is fixed.
-   - User's confirmed intent: staff efficiency edits SHOULD recalculate
-     shared items (not be scoped to only that one staff member) - the
-     fix needs to make that recalculation actually correct in both
-     directions (up AND down), not disable it.
-   - NOT fixed now - deliberately deferred: `effectiveEntryHours` is
-     used throughout the app (undo/redo, sibling locking/capping,
-     Catch-up Hours exclusions all depend on it), so a fix here has real
-     regression risk across everything tested this session. Needs a
-     dedicated pass with a full regression run, not a mid-session patch.
-   - Fix direction (needs more thought before starting): the
-     "completing entry" role's remaining-budget-based re-derivation
-     already does the right thing (line 2554-2556) - the non-special
-     capping step (line 2575) likely needs the same treatment: derive
-     from current real constraints (what's actually left of the item's
-     budget / the day's capacity) rather than clamping the entry's own
-     possibly-stale stored value.
+6. **FIXED.** `effectiveEntryHours` only ever shrank a non-"completing"
+   entry's hours, never re-derived them upward - so a staff efficiency
+   edit could permanently corrupt stored hours, including on OTHER
+   staff's entries in a shared item, with no way back once the
+   constraint that shrank them was lifted again.
+   - Live repro that confirmed it: David's productive hours dropped
+     7h→6h - his entry got PATCHED (persisted, not just displayed) down
+     to 6h by the ambient pass. Raising it back to 7h did NOT restore
+     it - still stuck at 6h. Also rippled into Mark's unrelated entries
+     on a shared item ("Overcommitted"/"X under" with Mark himself
+     never touched).
+   - Product decision (superseding the original "recalculate shared
+     items on a staff edit" intent, after discussing the real cost of
+     making that fully correct for every case): a staff hours edit, up
+     or down, now touches NOTHING already on the grid, ever - only
+     scheduling created from that point forward uses the new number.
+     The existing ambient correction pass (`useEffect` at `App.jsx`,
+     deps now `[entries,subItems,canEdit]` - `staff` deliberately
+     removed) no longer runs just because a staff record changed.
+   - That pass still runs - using whatever staff data is CURRENT at the
+     time - for actual schedule changes (drag, copy, delete, new entry),
+     same as always. Fixed there too: `oneCorrectionPass`'s non-special
+     capping step can now re-derive an entry's hours UPWARD as well as
+     down, but ONLY when it's the sole unlocked, non-special entry in
+     its item (see `regrowableIds` in `App.jsx`) - growing it when a
+     second such entry exists in the same item (e.g. two staff
+     splitting one day's worth of an item's budget) risked double-
+     counting hours against that other entry's own share, so that case
+     deliberately keeps the old shrink-only behaviour.
+   - An entry's stored hours can now legitimately exceed a staff
+     member's CURRENT cap for a while (until the next grid action
+     corrects it) - deliberate, confirmed with the user: no popup, no
+     display change for this case. The on-screen label already
+     recalculates live from current staff data regardless (unchanged),
+     it's only the STORED value that stays put until something else on
+     the grid touches it.
+   - Shipped in PR #57, with dedicated tests `test-staff-hours-no-
+     retroactive.mjs` (hours edit alone = zero effect) and
+     `test-staff-hours-rule2-grid-trigger.mjs` (a later grid action
+     correctly shrinks AND grows back). Also fixed a latent bug in the
+     shared test helper `date-helpers.mjs` found along the way:
+     `businessDay(0)` and `businessDay(1)` could collide on the same
+     date whenever "today" is a weekend.
 
 7. **FIXED.** Auto-fill silently walked past the requested start day if
    it was occupied, instead of flagging a conflict. `buildAutoFill`
