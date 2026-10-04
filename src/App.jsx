@@ -2357,12 +2357,16 @@ function MainApp({currentUser,onLogout}) {
       // duplication, not a fresh deliberate choice of hours, so it always
       // starts open to the normal budget math (which is exactly what lets
       // recalculateItem settle it and the source into a real split below).
-      // EXCEPT: a copy that would push its item over a budget it's already
-      // fully used lands as Catch-up Hours instead of being silently zeroed
-      // out and deleted by the ambient pass - the exact scenario Catch-up
-      // Hours was built for (see the ESE modal's own version of this
-      // check). Tracked running per item, since copying several entries
-      // onto the same item in one action can each push it further over.
+      // EXCEPT: a copy onto an item whose budget is ALREADY fully used
+      // lands as Catch-up Hours instead of being silently zeroed out and
+      // deleted - the exact scenario Catch-up Hours was built for. If the
+      // item still has ANY budget left, the copy is a normal entry and the
+      // item's own recalculation below settles it to the budget (TESTING_
+      // NOTES 2E #11 - previously a copy that merely went over, even with
+      // hours left, became all Catch-up and the budget was never filled).
+      // Judged per item only, against that item's own budget. Tracked
+      // running per item, since copying several entries onto the same item
+      // in one action can fill it part-way through.
       const itemUsedSoFar={};
       const isCatchUpFlags=toInsert.map(({en})=>{
         if(en.miscNote||!en.subItemId)return false;
@@ -2372,7 +2376,7 @@ function MainApp({currentUser,onLogout}) {
           itemUsedSoFar[en.subItemId]=_u.filter(e=>e.subItemId===en.subItemId&&!e.miscNote&&!e.isCatchUp).reduce((s,e)=>s+(Number(e.hours)||0),0);
         }
         const hrs=Number(en.hours)||0;
-        if(itemUsedSoFar[en.subItemId]+hrs>(Number(si.totalHours)||0)+0.05)return true;
+        if(itemUsedSoFar[en.subItemId]>=(Number(si.totalHours)||0)-0.05)return true;
         itemUsedSoFar[en.subItemId]+=hrs;
         return false;
       });
@@ -2474,16 +2478,16 @@ function MainApp({currentUser,onLogout}) {
         return;
       }
       // Same as performGroupCopy: a copy never inherits the source's lock,
-      // so it's always open to the normal budget math - unless it would
-      // push its item over a budget it's already fully used, in which case
-      // it lands as Catch-up Hours instead (see performGroupCopy).
+      // so it's always open to the normal budget math - unless its item's
+      // budget is already fully used, in which case it lands as Catch-up
+      // Hours instead (see performGroupCopy).
       const _u=snapshotEntries(entries);
       let entryIsCatchUp=false;
       if(!entry.miscNote&&entry.subItemId){
         const si=subItems.find(s=>s.id===entry.subItemId);
         if(si){
           const used=_u.filter(e=>e.subItemId===entry.subItemId&&!e.miscNote&&!e.isCatchUp).reduce((s,e)=>s+(Number(e.hours)||0),0);
-          if(used+(Number(entry.hours)||0)>(Number(si.totalHours)||0)+0.05)entryIsCatchUp=true;
+          if(used>=(Number(si.totalHours)||0)-0.05)entryIsCatchUp=true;
         }
       }
       const tempId=`temp_copy_${Date.now()}`;
