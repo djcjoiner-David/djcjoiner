@@ -778,6 +778,21 @@ look rather than being folded into any of the four above.
       passes after. Four older tests that checked the replaced #35/#39
       rule were updated to the new rule.
 
+16. **Entry form's Catch-up note shows the wrong budget when editing.**
+    Found in the user's live testing (Ian, Tue 20, editing a Catch-up
+    copy): the form said "+ 1h Catch-up Hours logged for this item (not
+    counted in its 12h budget)" while the Joinery Item dropdown said
+    "Laundry W (41h budget)". Display only.
+    - Cause: `EntryModal`'s `totalHours` is `form.totalHours ||
+      selectedSub.totalHours` - when editing an existing entry,
+      `form.totalHours` carries some other number, so the note uses it
+      instead of the item's real budget.
+    - Fix direction: the note should always use the selected item's own
+      `totalHours`. Not yet fixed.
+    - Also seen in the same test: one "Failed to save entry." that worked
+      on retry. Could not be reproduced with the same steps - most likely
+      a brief connection drop to the database. Watch for it recurring.
+
 ### 2G. Regression test suite (tests/)
 Rebuilt from scratch this session (the old scratchpad suite was lost with
 an earlier container) and kept in the repo so it can't be lost again. Run
