@@ -1318,24 +1318,51 @@ function MainApp({currentUser,onLogout}) {
   }
 
   // Syncs the database (and returns the resulting pool) to exactly match
-  // `target`, given the schedule currently sitting in `current`. Cells only
-  // in `current` are deleted, cells only in `target` are recreated (with
-  // their original created_at explicitly set), and cells in both whose
-  // fields differ are patched onto whichever row currently occupies that
-  // cell.
+  // `target`, given the schedule currently sitting in `current`. Entries
+  // only in `current` are deleted, entries only in `target` are recreated
+  // (with their original created_at explicitly set), and entries matched up
+  // in both (see matchEntriesByCell) whose fields differ are patched onto
+  // the row they were matched with.
   // Returns {ok, pool}: ok is false if any of the sync calls failed, in
   // which case pool is just `current` unchanged. Callers must only pop/push
   // the undo/redo stacks when ok is true - popping first and hoping the
   // sync works is what let a failed (or overlapping) click silently consume
   // the wrong stack entry.
+  // A cell normally holds at most one entry, but "Schedule Anyway" can
+  // deliberately put a second one there (a Conflict pair). So each cell's
+  // entries are matched up as a list, not a single value: first by id,
+  // then by what the entry actually is (job/item/note + scheduling order -
+  // survives the id churn of a delete+recreate), then whatever's left is
+  // paired off in order. For an ordinary one-entry cell that's exactly the
+  // plain cell-for-cell match; a doubled cell no longer collapses to one
+  // entry and silently overwrites/deletes the other.
+  function entryIdentity(e){ return `${e.jobId||""}|${e.subItemId||""}|${e.miscNote||""}|${e.createdAt}`; }
+  function matchEntriesByCell(current, target){
+    const group=list=>{const m=new Map();for(const e of list){const k=cellKey(e);if(!m.has(k))m.set(k,[]);m.get(k).push(e);}return m;};
+    const curByCell=group(current), tgtByCell=group(target);
+    const pairs=[], toDelete=[], toCreate=[];
+    for(const k of new Set([...curByCell.keys(),...tgtByCell.keys()])){
+      const cur=[...(curByCell.get(k)||[])], tgt=[...(tgtByCell.get(k)||[])];
+      const pairOff=match=>{
+        for(let i=0;i<tgt.length;){
+          const j=cur.findIndex(c=>match(c,tgt[i]));
+          if(j===-1){i++;continue;}
+          pairs.push({cur:cur[j],target:tgt[i]});
+          cur.splice(j,1);tgt.splice(i,1);
+        }
+      };
+      pairOff((c,t)=>c.id===t.id);
+      pairOff((c,t)=>entryIdentity(c)===entryIdentity(t));
+      pairOff(()=>true);
+      toDelete.push(...cur);
+      toCreate.push(...tgt);
+    }
+    return {pairs,toDelete,toCreate};
+  }
+
   async function applyEntriesSnapshot(current, target){
-    const byCellCur=new Map(current.map(e=>[cellKey(e),e]));
-    const byCellTgt=new Map(target.map(e=>[cellKey(e),e]));
-    const toDelete=[...byCellCur.values()].filter(e=>!byCellTgt.has(cellKey(e)));
-    const toCreate=[...byCellTgt.values()].filter(e=>!byCellCur.has(cellKey(e)));
-    const toPatch=[...byCellTgt.values()]
-      .map(t=>({cur:byCellCur.get(cellKey(t)),target:t}))
-      .filter(({cur,target})=>cur&&!sameEntry(cur,target));
+    const {pairs,toDelete,toCreate}=matchEntriesByCell(current,target);
+    const toPatch=pairs.filter(({cur,target})=>!sameEntry(cur,target));
     try{
       if(toDelete.length)await Promise.all(toDelete.map(e=>db("DELETE","entries",null,`?id=eq.${e.id}`)));
       let created=[];
@@ -1347,8 +1374,7 @@ function MainApp({currentUser,onLogout}) {
         await Promise.all(toPatch.map(({cur,target})=>
           db("PATCH","entries",{...entryFields(target),created_at:target.createdAt},`?id=eq.${cur.id}`)
         ));
-      const patchedIds=new Set(toPatch.map(({cur})=>cur.id));
-      const untouched=current.filter(e=>byCellTgt.has(cellKey(e))&&!patchedIds.has(e.id));
+      const untouched=pairs.filter(({cur,target})=>sameEntry(cur,target)).map(({cur})=>cur);
       const patched=toPatch.map(({cur,target})=>({...target,id:cur.id}));
       return {ok:true,pool:[...untouched,...patched,...created]};
     }catch(err){

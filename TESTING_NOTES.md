@@ -304,7 +304,7 @@ look rather than being folded into any of the four above.
 
 ### 2E. Logged for a later fix batch (not yet fixed)
 
-1. **HIGH PRIORITY - CONFIRMED REAL DATA LOSS. Undo/redo can't correctly
+1. **FIXED. (Was: HIGH PRIORITY - CONFIRMED REAL DATA LOSS.) Undo/redo can't correctly
    represent a deliberately-duplicated cell, and can now permanently
    delete one of the two entries with no recovery path.** The undo/redo
    engine (`applyEntriesSnapshot`, `cellKey`) diffs snapshots by
@@ -340,6 +340,33 @@ look rather than being folded into any of the four above.
    whenever `conflictKeys` shows more than one entry sharing that cell (a
    plain per-cell diff for the common case, falling back to id-based
    matching only for the cells that are actually doubled up).
+   - What shipped: `applyEntriesSnapshot` (undo/redo's "make the DB
+     match this snapshot" sync) no longer builds one-entry-per-cell
+     `Map`s. A new `matchEntriesByCell` groups both snapshots by cell
+     and matches each cell's entries as a LIST: first by `id`, then by
+     what the entry is (`entryIdentity`: job/item/note + `created_at`,
+     which survives the id churn of a delete+recreate), then pairs off
+     whatever is left in order. Leftover current entries are deleted,
+     leftover target entries recreated (original `created_at` kept). For
+     an ordinary one-entry cell this is exactly the old cell-for-cell
+     behaviour, so normal undo/redo is unchanged; a doubled cell no
+     longer collapses to one entry.
+   - Root cause confirmed against a pre-fix baseline (worktree + second
+     vite port): Conflict pair A+B in one cell, drag B away, Undo ->
+     the cell `Map` only "saw" B, so the sync DELETEd B at its new spot
+     and PATCHed A's row into a copy of B - A (never touched by the
+     drag) was gone from the DB. Same flaw could also DUPLICATE an
+     entry when undoing the "Schedule Anyway" creation itself.
+   - Tests: `test-dupcell-undo.mjs` (seeded Conflict pair: drag, undo,
+     redo, undo, reload - both entries and their scheduling order
+     survive) and `test-dupcell-undo-ui.mjs` (the exact live repro via
+     the UI: Schedule Anyway -> drag -> Undo x2 -> Redo x2, DB checked
+     exactly at every step). Both FAIL on the pre-fix baseline, PASS on
+     the fix. `test-undo-regression.mjs` (single move, edit, delete,
+     auto-fill create, group move - undo/redo each exact incl.
+     `created_at`) passes on both baseline and fix.
+   - Unblocks re-adding "Schedule Anyway" to the "No Room That Day"
+     prompt (see item 7 below) - not done in this fix, separate change.
 
 2. **Multi-entry group copy doesn't auto-open the ESE modal for a Catch-up
    result.** `performGroupCopy` and the single-entry ctrl+drag copy path
