@@ -1547,6 +1547,21 @@ function MainApp({currentUser,onLogout}) {
     for(const e of entries){const k=`${e.staffId}|${e.dateStr}|${e.slot}`;counts[k]=(counts[k]||0)+1;map[k]=e;(byKey[k]=byKey[k]||[]).push(e);}
     return {entryMap:map,conflictKeys:new Set(Object.keys(counts).filter(k=>counts[k]>1)),entriesByKey:byKey};
   },[entries]);
+  // A person booked over their daily hours on purpose ("Schedule Anyway" on
+  // a day with no room - see askNoRoom): both slots filled, a locked entry
+  // among them, and more stored hours than their day holds. Both entries
+  // that day show the red "⚠ Conflict" until someone fixes it by hand.
+  const overMaxDays=useMemo(()=>{
+    const byDay={};
+    for(const e of entries){const k=`${e.staffId}|${e.dateStr}`;(byDay[k]=byDay[k]||[]).push(e);}
+    const out=new Set();
+    Object.entries(byDay).forEach(([k,list])=>{
+      if(new Set(list.map(e=>e.slot)).size<2||!list.some(e=>e.hoursLocked))return;
+      const cap=Number(staff.find(s=>s.id===list[0].staffId)?.productiveHours)||8;
+      if(list.reduce((a,e)=>a+(Number(e.hours)||0),0)>cap+0.05)out.add(k);
+    });
+    return out;
+  },[entries,staff]);
 
   function navigate(dir){setAnchorDate(d=>addDays(d,dir*viewWeeks*7));}
   function goToday(){setAnchorDate(mondayOf(TODAY));}
@@ -1693,8 +1708,11 @@ function MainApp({currentUser,onLogout}) {
   // actually touched can keep reserving its hours out of the total while the
   // rest of the item is redistributed around it, letting the item's stored
   // total run over its real budget.
-  async function unlockAllLocksInItem(subItemId,pool){
-    const locked=pool.filter(x=>x.subItemId===subItemId&&x.hoursLocked);
+  async function unlockAllLocksInItem(subItemId,pool,keepIds){
+    // keepIds: entries just placed with "Schedule Anyway" on a day the
+    // person had no hours left (see askNoRoom) - that lock is what keeps
+    // their deliberate hours from being shrunk or deleted, so it stays.
+    const locked=pool.filter(x=>x.subItemId===subItemId&&x.hoursLocked&&!keepIds?.has(x.id));
     if(locked.length===0)return pool;
     const ids=new Set(locked.map(c=>c.id));
     setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
@@ -1874,31 +1892,47 @@ function MainApp({currentUser,onLogout}) {
           });
           return;
         }
-        const inserted=await db("POST","entries",buildRows(valid));
-        const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up}));
-        setEntries(prev=>[...prev,...newMapped]);
-        let pool=[..._u,...newMapped];
-        if(data.entryType!=="misc"&&data.subItemId&&newMapped.length>0){
-          if(data.autoFill){
-            // A brand-new auto-filled schedule can still land on a day this
-            // item already has an entry on (from an earlier, separate
-            // scheduling action) - recalculate every day it touched so the
-            // whole item settles together instead of leaving that day
-            // silently over-budget until the next unrelated change.
-            const touchedDates=[...new Set(newMapped.map(m=>m.dateStr))];
-            pool=await unlockStaleLocksAtMany(data.subItemId,newMapped.map(m=>({dateStr:m.dateStr,excludeId:m.id})),pool);
-            pool=await recalculateItem(data.subItemId,pool,touchedDates);
-          }else if(newMapped.length===1){
-            const created=newMapped[0];
-            pool=await unlockStaleLocksAt(data.subItemId,created.dateStr,created.id,pool);
-            pool=await recalculateItem(data.subItemId,pool,[created.dateStr]);
+        // Saves the new entries. forcedKeys: staff|date days the person had
+        // no hours left and Schedule Anyway was chosen (see askNoRoom).
+        const insertNew=async(forcedKeys)=>{
+          const inserted=await db("POST","entries",buildRows(valid).map(r=>forcedKeys.has(noRoomKey(r.staff_id,r.date_str))?{...r,hours_locked:true}:r));
+          const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up}));
+          setEntries(prev=>[...prev,...newMapped]);
+          let pool=[..._u,...newMapped];
+          if(data.entryType!=="misc"&&data.subItemId&&newMapped.length>0){
+            if(data.autoFill){
+              // A brand-new auto-filled schedule can still land on a day this
+              // item already has an entry on (from an earlier, separate
+              // scheduling action) - recalculate every day it touched so the
+              // whole item settles together instead of leaving that day
+              // silently over-budget until the next unrelated change.
+              const touchedDates=[...new Set(newMapped.map(m=>m.dateStr))];
+              pool=await unlockStaleLocksAtMany(data.subItemId,newMapped.map(m=>({dateStr:m.dateStr,excludeId:m.id})),pool);
+              pool=await recalculateItem(data.subItemId,pool,touchedDates);
+            }else if(newMapped.length===1){
+              const created=newMapped[0];
+              pool=await unlockStaleLocksAt(data.subItemId,created.dateStr,created.id,pool);
+              pool=await recalculateItem(data.subItemId,pool,[created.dateStr]);
+            }
           }
+          if(data.entryType!=="misc"&&!data.autoFill&&newMapped.length===1){
+            const created=newMapped[0];
+            // A Schedule Anyway entry (no room that day) leaves the other slot
+            // exactly as it is - it's booked over the day on purpose.
+            if(!forcedKeys.has(noRoomKey(created.staffId,created.dateStr)))
+              pool=await unlockSiblingSlot(pool,created.staffId,created.dateStr,created.slot===0?1:0,created.id);
+          }
+          pushUndoSnapshot(_u,pool);
+        };
+        // No hours left for that person that day: ask first (see askNoRoom).
+        // Go Back returns to the form with nothing saved.
+        const newNoRoom=noRoomDays(valid.map(p=>({staffId:p.staffId||data.staffId,dateStr:p.dateStr,slot:p.slot!==undefined?p.slot:data.slot,hours:p.hours})),entries);
+        if(newNoRoom.length>0){
+          setSaving(false);
+          if(!(await askNoRoom(newNoRoom)))return;
+          setSaving(true);
         }
-        if(data.entryType!=="misc"&&!data.autoFill&&newMapped.length===1){
-          const created=newMapped[0];
-          pool=await unlockSiblingSlot(pool,created.staffId,created.dateStr,created.slot===0?1:0,created.id);
-        }
-        pushUndoSnapshot(_u,pool);
+        await insertNew(new Set(newNoRoom.map(d=>noRoomKey(d.staffId,d.dateStr))));
       } else {
         const prevEntry=entries.find(e=>e.id===data.id);
         // A job entry manually set to zero (or negative) hours means "no
@@ -2198,6 +2232,15 @@ function MainApp({currentUser,onLogout}) {
         setError("Couldn't move - every destination slot is already taken.");
         return;
       }
+      // Any destination day where that person has no hours left: ONE
+      // pop-up for the whole group (see askNoRoom). Go Back = nothing moves.
+      // Schedule Anyway = the whole group moves; those placements keep
+      // their full hours, locked. All or nothing - never split.
+      const groupPlacements=activeIds.map(id=>({id,staffId:idToStaff[id],dateStr:idToDate[id],slot:idToSlot[id],hours:Number(entries.find(x=>x.id===id)?.hours)||0}));
+      const groupNoRoom=noRoomDays(groupPlacements,entries,movingIds);
+      if(groupNoRoom.length>0&&!(await askNoRoom(groupNoRoom)))return;
+      const noRoomSet=new Set(groupNoRoom.map(d=>noRoomKey(d.staffId,d.dateStr)));
+      const forcedIds=new Set(groupPlacements.filter(p=>noRoomSet.has(noRoomKey(p.staffId,p.dateStr))).map(p=>p.id));
       // Same restoration as a single-entry drag (see handleDrop): if the one
       // entry being moved was capped by a same-day sibling at its old spot,
       // or was simply using its old staff member's whole day outright (no
@@ -2208,7 +2251,7 @@ function MainApp({currentUser,onLogout}) {
       // together, where "was it capped" gets a lot less clear-cut, so those
       // keep their hours as-is like before.
       let newHoursById={};
-      if(activeIds.length===1){
+      if(activeIds.length===1&&!forcedIds.has(activeIds[0])){
         const id=activeIds[0];
         const en=entries.find(x=>x.id===id);
         const newStaffId=idToStaff[id],newDate=idToDate[id],newSlot=idToSlot[id];
@@ -2233,7 +2276,7 @@ function MainApp({currentUser,onLogout}) {
         .filter(e=>!skippedIds.has(e.id))
         .map(x=>{
           const u=updates.find(u=>u.id===x.id);
-          if(u)return{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt,...(u.newHours!==undefined?{hours:u.newHours}:{})};
+          if(u)return{...x,staffId:u.newStaffId,dateStr:u.newDate,slot:u.newSlot,createdAt:movedAt,...(u.newHours!==undefined?{hours:u.newHours}:{}),...(forcedIds.has(x.id)?{hoursLocked:true}:{})};
           const d=displacements.find(d=>d.blocker.id===x.id);
           if(d)return{...x,slot:d.newSlot};
           return x;
@@ -2247,7 +2290,7 @@ function MainApp({currentUser,onLogout}) {
       try{
         await Promise.all([
           ...updates.map(({id,newDate,newStaffId,newSlot,newHours})=>
-            db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt,...(newHours!==undefined?{hours:newHours}:{})},`?id=eq.${id}`)
+            db("PATCH","entries",{staff_id:newStaffId,date_str:newDate,slot:newSlot,created_at:movedAt,...(newHours!==undefined?{hours:newHours}:{}),...(forcedIds.has(id)?{hours_locked:true}:{})},`?id=eq.${id}`)
           ),
           ...displacements.map(({blocker,newSlot})=>
             db("PATCH","entries",{slot:newSlot},`?id=eq.${blocker.id}`)
@@ -2283,7 +2326,7 @@ function MainApp({currentUser,onLogout}) {
           // cost was the PER-ENTRY loop this replaces, batched below into
           // one pass per item instead of one per arrival.
           for(const subItemId of Object.keys(byItemArrivals)){
-            pool=await unlockAllLocksInItem(subItemId,pool);
+            pool=await unlockAllLocksInItem(subItemId,pool,forcedIds);
           }
           const settledPool=pool;
           const branches=await Promise.all(Object.keys(byItem).map(async subItemId=>{
@@ -2352,6 +2395,15 @@ function MainApp({currentUser,onLogout}) {
         setError("Couldn't paste - every target slot is already occupied.");
         return;
       }
+      // Any destination day where that person has no hours left: ONE
+      // pop-up for the whole group (see askNoRoom). Go Back = no copies.
+      // Schedule Anyway = every copy is made; those keep their full hours,
+      // locked. All or nothing - never split.
+      const copyPlacements=toInsert.map(({en,newDate,newSlot,newStaffId})=>({staffId:newStaffId,dateStr:newDate,slot:newSlot,hours:Number(en.hours)||0}));
+      const copyNoRoom=noRoomDays(copyPlacements,entries);
+      if(copyNoRoom.length>0&&!(await askNoRoom(copyNoRoom)))return;
+      const copyNoRoomSet=new Set(copyNoRoom.map(d=>noRoomKey(d.staffId,d.dateStr)));
+      const forcedFlags=copyPlacements.map(p=>copyNoRoomSet.has(noRoomKey(p.staffId,p.dateStr)));
 
       // A copy never inherits the source's lock - it's a mechanical
       // duplication, not a fresh deliberate choice of hours, so it always
@@ -2383,14 +2435,14 @@ function MainApp({currentUser,onLogout}) {
       const rows=toInsert.map(({en,newDate,newSlot,newStaffId},idx)=>({
         staff_id:newStaffId,job_id:en.jobId||null,sub_item_id:en.subItemId||null,
         date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null,
-        hours_locked:false,is_catch_up:isCatchUpFlags[idx]
+        hours_locked:forcedFlags[idx],is_catch_up:isCatchUpFlags[idx]
       }));
       // Show the pasted copies immediately with temporary ids, swapped for the
       // real ones once the server confirms - removed again if the save fails.
       const tempEntries=toInsert.map(({en,newDate,newSlot,newStaffId},i)=>({
         id:`temp_copy_${Date.now()}_${i}`,staffId:newStaffId,jobId:en.jobId||null,subItemId:en.subItemId||null,
         dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString(),
-        hoursLocked:false,isCatchUp:isCatchUpFlags[i]
+        hoursLocked:forcedFlags[i],isCatchUp:isCatchUpFlags[i]
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
@@ -2419,8 +2471,9 @@ function MainApp({currentUser,onLogout}) {
           arrivals.push({dateStr:newDate,excludeId:newEntry.id});
         });
         if(Object.keys(byItem).length>0){
+          const forcedNewIds=new Set(newEntries.filter((n,idx)=>forcedFlags[idx]).map(n=>n.id));
           for(const subItemId of Object.keys(byItemArrivals)){
-            pool=await unlockAllLocksInItem(subItemId,pool);
+            pool=await unlockAllLocksInItem(subItemId,pool,forcedNewIds);
           }
           const settledPool=pool;
           const branches=await Promise.all(Object.keys(byItem).map(async subItemId=>{
@@ -2451,6 +2504,43 @@ function MainApp({currentUser,onLogout}) {
       }
     }catch(err){setError("Failed to copy entries.");}
   }
+  // A person can never be booked over their daily hours without being
+  // asked (TESTING_NOTES.md 2E #12). Every way of putting work onto a day
+  // (new entry, drag, copy, group move, group copy) checks the days it's
+  // about to land on first; any day where that person already has 0h left
+  // gets the "⚠ Scheduling Conflict" pop-up. Go Back = nothing happens.
+  // Schedule Anyway = the work lands at its full hours, locked, so nothing
+  // ever shrinks or deletes it; both of that day's entries show red
+  // "⚠ Conflict" until someone fixes it by hand. A day with SOME room left
+  // isn't asked about - the work is cut to fit and the rest is scheduled
+  // further out, same as always.
+  // `placements` is [{staffId,dateStr,slot,hours}]; `ignoreIds` are entries
+  // leaving their spot (being moved), which no longer use anyone's day.
+  // Returns one {staffId,dateStr,used,cap} per day with no room.
+  function noRoomDays(placements,pool,ignoreIds){
+    const out=new Map();
+    placements.forEach((p,i)=>{
+      const cap=Number(staff.find(s=>s.id===p.staffId)?.productiveHours)||8;
+      const used=pool.filter(e=>e.staffId===p.staffId&&e.dateStr===p.dateStr&&!ignoreIds?.has(e.id)).reduce((a,e)=>a+(Number(e.hours)||0),0)
+        +placements.filter((q,j)=>j!==i&&q.staffId===p.staffId&&q.dateStr===p.dateStr&&q.slot!==p.slot).reduce((a,q)=>a+(Number(q.hours)||0),0);
+      if(cap-used<=0.05){
+        const k=`${p.staffId}|${p.dateStr}`;
+        if(!out.has(k))out.set(k,{staffId:p.staffId,dateStr:p.dateStr,used:Math.round(Math.min(used,cap)*2)/2,cap});
+      }
+    });
+    return [...out.values()];
+  }
+  function noRoomKey(staffId,dateStr){return `${staffId}|${dateStr}`;}
+  // Shows the existing Scheduling Conflict pop-up and resolves true for
+  // Schedule Anyway, false for Go Back.
+  function askNoRoom(days){
+    const lines=days.map(d=>`${staff.find(s=>s.id===d.staffId)?.name||"This person"} has no hours left on ${parseISO(d.dateStr).toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})} (${d.used}h of ${d.cap}h used).`);
+    return new Promise(resolve=>setConflictAlert({
+      message:`${lines.join(" ")} Schedule Anyway books them over their daily hours, shown as a conflict until it's fixed.`,
+      onConfirm:()=>{setConflictAlert(null);resolve(true);},
+      onCancel:()=>{setConflictAlert(null);resolve(false);},
+    }));
+  }
   function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
   function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect=(e.ctrlKey||e.altKey||e.metaKey)?"copy":"move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
@@ -2477,10 +2567,16 @@ function MainApp({currentUser,onLogout}) {
         dragEntry.current=null;
         return;
       }
+      // No hours left for that person that day: ask first (see askNoRoom).
+      dragEntry.current=null;
+      const copyNoRoom=noRoomDays([{staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:entry.hours}],entries);
+      const copyForced=copyNoRoom.length>0;
+      if(copyForced&&!(await askNoRoom(copyNoRoom)))return;
       // Same as performGroupCopy: a copy never inherits the source's lock,
       // so it's always open to the normal budget math - unless its item's
       // budget is already fully used, in which case it lands as Catch-up
-      // Hours instead (see performGroupCopy).
+      // Hours instead (see performGroupCopy). A Schedule Anyway copy is
+      // locked instead, at its full hours.
       const _u=snapshotEntries(entries);
       let entryIsCatchUp=false;
       if(!entry.miscNote&&entry.subItemId){
@@ -2491,11 +2587,10 @@ function MainApp({currentUser,onLogout}) {
         }
       }
       const tempId=`temp_copy_${Date.now()}`;
-      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString(),hoursLocked:false,isCatchUp:entryIsCatchUp};
+      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString(),hoursLocked:copyForced,isCatchUp:entryIsCatchUp};
       setEntries(prev=>[...prev,tempEntry]);
-      dragEntry.current=null;
       try{
-        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:false,is_catch_up:entryIsCatchUp}]);
+        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:copyForced,is_catch_up:entryIsCatchUp}]);
         const i=inserted[0];
         const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked,isCatchUp:!!i.is_catch_up};
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
@@ -2506,7 +2601,7 @@ function MainApp({currentUser,onLogout}) {
         // the item's budget math.
         let pool=[..._u,newEntry];
         if(!entry.miscNote&&entry.subItemId&&!entryIsCatchUp){
-          pool=await unlockAllLocksInItem(entry.subItemId,pool);
+          pool=await unlockAllLocksInItem(entry.subItemId,pool,copyForced?new Set([newEntry.id]):undefined);
           pool=await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
           pool=await extendItemIfShort(entry.subItemId,pool);
         }
@@ -2518,8 +2613,13 @@ function MainApp({currentUser,onLogout}) {
       }
       return;
     }
+    // No hours left for that person that day: ask first (see askNoRoom).
+    dragEntry.current=null;
+    const moveNoRoom=noRoomDays([{staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:entry.hours}],entries,new Set([entry.id]));
+    const moveForced=moveNoRoom.length>0;
+    if(moveForced&&!(await askNoRoom(moveNoRoom)))return;
     const _u=snapshotEntries(entries);
-    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt,hours:entry.hours};
+    const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt,hours:entry.hours,hoursLocked:entry.hoursLocked};
     // If this entry's hours were being capped by a same-day sibling at its
     // OLD spot, and the new spot has no sibling to share the day with, its
     // stored hours should go back to using the whole day - otherwise a
@@ -2547,7 +2647,8 @@ function MainApp({currentUser,onLogout}) {
     const sharedItemAtDest=entry.subItemId&&entries.some(o=>o.id!==entry.id&&o.subItemId===entry.subItemId&&o.dateStr===toDateStr&&o.staffId!==toStaffId);
     // A Catch-up entry's hours are a deliberate fixed number, never derived
     // from any staff's cap - never touched by this restoration.
-    const newHours=((wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest&&!entry.isCatchUp)
+    // A Schedule Anyway move keeps exactly its own hours.
+    const newHours=(!moveForced&&(wasCappedByOldSibling||wasOldStaffFullDay)&&!newSibling&&!sharedItemAtDest&&!entry.isCatchUp)
       ?(Number(staff.find(s=>s.id===toStaffId)?.productiveHours)||8)
       :entry.hours;
     // Dropping it here makes it the newest arrival at this day/slot for
@@ -2556,17 +2657,17 @@ function MainApp({currentUser,onLogout}) {
     const movedAt=new Date().toISOString();
     // Move it on screen immediately - don't wait for the server round-trip to
     // show the drop landing. Roll back if the save actually fails.
-    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt,hours:newHours}:en));
-    dragEntry.current=null;
+    const lockPatch=moveForced?{hours_locked:true}:{};
+    setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt,hours:newHours,...(moveForced?{hoursLocked:true}:{})}:en));
     try{
-      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot,created_at:movedAt,hours:newHours},`?id=eq.${entry.id}`);
+      await db("PATCH","entries",{staff_id:toStaffId,date_str:toDateStr,slot:toSlot,created_at:movedAt,hours:newHours,...lockPatch},`?id=eq.${entry.id}`);
       // A drag/move can land this entry on a day its item is shared with
       // another staff member (or leave its old day short one entry) -
       // recalculate that item at both its new and old day, same as any
       // other mutation. This is the fix for moves never triggering a recalc.
-      let pool=_u.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt,hours:newHours}:en);
+      let pool=_u.map(en=>en.id===entry.id?{...en,staffId:toStaffId,dateStr:toDateStr,slot:toSlot,createdAt:movedAt,hours:newHours,...(moveForced?{hoursLocked:true}:{})}:en);
       if(entry.subItemId){
-        pool=await unlockAllLocksInItem(entry.subItemId,pool);
+        pool=await unlockAllLocksInItem(entry.subItemId,pool,moveForced?new Set([entry.id]):undefined);
         pool=await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
         pool=await extendItemIfShort(entry.subItemId,pool);
       }
@@ -3274,7 +3375,7 @@ function MainApp({currentUser,onLogout}) {
                                       <div key={ce.id} style={{flex:1,minWidth:0}}>{renderEntryBlock(ce,true)}</div>
                                     ))}
                                   </div>
-                                : renderEntryBlock(entry,false)
+                                : renderEntryBlock(entry,overMaxDays.has(`${st.id}|${ds}`))
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} availableHours={availableHours}/>
                             }
                           </td>
@@ -3514,10 +3615,15 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   // Keep the field itself honest if the cap changes underneath it (staff,
   // date or slot picked after Hours was already typed in) rather than
   // silently letting a now-too-high value sit there unnoticed.
+  // A brand-new entry on a day this person has NO hours left can still be
+  // typed in - saving it shows the Scheduling Conflict pop-up (see
+  // askNoRoom in MainApp), where Schedule Anyway books it over their day on
+  // purpose. With SOME room left, the box is capped to what fits, as before.
+  const hoursInputMax=(form.mode==="new"&&maxHours<=0)?productiveHours:maxHours;
   useEffect(()=>{
     if(form.entryType!=="misc"&&autoFill)return;
-    if(form.hours>maxHours)set("hours",maxHours);
-  },[maxHours]);
+    if(form.hours>hoursInputMax)set("hours",hoursInputMax);
+  },[hoursInputMax]);
 
   const preview=useMemo(()=>{
     if(!autoFill||!form.dateStr||!totalHours||form.entryType==="misc")return[];
@@ -3593,7 +3699,9 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           const otherEntry=entries.find(e=>e.staffId===sid&&e.dateStr===form.dateStr&&e.slot!==form.slot);
           const otherHrs=otherEntry?Math.min(Number(otherEntry.hours)||0,ph):0;
           const personalMax=Math.max(0,Math.round((ph-otherHrs)*2)/2);
-          combined.push({dateStr:form.dateStr,hours:Math.min(Number(form.hours)||0,personalMax),staffId:sid,slot:form.slot});
+          // No room at all that day: keep the typed number - saving asks
+          // first (Scheduling Conflict pop-up) instead of saving 0h.
+          combined.push({dateStr:form.dateStr,hours:personalMax>0?Math.min(Number(form.hours)||0,personalMax):(Number(form.hours)||0),staffId:sid,slot:form.slot});
         }
       });
       // A brand-new, manually-typed job entry that would push this item
@@ -3751,7 +3859,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
           {form.entryType==="misc"?(
             <div style={{width:130}}>
-              <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
+              <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
               {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day has {otherSlotEntry.hours}h - it'll recalculate automatically once you save</div>}
             </div>
@@ -3794,7 +3902,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
             </div>
           ):(
             <div style={{width:130}}>
-              <Inp label="Hours" type="number" min={0.5} max={maxHours} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),maxHours))}/>
+              <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
               {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day has {otherSlotEntry.hours}h - it'll recalculate automatically once you save</div>}
             </div>

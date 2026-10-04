@@ -11,10 +11,13 @@ const D = n => businessDayStr(n);
 const seed = {
   staff: [staff('s1', 'Mark', 8, 0), staff('s2', 'Ian', 8, 1)],
   jobs: [job('j1', '101', 'Smith'), job('j2', '202', 'Jones')],
-  sub_items: [item('i1', 'j1', 'Kitchen', 16), item('i2', 'j2', 'Laundry', 8, 1)],
+  sub_items: [item('i1', 'j1', 'Kitchen', 16), item('i2', 'j2', 'Laundry', 4, 1)],
   entries: [
     entry('k1', 's1', 'i1', D(2), 0, 8), entry('k2', 's1', 'i1', D(3), 0, 8),
-    entry('eL', 's2', 'i2', D(2), 0, 8, { job_id: 'j2' }),
+    // 4h, so Ian still has room that day. (If it used his whole day, the
+    // move would show the Scheduling Conflict pop-up instead - 2E #12,
+    // covered by test-no-room-conflict.mjs.)
+    entry('eL', 's2', 'i2', D(2), 0, 4, { job_id: 'j2' }),
   ],
 };
 const { browser, page, db } = await launch(seed);
@@ -32,7 +35,7 @@ try {
   const l = rows(db, e => e.id === 'eL')[0];
   r.check('blocking entry moved to the other slot, same day', l && l.staff_id === 's2' && l.date_str === D(2) && l.slot === 1, l);
   r.check('all Kitchen entries now on Ian\'s row', rows(db, e => e.sub_item_id === 'i1').every(e => e.staff_id === 's2'), rows(db, e => e.sub_item_id === 'i1'));
-  r.check('#42: displaced entry kept its hours', l && Number(l.hours) === 8, l);
+  r.check('#42: displaced entry kept its hours', l && Number(l.hours) === 4, l);
   r.check('#42: displaced entry kept its created_at', l && l.created_at === lBefore.created_at, { before: lBefore.created_at, after: l && l.created_at });
   // (Keeping its LOCK is a separate, still-open bug - see
   // test-group-move-displace-keeps-lock.mjs / TESTING_NOTES 2E #9.)

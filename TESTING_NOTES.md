@@ -617,8 +617,8 @@ look rather than being folded into any of the four above.
     - Test: `test-copy-partial-budget.mjs` (was the known-bug file) -
       fails on main before this change, passes after.
 
-12. **Adding work to someone with no hours left that day never warns -
-    except auto-fill.** Found by a read-only check (pretend data): David
+12. **FIXED (no-room conflict PR). (Was: adding work to someone with no
+    hours left that day never warned - except auto-fill.)** Found by a read-only check (pretend data): David
     (7h/day) has a full 7h in slot 1 on a day; work is put into his empty
     slot 2 six different ways:
     1. New entry, auto-fill off: Hours box locks at 0, saving creates an
@@ -666,7 +666,23 @@ look rather than being folded into any of the four above.
       as today - cut to the 2h that fits, the other 5.5h added as a new day
       at the end of the item's schedule ("Extended by 1 day" message). The
       pop-up is only for 0h left. (User: "Try that".)
-    - Not yet built.
+    - What shipped: `noRoomDays`/`askNoRoom` in `App.jsx`, called from all
+      5 paths before anything is saved (saveEntry's new branch,
+      handleDrop's move and copy, performGroupMove, performGroupCopy).
+      Schedule Anyway saves those placements `hours_locked:true` at their
+      full hours; `unlockAllLocksInItem` skips them (new `keepIds`) and a
+      new entry's sibling slot isn't unlocked, so nothing shrinks or
+      deletes either entry. `overMaxDays` shows the red "⚠ Conflict" on
+      both of the person's entries that day (both slots filled, a locked
+      entry among them, stored hours over their daily max). The entry
+      form's Hours box accepts a number for a NEW entry on a no-room day
+      (`hoursInputMax`); with some room it's still capped to what fits.
+    - Test: `test-no-room-conflict.mjs` (all 5 ways x Go Back / Schedule
+      Anyway, red conflict, still intact after a later grid action, and
+      the some-room case unchanged) - fails on main before this change
+      (no pop-up anywhere), passes after. `test-group-move-displace.mjs`
+      updated: its blocker now leaves room that day (a full-day blocker is
+      now this pop-up).
 
 13. **FIXED (PR #61). An entry left with 0h now deletes
     itself** - the user's rule, restoring the behaviour that existed for
