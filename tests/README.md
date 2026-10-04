@@ -30,3 +30,10 @@ The commit for each test is named at the top of the test file.
 - Check the saved rows (`db.tables.entries`), not just the screen.
 - Never run git commands that change `src/App.jsx` while tests are running.
   The app reloads mid-test and causes false failures.
+
+## Known open bugs
+
+`known-bug-*.mjs` files test bugs that are logged in `TESTING_NOTES.md` but
+not fixed yet. They are expected to fail. `run-all.sh` reports them
+separately and doesn't count them. Once the bug is fixed, the file should
+pass: rename it to `test-...` so it counts from then on.

@@ -521,6 +521,32 @@ look rather than being folded into any of the four above.
    separate code path not yet found. Explicitly deferred until desktop
    is fully tested and stable - do not start mobile work before then.
 
+9. **Group move strips a displaced entry's lock and overwrites its
+   manually typed hours.** Found while rebuilding the regression suite.
+   PR #42 says a group move's displaced entry (the one moved to the
+   day's other slot to make room) keeps its lock and hours exactly as
+   they were - and the displacement PATCH itself does (`{slot}` only).
+   But `performGroupMove` (`App.jsx` ~line 2260) then adds the displaced
+   entry's own item to `byItemArrivals`, so `unlockAllLocksInItem` clears
+   its lock and `recalculateItem` re-derives its hours, replacing a
+   deliberately typed number.
+   - Live repro (`tests/known-bug-group-move-displace-keeps-lock.mjs`):
+     Ian has Laundry locked at a manual 5h in slot 1. Group-move two
+     Kitchen days onto Ian's slot 1 row. Laundry correctly moves to slot
+     2, but is unlocked and changed 5h -> 8h.
+   - Knock-on, timing-dependent (seen on one run, not the next): the two
+     items recalculate in parallel against the same starting state, so
+     Kitchen sized its day around Laundry's 5h while Laundry grew to 8h -
+     stored hours for Ian that day added up to 11h on an 8h day (the
+     on-screen numbers are recalculated live, so the screen looked right;
+     the stored value was stale).
+   - Fix direction: re-settle the displaced entry's item WITHOUT clearing
+     its locks (add it to `byItem` for the recalculation, not to
+     `byItemArrivals`), so a locked displaced entry keeps its number and
+     the rest of its item settles around it. Expected to also remove the
+     knock-on, since that only happens when the lock is lost.
+   - Not yet fixed - waiting on the user's go-ahead.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**

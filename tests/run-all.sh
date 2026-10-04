@@ -14,4 +14,16 @@ for f in ${@:-test-*.mjs}; do
   fi
 done
 echo "----"; echo "$pass passed, $fail failed"
+# known-bug-*.mjs: tests for bugs that are logged but NOT fixed yet. They're
+# expected to fail; reported separately so they never hide a real regression.
+if [ $# -eq 0 ]; then
+  for f in known-bug-*.mjs; do
+    [ -e "$f" ] || continue
+    if timeout 300 node "$f" > "$LOGDIR/${f%.mjs}.log" 2>&1; then
+      echo "NOW PASSES (bug fixed? update TESTING_NOTES and rename to test-): $f"
+    else
+      echo "known bug, still failing as expected: $f"
+    fi
+  done
+fi
 [ $fail -eq 0 ]
