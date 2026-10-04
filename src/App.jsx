@@ -3338,7 +3338,13 @@ function MainApp({currentUser,onLogout}) {
                           // telling you anything different from an ordinary interior day, so it
                           // still shows the same placeholder those do.
                           const myMaxThisDay=maxPossibleHours(e,entries,staff);
-                          const isGenuinePartial=!isSpecialEntry&&!isOverRun&&(Number(e.hours)||0)<myMaxThisDay-0.05;
+                          // A person with entries in BOTH slots that day always sees each
+                          // entry's own real hours (user's request, TESTING_NOTES 2F #7): the
+                          // flat item-total placeholder there made a correctly-split day look
+                          // over-booked (e.g. 309 Harries showing "14h" for both David and Mark
+                          // when they really had 5h and 3h).
+                          const sharesDayWithOtherSlot=!!entryMap[`${e.staffId}|${e.dateStr}|${e.slot===0?1:0}`];
+                          const isGenuinePartial=!isSpecialEntry&&!isOverRun&&((Number(e.hours)||0)<myMaxThisDay-0.05||sharesDayWithOtherSlot);
                           // How many hours this ITEM as a whole still needs to reach its
                           // total budget, using everyone's real effective hours (not raw
                           // stored ones) - `cumulative` is exactly that sum, since the walk
