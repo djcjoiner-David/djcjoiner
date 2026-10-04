@@ -85,6 +85,13 @@ changes — re-verify line numbers against the file before relying on them.
     happening in a row when it's really one process settling. Sequence the
     writes if correctness requires it; don't force the user to watch each
     intermediate render.
+11. **Undo must handle every record in a spot, not just one.** Normally
+    each spot on a schedule holds one job, but if the app lets a user put
+    two jobs in the same spot on purpose (e.g. a "Schedule Anyway"
+    option), undo/redo has to track and restore both of them. Undo code
+    written as if a spot can only ever hold one record will quietly lose
+    track of the second one and can delete it for good. Test undo/redo
+    specifically on a doubled-up spot.
 
 ---
 
@@ -304,7 +311,7 @@ look rather than being folded into any of the four above.
 
 ### 2E. Logged for a later fix batch (not yet fixed)
 
-1. **HIGH PRIORITY - CONFIRMED REAL DATA LOSS. Undo/redo can't correctly
+1. **FIXED. (Was: HIGH PRIORITY - CONFIRMED REAL DATA LOSS.) Undo/redo can't correctly
    represent a deliberately-duplicated cell, and can now permanently
    delete one of the two entries with no recovery path.** The undo/redo
    engine (`applyEntriesSnapshot`, `cellKey`) diffs snapshots by
@@ -340,6 +347,33 @@ look rather than being folded into any of the four above.
    whenever `conflictKeys` shows more than one entry sharing that cell (a
    plain per-cell diff for the common case, falling back to id-based
    matching only for the cells that are actually doubled up).
+   - What shipped: `applyEntriesSnapshot` (undo/redo's "make the DB
+     match this snapshot" sync) no longer builds one-entry-per-cell
+     `Map`s. A new `matchEntriesByCell` groups both snapshots by cell
+     and matches each cell's entries as a LIST: first by `id`, then by
+     what the entry is (`entryIdentity`: job/item/note + `created_at`,
+     which survives the id churn of a delete+recreate), then pairs off
+     whatever is left in order. Leftover current entries are deleted,
+     leftover target entries recreated (original `created_at` kept). For
+     an ordinary one-entry cell this is exactly the old cell-for-cell
+     behaviour, so normal undo/redo is unchanged; a doubled cell no
+     longer collapses to one entry.
+   - Root cause confirmed against a pre-fix baseline (worktree + second
+     vite port): Conflict pair A+B in one cell, drag B away, Undo ->
+     the cell `Map` only "saw" B, so the sync DELETEd B at its new spot
+     and PATCHed A's row into a copy of B - A (never touched by the
+     drag) was gone from the DB. Same flaw could also DUPLICATE an
+     entry when undoing the "Schedule Anyway" creation itself.
+   - Tests: `test-dupcell-undo.mjs` (seeded Conflict pair: drag, undo,
+     redo, undo, reload - both entries and their scheduling order
+     survive) and `test-dupcell-undo-ui.mjs` (the exact live repro via
+     the UI: Schedule Anyway -> drag -> Undo x2 -> Redo x2, DB checked
+     exactly at every step). Both FAIL on the pre-fix baseline, PASS on
+     the fix. `test-undo-regression.mjs` (single move, edit, delete,
+     auto-fill create, group move - undo/redo each exact incl.
+     `created_at`) passes on both baseline and fix.
+   - Unblocks re-adding "Schedule Anyway" to the "No Room That Day"
+     prompt (see item 7 below) - not done in this fix, separate change.
 
 2. **Multi-entry group copy doesn't auto-open the ESE modal for a Catch-up
    result.** `performGroupCopy` and the single-entry ctrl+drag copy path
@@ -513,7 +547,7 @@ look rather than being folded into any of the four above.
      knock-on, since that only happens when the lock is lost.
    - Not yet fixed - waiting on the user's go-ahead.
 
-10. **HIGH PRIORITY - CONFIRMED, LIVE ON MAIN. Batch 6's "regrow" rule
+10. **FIXED (PR #60). (Was: HIGH PRIORITY, live on main.) Batch 6's "regrow" rule
     rewrites correct stored hours just by opening the app.** Found while
     rebuilding the regression suite. Introduced by PR #57 (Batch 6).
     `oneCorrectionPass` (`App.jsx` ~line 2634, `regrowableIds`) grows the
@@ -540,7 +574,7 @@ look rather than being folded into any of the four above.
       over its budget (grow only by what the item still actually needs).
     - User's decision: fix B (keep the grow-back, but make it safe), plus
       the app must never recalculate just from being opened.
-    - FIX BUILT AND TESTED, NOT YET SHIPPED (no PR yet, per the user):
+    - SHIPPED in PR #60 (squash-merged to main as 902134f, verified on main):
       1. The background check skips the schedule exactly as loaded from
          the database (`loadedStateRef` in `App.jsx`), so opening the app
          or pressing Refresh never saves anything. Every load is
@@ -572,8 +606,40 @@ look rather than being folded into any of the four above.
     - Needs the user's call: (a) only use Catch-up when the budget is
       already fully used (copy otherwise re-balances, as before), or
       (b) split it - fill what's left, rest as Catch-up, or (c) keep as is.
+    - USER'S DECISION: (a). Catch-up is judged per item only (that item's
+      own budget) - a different item with budget left schedules normally.
 
-13. **FIXED (0h auto-delete PR). An entry left with 0h now deletes
+12. **Adding work to someone with no hours left that day never warns -
+    except auto-fill.** Found by a read-only check (pretend data): David
+    (7h/day) has a full 7h in slot 1 on a day; work is put into his empty
+    slot 2 six different ways:
+    1. New entry, auto-fill off: Hours box locks at 0, saving creates an
+       empty 0h entry. No warning.
+    2. New entry, auto-fill on: "No Room That Day" pop-up, nothing saved.
+       (The only one that warns.)
+    3. Drag one entry: lands at 7.5h (over his max), is then recalculated
+       to 0h and DELETED, and auto-extend quietly creates a replacement
+       entry back on the original person's row. Looks like nothing
+       happened. No warning.
+    4. Ctrl-drag copy: saves an empty 0h Catch-up entry. No warning.
+    5. Group move: the full day's placement is quietly dropped and the
+       work moved to later days instead. No warning.
+    6. Group copy: saves an empty 0h Catch-up entry. No warning.
+    - USER'S DECISION (the rule): a person can never be booked over their
+      daily max without being asked. Every one of these paths must show
+      the existing "⚠ Scheduling Conflict" pop-up (Schedule Anyway / Go
+      Back). Go Back = nothing saved. Schedule Anyway = the work is saved
+      at its hours, the person is over their max that day, both entries
+      show the red "⚠ Conflict" until someone fixes it by hand, and the app
+      never shrinks or deletes either of them on its own.
+    - Same rule applies to item 9 (group move onto a LOCKED entry): show a
+      conflict, never displace it. The 0h auto-delete (separate branch
+      `claude/auto-delete-zero-hours`) then only ever applies to an entry
+      emptied by its own item's budget being used up elsewhere - never to
+      one squeezed out by a different job, since that's now a conflict.
+    - Not yet built.
+
+13. **FIXED (PR #61). An entry left with 0h now deletes
     itself** - the user's rule, restoring the behaviour that existed for
     one day on 22 Sep (added in 0a46bf8, reverted in 38ae3f8 with no
     reason recorded, replaced by a plain "0h" label).
@@ -658,6 +724,16 @@ look rather than being folded into any of the four above.
    leaves it as-is (presumably not re-prompted again this session, to
    avoid nagging - needs a decision on whether to re-prompt on every
    load or just once per job).
+
+7. **Show real hours when a person has two entries on one day.** User's
+   request (from a live review of 309 Harries, which looked over-booked
+   but wasn't): when a staff member has entries in BOTH slots on a day,
+   each entry shows its own assigned hours, not the item's total-budget
+   placeholder. Example: Tue 6 Oct, 309 Harries Mudroom W showed "14h"
+   for both David and Mark - it should show David 5h and Mark 3h (their
+   real saved hours; David's other slot has Laundry 2h, Mark's 3.5h).
+   A day with only one entry keeps the current display. Changes 2D #1's
+   "placeholder is intentional" rule for this case. Not yet built.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
