@@ -216,3 +216,16 @@ export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export function summarize(entries) {
   return entries.map(e => `${e.staff_id}|${e.date_str}|${e.slot}|${e.sub_item_id || e.misc_note}|${e.hours}`).sort();
 }
+
+// ---- form helpers (modal fields are a label <div> followed by the control)
+export function input(page, label) { return page.locator(`div:has(> div:text-is("${label}")) > input`).last(); }
+export function select(page, label) { return page.locator(`div:has(> div:text-is("${label}")) > select`).last(); }
+export function button(page, text) { return page.locator('button', { hasText: text instanceof RegExp ? text : new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }).last(); }
+// Opens a new-entry modal on an empty cell and fills job/item.
+export async function newEntry(page, staffName, dateStr, slot, { jobId = 'j1', itemId, autoFill = true } = {}) {
+  await (await cell(page, staffName, dateStr, slot)).click();
+  await page.locator('select').filter({ has: page.locator('option', { hasText: '— Select job —' }) }).selectOption(jobId);
+  if (itemId) await select(page, 'Joinery Item').selectOption(itemId);
+  const af = page.locator('label', { hasText: 'Auto-fill consecutive days' }).locator('input');
+  if (await af.count()) { if (autoFill) await af.check(); else await af.uncheck(); }
+}
