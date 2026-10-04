@@ -1,3 +1,6 @@
+// KNOWN OPEN - TESTING_NOTES 2E #11 (decided: option a, not built yet).
+// Expected to FAIL until then: today an 8h copy onto an item with 4h left
+// becomes all Catch-up instead of re-balancing the item to its budget.
 // Core copy rules (commits 09e375c, 2bd3e59): a copy onto a day where the
 // item is already shared doesn't just clone the source's hours into an
 // over-run - the item re-balances to its budget - and the whole thing
