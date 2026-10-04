@@ -778,7 +778,8 @@ look rather than being folded into any of the four above.
       passes after. Four older tests that checked the replaced #35/#39
       rule were updated to the new rule.
 
-16. **Entry form's Catch-up note shows the wrong budget when editing.**
+16. **FIXED (Catch-up note budget PR). (Was: entry form's Catch-up note
+    showed the wrong budget when editing.)**
     Found in the user's live testing (Ian, Tue 20, editing a Catch-up
     copy): the form said "+ 1h Catch-up Hours logged for this item (not
     counted in its 12h budget)" while the Joinery Item dropdown said
@@ -787,8 +788,18 @@ look rather than being folded into any of the four above.
       selectedSub.totalHours` - when editing an existing entry,
       `form.totalHours` carries some other number, so the note uses it
       instead of the item's real budget.
-    - Fix direction: the note should always use the selected item's own
-      `totalHours`. Not yet fixed.
+    - Actual cause, once traced: when editing, `form.totalHours` is the
+      FIRST item on the job's budget (Driscoll's Laundry S, 12h), not the
+      selected one. The same number fed the "All hours allocated / Add
+      Catch-up Hours" check and its wording - and from Job Summary's
+      "+ Schedule" it's the hours LEFT, so a manual entry that still fit
+      the item wrongly got the Catch-up prompt (test: 30h of 41h used,
+      4h entry -> prompt said "All 11h ... already scheduled").
+    - What shipped: new `itemBudget` (the selected item's own budget) used
+      for the note, the Catch-up check and its pop-up wording.
+    - Test: `test-catchup-note-budget.mjs` (note says 41h; Job Summary
+      "+ Schedule" 4h saves as a normal entry) - fails on main, passes
+      after.
     - Also seen in the same test: one "Failed to save entry." that worked
       on retry. Could not be reproduced with the same steps - most likely
       a brief connection drop to the database. Watch for it recurring.
