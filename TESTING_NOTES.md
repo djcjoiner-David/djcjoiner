@@ -606,6 +606,38 @@ look rather than being folded into any of the four above.
     - Needs the user's call: (a) only use Catch-up when the budget is
       already fully used (copy otherwise re-balances, as before), or
       (b) split it - fill what's left, rest as Catch-up, or (c) keep as is.
+    - USER'S DECISION: (a). Catch-up is judged per item only (that item's
+      own budget) - a different item with budget left schedules normally.
+
+12. **Adding work to someone with no hours left that day never warns -
+    except auto-fill.** Found by a read-only check (pretend data): David
+    (7h/day) has a full 7h in slot 1 on a day; work is put into his empty
+    slot 2 six different ways:
+    1. New entry, auto-fill off: Hours box locks at 0, saving creates an
+       empty 0h entry. No warning.
+    2. New entry, auto-fill on: "No Room That Day" pop-up, nothing saved.
+       (The only one that warns.)
+    3. Drag one entry: lands at 7.5h (over his max), is then recalculated
+       to 0h and DELETED, and auto-extend quietly creates a replacement
+       entry back on the original person's row. Looks like nothing
+       happened. No warning.
+    4. Ctrl-drag copy: saves an empty 0h Catch-up entry. No warning.
+    5. Group move: the full day's placement is quietly dropped and the
+       work moved to later days instead. No warning.
+    6. Group copy: saves an empty 0h Catch-up entry. No warning.
+    - USER'S DECISION (the rule): a person can never be booked over their
+      daily max without being asked. Every one of these paths must show
+      the existing "⚠ Scheduling Conflict" pop-up (Schedule Anyway / Go
+      Back). Go Back = nothing saved. Schedule Anyway = the work is saved
+      at its hours, the person is over their max that day, both entries
+      show the red "⚠ Conflict" until someone fixes it by hand, and the app
+      never shrinks or deletes either of them on its own.
+    - Same rule applies to item 9 (group move onto a LOCKED entry): show a
+      conflict, never displace it. The 0h auto-delete (separate branch
+      `claude/auto-delete-zero-hours`) then only ever applies to an entry
+      emptied by its own item's budget being used up elsewhere - never to
+      one squeezed out by a different job, since that's now a conflict.
+    - Not yet built.
 
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
