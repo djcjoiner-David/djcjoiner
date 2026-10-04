@@ -10,6 +10,15 @@ All work happens on `claude/peaceful-brahmagupta-7poe1m`. Ship one fix at a time
 
 `TESTING_NOTES.md` is the running log of everything found during live QA: confirmed bugs, root causes, fix direction, and what's already shipped vs still open. **Read it first** - it has far more detail than this file, including exact line references and live-repro steps for anything not yet fixed. Each shipped fix gets its entry updated to `**FIXED.**` with a short summary of what actually shipped (not left as "deferred").
 
+## The user's standing rules (apply every session)
+
+1. Replies are clean, clear and simple. No jargon, no filler.
+2. Anything more than a few lines is numbered, so the user can reply by number.
+3. Read the whole prompt and respond to every part of it.
+4. Make no changes until the user says so. Discuss first.
+5. No shortcuts. This build has to be 100%.
+6. Update `TESTING_NOTES.md` as work progresses. Write lessons so they can easily be reused in other projects (Part 1 = general, Part 2 = this app).
+
 ## Workflow that's been established
 
 1. **Discuss nontrivial design decisions before building them.** If a fix could reasonably be done two different ways, or touches a widely-depended-on function, lay out the tradeoff and ask before writing code. Keep discussion replies short, plain language, no jargon unless asked for detail. When asked for a numbered list, give one.
