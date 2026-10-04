@@ -1,3 +1,6 @@
+// NOTE: the user has since decided the right behaviour is different (2E #9 /
+// #12): a group move onto a LOCKED entry must show the Scheduling Conflict
+// pop-up and never displace it. This test gets rewritten when that is built.
 // KNOWN OPEN BUG - TESTING_NOTES 2E #9. Expected to FAIL until fixed.
 // PR #42 says a group move's displaced entry keeps its lock and its hours
 // exactly as they were. But performGroupMove then re-settles the displaced

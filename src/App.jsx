@@ -1460,6 +1460,13 @@ function MainApp({currentUser,onLogout}) {
     setContextMenu({x:e.clientX,y:e.clientY,entry});
   }
 
+  // The schedule exactly as it was just loaded from the database. The
+  // background hours check (see the useEffect after computeHoursCorrections)
+  // skips this state: opening or refreshing the app must never change
+  // anything - only an actual change someone makes on the grid can. Every
+  // load is remembered (not just the latest), since two loads can overlap -
+  // e.g. a double-clicked Refresh - and either one can land on screen.
+  const loadedStateRef=useRef({entries:new WeakSet(),subItems:new WeakSet()});
   const loadAll=useCallback(async()=>{
     try {
       setLoading(true);
@@ -1479,8 +1486,12 @@ function MainApp({currentUser,onLogout}) {
         setStaffOrder(staffSorted.map(s=>s.id));
       }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color,completed:!!j.completed})));
-      setSubItems(subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0})));
-      setEntries(entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up})));
+      const loadedSubItems=subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0}));
+      const loadedEntries=entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up}));
+      loadedStateRef.current.entries.add(loadedEntries);
+      loadedStateRef.current.subItems.add(loadedSubItems);
+      setSubItems(loadedSubItems);
+      setEntries(loadedEntries);
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -2588,8 +2599,8 @@ function MainApp({currentUser,onLogout}) {
   // This stays deliberately narrower than recalculateItem's full per-day,
   // per-item split (computeItemPlan): it only ever derives ONE entry per
   // item (the one that finishes its budget), trusting every earlier entry's
-  // stored hours as-is. It's the ambient safety net that runs on every
-  // entries change, including the very first load of a session - re-running
+  // stored hours as-is. It's the ambient safety net that runs after every
+  // schedule change (never on the schedule exactly as loaded) - re-running
   // the FULL multi-way day-split here would mean any already-scheduled,
   // already-correct-looking day across the whole app could get its numbers
   // silently rewritten the moment this ships, with no user action behind
@@ -2631,7 +2642,20 @@ function MainApp({currentUser,onLogout}) {
     // never touches the grid, but once something else on the grid DOES
     // trigger this pass, it should get the math right in both directions,
     // not just shrink.
-    const regrowableIds=new Set();
+    // Two limits keep that growth from ever corrupting a correct schedule:
+    // - It only applies to an entry on an EARLIER day than the item's
+    //   finishing entry. Two people sharing the finishing day itself are a
+    //   split of what's left, with nothing to say which of them "should"
+    //   be the full day - growing one there just swaps their numbers
+    //   (TESTING_NOTES.md 2E #10: Mary 8h + TJ 3.5h became TJ 8h + Mary
+    //   3.5h), or grows a correctly-zeroed entry straight into an over-run.
+    // - It can never grow past what the item still needs from it: the
+    //   budget minus every other entry except the finishing one (which
+    //   just absorbs whatever's left), so the item can't go over budget.
+    // The grown value is worked out BEFORE the finishing entry's own hours,
+    // so the finishing entry takes exactly what's left after it (down to
+    // 0h) in the same pass, instead of keeping its old, now-too-big number.
+    const regrowHours={}; // entryId -> its re-derived hours
     Object.values(bySubItem).forEach(siEntries=>{
       const si=subItems.find(s=>s.id===siEntries[0].subItemId);
       if(!si)return;
@@ -2651,7 +2675,21 @@ function MainApp({currentUser,onLogout}) {
       // for this pass to derive for the item right now.
       const specialIdx=sorted[rawSpecialIdx].hoursLocked?-1:rawSpecialIdx;
       const nonSpecialUnlocked=sorted.filter((e,i)=>i!==specialIdx&&!e.hoursLocked);
-      if(nonSpecialUnlocked.length===1)regrowableIds.add(nonSpecialUnlocked[0].id);
+      if(nonSpecialUnlocked.length===1){
+        const cand=nonSpecialUnlocked[0];
+        const finishing=specialIdx===-1?null:sorted[specialIdx];
+        if(!finishing||cand.dateStr<finishing.dateStr){
+          const othersFixed=sorted
+            .filter(x=>x.id!==cand.id&&x.id!==finishing?.id)
+            .reduce((a,x)=>a+effectiveEntryHours(x,working,staff,otherOf(workingIndex,x)),0);
+          const cap=Math.max(0,si.totalHours-othersFixed);
+          const grown=Math.round(Math.min(maxPossibleHours(cand,working,staff,otherOf(workingIndex,cand)),cap)*2)/2;
+          regrowHours[cand.id]=grown;
+          const delta=grown-effectiveEntryHours(cand,working,staff,otherOf(workingIndex,cand));
+          const candIdx=sorted.indexOf(cand);
+          for(let i=candIdx+1;i<befores.length;i++)befores[i]+=delta;
+        }
+      }
       if(specialIdx===-1)return;
       const special=sorted[specialIdx];
       const remainingBefore=si.totalHours-befores[specialIdx];
@@ -2679,13 +2717,12 @@ function MainApp({currentUser,onLogout}) {
     // shrink the now-unlocked Misc entry back down to fit.
     return afterSpecial.map(e=>{
       if(specialHours[e.id]!==undefined||e.hoursLocked)return e;
-      // The sole non-special, unlocked entry in its item: safe to re-derive
-      // straight from current day capacity in either direction - see the
-      // regrowableIds comment above for why this only applies when it's
-      // the only such entry.
-      const newHours=regrowableIds.has(e.id)
-        ?maxPossibleHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e))
-        :effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e));
+      // The sole non-special, unlocked entry in its item, on a day before
+      // the item's finishing day: re-derived from current day capacity in
+      // either direction, but never past what the item still needs - see
+      // the regrowHours comment above.
+      if(regrowHours[e.id]!==undefined)return {...e,hours:regrowHours[e.id]};
+      const newHours=effectiveEntryHours(e,afterSpecial,staff,otherOf(afterSpecialIndex,e));
       return {...e,hours:Math.round(newHours*2)/2};
     });
   }
@@ -2706,7 +2743,12 @@ function MainApp({currentUser,onLogout}) {
     const corrections=[];
     entries.forEach((orig,idx)=>{
       const fixed=working[idx];
-      if(Math.abs(Number(orig.hours)-fixed.hours)>0.05)corrections.push({id:orig.id,oldHours:Number(orig.hours),newHours:fixed.hours});
+      // An entry left with 0h (just reduced to it, or already sitting at it)
+      // is listed even when its number didn't change, so the caller can
+      // remove it - see the useEffect below. A locked entry is never
+      // touched, and a past-dated one is history, not something to tidy.
+      const isEmpty=fixed.hours<=0.05&&!orig.hoursLocked&&!isPast(orig.dateStr);
+      if(isEmpty||Math.abs(Number(orig.hours)-fixed.hours)>0.05)corrections.push({id:orig.id,oldHours:Number(orig.hours),newHours:isEmpty?0:fixed.hours});
     });
     return corrections;
   }
@@ -2735,17 +2777,36 @@ function MainApp({currentUser,onLogout}) {
   // schedule itself changes (entries/subItems), which is correct: a staff
   // member's new hours should absolutely apply to anything scheduled from
   // today onward, just not retroactively rewrite what's already there.
+  // It never runs on the schedule exactly as loaded (opening the app, or
+  // the Refresh button): if the saved data follows the rules, there's
+  // nothing to correct, and anything this pass WOULD change there - data
+  // saved under older rules, or a staff member's hours changed since (see
+  // above) - isn't the result of anything anyone just did on the grid.
   const correctingRef=useRef(false);
   useEffect(()=>{
     if(!canEdit||correctingRef.current)return;
+    const loaded=loadedStateRef.current;
+    if(loaded.entries.has(entries)&&loaded.subItems.has(subItems))return;
     const corrections=computeHoursCorrections();
     if(corrections.length===0)return;
     correctingRef.current=true;
     (async()=>{
       try{
-        await Promise.all(corrections.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)));
-        setEntries(prev=>prev.map(e=>{
-          const c=corrections.find(x=>x.id===e.id);
+        // An entry left with nothing (someone else's entry now covers the
+        // whole day/budget for it) has nothing left to represent, so it
+        // deletes itself instead of sitting on the grid as an empty "0h"
+        // block. This only ever happens after a real change on the grid
+        // (never on opening - see above), and that change's own Undo brings
+        // it back, since Undo restores the whole schedule as it was.
+        const toDelete=corrections.filter(c=>c.newHours<=0.05);
+        const toPatch=corrections.filter(c=>c.newHours>0.05);
+        await Promise.all([
+          ...toPatch.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)),
+          ...(toDelete.length>0?[db("DELETE","entries",null,`?id=in.(${toDelete.map(c=>c.id).join(",")})`)]:[]),
+        ]);
+        const deletedIds=new Set(toDelete.map(c=>c.id));
+        setEntries(prev=>prev.filter(e=>!deletedIds.has(e.id)).map(e=>{
+          const c=toPatch.find(x=>x.id===e.id);
           return c?{...e,hours:c.newHours}:e;
         }));
       }catch(err){
