@@ -27,6 +27,8 @@ try {
   r.check('Hours box accepts 4 (not clamped to 0)', (await input(page, 'Hours').inputValue()) === '4', await input(page, 'Hours').inputValue());
   r.check('warns that the other slot already has hours', await page.locator('text=/other slot that day/').count() > 0);
   await button(page, 'Save').click();
+  // 4h + Laundry's 8h is still over Mark's 8h: asks first (2E #15).
+  await button(page, 'Schedule Anyway').click();
   await settle(db, 3000);
   const k = at(db, 's1', D1, 0)[0];
   r.check('corrected 4h saved and still 4h after background pass', k && Number(k.hours) === 4, k);

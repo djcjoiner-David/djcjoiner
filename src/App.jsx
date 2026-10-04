@@ -1647,8 +1647,21 @@ function MainApp({currentUser,onLogout}) {
   // locked there is stale: it's unlocked and folded back into the normal
   // split, anchored by the new arrival instead. Returns the pool with those
   // entries reflected as unlocked, for whatever runs next to see.
-  async function unlockStaleLocksAt(subItemId,dateStr,excludeId,pool){
-    const competitors=pool.filter(x=>x.subItemId===subItemId&&x.dateStr===dateStr&&x.id!==excludeId&&x.hoursLocked);
+  // A lock that must survive every automatic lock clean-up: a Catch-up
+  // entry (a fixed number by design, never part of the budget math), or an
+  // entry on a day its person was deliberately booked over their daily max
+  // ("Schedule Anyway" - see askNoRoom and saveEntry's edit branch). Clearing
+  // those locks would let the background pass shrink or delete them, which
+  // the user's rule says must never happen (TESTING_NOTES.md 2E #12/#15).
+  function keepLockAlways(x,pool){
+    if(x.isCatchUp)return true;
+    const day=pool.filter(o=>o.staffId===x.staffId&&o.dateStr===x.dateStr);
+    if(!day.some(o=>o.slot!==x.slot))return false;
+    const cap=Number(staff.find(s=>s.id===x.staffId)?.productiveHours)||8;
+    return day.reduce((a,o)=>a+(Number(o.hours)||0),0)>cap+0.05;
+  }
+  async function unlockStaleLocksAt(subItemId,dateStr,excludeId,pool,keepIds){
+    const competitors=pool.filter(x=>x.subItemId===subItemId&&x.dateStr===dateStr&&x.id!==excludeId&&x.hoursLocked&&!keepIds?.has(x.id)&&!keepLockAlways(x,pool));
     if(competitors.length===0)return pool;
     const ids=new Set(competitors.map(c=>c.id));
     setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
@@ -1664,7 +1677,7 @@ function MainApp({currentUser,onLogout}) {
   async function unlockStaleLocksAtMany(subItemId,arrivals,pool){
     const excludeIds=new Set(arrivals.map(a=>a.excludeId));
     const dateSet=new Set(arrivals.map(a=>a.dateStr));
-    const competitors=pool.filter(x=>x.subItemId===subItemId&&dateSet.has(x.dateStr)&&!excludeIds.has(x.id)&&x.hoursLocked);
+    const competitors=pool.filter(x=>x.subItemId===subItemId&&dateSet.has(x.dateStr)&&!excludeIds.has(x.id)&&x.hoursLocked&&!keepLockAlways(x,pool));
     if(competitors.length===0)return pool;
     const ids=new Set(competitors.map(c=>c.id));
     setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
@@ -1712,7 +1725,7 @@ function MainApp({currentUser,onLogout}) {
     // keepIds: entries just placed with "Schedule Anyway" on a day the
     // person had no hours left (see askNoRoom) - that lock is what keeps
     // their deliberate hours from being shrunk or deleted, so it stays.
-    const locked=pool.filter(x=>x.subItemId===subItemId&&x.hoursLocked&&!keepIds?.has(x.id));
+    const locked=pool.filter(x=>x.subItemId===subItemId&&x.hoursLocked&&!keepIds?.has(x.id)&&!keepLockAlways(x,pool));
     if(locked.length===0)return pool;
     const ids=new Set(locked.map(c=>c.id));
     setEntries(prev=>prev.map(e=>ids.has(e.id)?{...e,hoursLocked:false}:e));
@@ -1950,6 +1963,34 @@ function MainApp({currentUser,onLogout}) {
         // even though it's the one that just showed up.
         const relocated=prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.slot!==data.slot);
         const newCreatedAt=relocated?new Date().toISOString():undefined;
+        // A manual edit never shrinks the person's OTHER entry that day
+        // (TESTING_NOTES.md 2E #15, user's decision - replaces the old "the
+        // other slot yields to a fresh edit" rule). If the typed hours would
+        // take them over their daily max, ask first: Schedule Anyway keeps
+        // both at their hours (both locked, so nothing shrinks either one)
+        // and shows the red "⚠ Conflict"; Go Back returns to the form.
+        const editStaff=staff.find(s=>s.id===data.staffId);
+        const editCap=Number(editStaff?.productiveHours)||8;
+        const editOthers=entries.filter(e=>e.staffId===data.staffId&&e.dateStr===data.dateStr&&e.slot!==data.slot&&e.id!==data.id);
+        const editOthersHours=editOthers.reduce((a,e)=>a+(Number(e.hours)||0),0);
+        const editOverMax=editOthers.length>0&&(Number(data.hours)||0)+editOthersHours>editCap+0.05;
+        if(editOverMax){
+          const otherName=editOthers.map(e=>e.miscNote||subItems.find(si=>si.id===e.subItemId)?.name||"the other entry").join(" / ");
+          setSaving(false);
+          const ok=await new Promise(resolve=>setConflictAlert({
+            message:`${editStaff?.name||"This person"} has ${editCap}hrs max per day, these additional hours will create a conflict, Schedule anyway? Note: if you reduce ${otherName} to make room, ${otherName} will be short of its hours - consider adding those hours to the next day.`,
+            onConfirm:()=>{setConflictAlert(null);resolve(true);},
+            onCancel:()=>{setConflictAlert(null);resolve(false);},
+          }));
+          if(!ok)return;
+          setSaving(true);
+        }
+        const keepOtherIds=editOverMax?new Set(editOthers.map(e=>e.id)):undefined;
+        if(editOverMax){
+          const unlocked=editOthers.filter(e=>!e.hoursLocked);
+          await Promise.all(unlocked.map(e=>db("PATCH","entries",{hours_locked:true},`?id=eq.${e.id}`)));
+          setEntries(prev=>prev.map(e=>keepOtherIds.has(e.id)?{...e,hoursLocked:true}:e));
+        }
         // Saving an edit through this modal is always a deliberate choice of
         // hours, so it locks the entry - job or Misc alike - the background
         // correction pass will leave it as the person set it instead of
@@ -1968,10 +2009,10 @@ function MainApp({currentUser,onLogout}) {
           ...(newCreatedAt?{created_at:newCreatedAt}:{})
         },`?id=eq.${data.id}`);
         setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
-        let pool=_u.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e);
+        let pool=_u.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:(keepOtherIds?.has(e.id)?{...e,hoursLocked:true}:e));
         if(prevEntry){
           if(hoursLocked&&data.subItemId){
-            pool=await unlockStaleLocksAt(data.subItemId,data.dateStr,data.id,pool);
+            pool=await unlockStaleLocksAt(data.subItemId,data.dateStr,data.id,pool,keepOtherIds);
             const epicenters=[data.dateStr];
             if(prevEntry.subItemId===data.subItemId&&prevEntry.dateStr!==data.dateStr)epicenters.push(prevEntry.dateStr);
             pool=await recalculateItem(data.subItemId,pool,epicenters);
@@ -1989,7 +2030,7 @@ function MainApp({currentUser,onLogout}) {
         // A Misc entry never carries hoursLocked (see above), but it's just
         // as deliberate a manual edit as a locked job entry - the sibling
         // slot's own item should unlock and settle around it too.
-        pool=await unlockSiblingSlot(pool,data.staffId,data.dateStr,data.slot===0?1:0,data.id);
+        if(!editOverMax)pool=await unlockSiblingSlot(pool,data.staffId,data.dateStr,data.slot===0?1:0,data.id);
         pushUndoSnapshot(_u,pool);
         }
       }
