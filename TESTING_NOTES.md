@@ -521,8 +521,8 @@ look rather than being folded into any of the four above.
    separate code path not yet found. Explicitly deferred until desktop
    is fully tested and stable - do not start mobile work before then.
 
-9. **Group move strips a displaced entry's lock and overwrites its
-   manually typed hours.** Found while rebuilding the regression suite.
+9. **FIXED (locked-blocker PR). (Was: group move stripped a displaced
+   entry's lock and overwrote its manually typed hours.)** Found while rebuilding the regression suite.
    PR #42 says a group move's displaced entry (the one moved to the
    day's other slot to make room) keeps its lock and hours exactly as
    they were - and the displacement PATCH itself does (`{slot}` only).
@@ -545,7 +545,22 @@ look rather than being folded into any of the four above.
      `byItemArrivals`), so a locked displaced entry keeps its number and
      the rest of its item settles around it. Expected to also remove the
      knock-on, since that only happens when the lock is lost.
-   - Not yet fixed - waiting on the user's go-ahead.
+   - USER'S RULE (replaces the fix direction above): first booked takes
+     priority, then second, then third; a moved entry always counts as
+     the newest, so it comes last. A LOCKED entry in the way is never
+     moved, unlocked or changed. Agreed example: Mark 6.5h/day, Wed:
+     Kerrigan 4h locked in slot 1; a 6.5h Harries day lands on Mark's
+     slot 1 -> Kerrigan stays in slot 1 at 4h, Harries goes into slot 2
+     with the 2.5h left, its other 4h is added further out. With 0h left,
+     the Scheduling Conflict pop-up asks first (2E #12).
+   - What shipped: `performGroupMove` - when the entry in the way is
+     locked, the incoming entry takes the person's other slot instead of
+     displacing it (an unlocked entry in the way is still moved aside, as
+     before). The rest is the existing recalculation/auto-extend and the
+     2E #12 pop-up.
+   - Test: `test-group-move-locked-blocker.mjs` (replaces the old
+     known-bug file) - fails on main (Kerrigan displaced and unlocked),
+     passes after.
 
 10. **FIXED (PR #60). (Was: HIGH PRIORITY, live on main.) Batch 6's "regrow" rule
     rewrites correct stored hours just by opening the app.** Found while
