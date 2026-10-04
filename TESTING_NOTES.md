@@ -573,6 +573,27 @@ look rather than being folded into any of the four above.
       already fully used (copy otherwise re-balances, as before), or
       (b) split it - fill what's left, rest as Catch-up, or (c) keep as is.
 
+13. **FIXED (0h auto-delete PR). An entry left with 0h now deletes
+    itself** - the user's rule, restoring the behaviour that existed for
+    one day on 22 Sep (added in 0a46bf8, reverted in 38ae3f8 with no
+    reason recorded, replaced by a plain "0h" label).
+    - What shipped: after any real change on the grid, the background
+      hours check deletes every UNLOCKED entry whose hours come out at 0
+      (just reduced to 0, or already sitting at 0). Never on opening the
+      app (see 10), never a locked entry, never a past-dated entry
+      (history). A colleague's edit using up an item's whole budget
+      already deleted the emptied entry before this (manual-edit path);
+      this covers every other 0h entry.
+    - Undo brings back everything that had hours. An entry that was
+      already 0h before the change is restored and then deletes itself
+      again, by the same rule.
+    - An entry squeezed to 0h by a DIFFERENT job in the person's other
+      slot is meant to become a Scheduling Conflict instead (user's rule,
+      not built yet) - so this rule is really for entries emptied by
+      their own item's budget.
+    - Test: `test-zero-hours-self-delete.mjs` (fails on main before this
+      change, passes after). Full suite 34/34.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
