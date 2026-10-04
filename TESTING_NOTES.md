@@ -740,8 +740,9 @@ look rather than being folded into any of the four above.
       and grows Thu 15 for David and Ian (4.5h each) - still 36h.
     - USER'S DECISION: no change - a single drag stays as it is.
 
-15. **A manual hours edit shrinks the person's OTHER entry that day
-    instead of flagging them as over their day.** Found in the user's
+15. **FIXED (edit-over-max PR). (Was: a manual hours edit shrank the
+    person's OTHER entry that day instead of flagging them as over their
+    day.)** Found in the user's
     live testing (Ian, Mon 19): Ian 7.5h/day had Driscoll Laundry W 7h in
     slot 2. Copying David's same-item entry onto Ian's slot 1 correctly
     landed as Catch-up (0.5h, what fit) and opened its form; changing it
@@ -754,8 +755,43 @@ look rather than being folded into any of the four above.
     - USER'S DECISION: (b) - for EVERY manual hours edit, the other entry
       is never shrunk; if the day goes over the person's max it's flagged
       instead. This replaces the #35/#39 rule.
-    - Still to agree with the user before building: exactly how it's
-      flagged (pop-up first, or save and show red Conflict).
+    - Agreed with the user: saving asks first, with the user's wording -
+      "Ian has 7.5hrs max per day, these additional hours will create a
+      conflict, Schedule anyway?" - plus a note that reducing the other
+      entry would leave its item short (consider adding hours to the next
+      day). Schedule Anyway keeps both (red Conflict); Go Back returns to
+      the form. No "shrink the other entry" option.
+    - What shipped: `saveEntry`'s edit branch checks the person's day
+      before saving; over the max -> that pop-up. Schedule Anyway locks
+      the other entry too and skips `unlockSiblingSlot`. An edit that fits
+      saves straight away as before.
+    - Also fixed (found while testing this): a later move of ANY entry in
+      the same item cleared every lock in it (`unlockAllLocksInItem`,
+      PR #20), which unprotected a Schedule Anyway pair - the Catch-up was
+      then squeezed to 0h and deleted. New `keepLockAlways`: a Catch-up
+      entry, or an entry on a day its person is deliberately over their
+      max, is never unlocked by any automatic lock clean-up. Covers 2E #12's
+      Schedule Anyway entries too.
+    - Tests: `test-edit-over-max-conflict.mjs` (the Ian example: pop-up
+      wording, Schedule Anyway keeps 7h + 4h - still after a later move in
+      the same item - Go Back, and an edit that fits) fails on main,
+      passes after. Four older tests that checked the replaced #35/#39
+      rule were updated to the new rule.
+
+16. **Entry form's Catch-up note shows the wrong budget when editing.**
+    Found in the user's live testing (Ian, Tue 20, editing a Catch-up
+    copy): the form said "+ 1h Catch-up Hours logged for this item (not
+    counted in its 12h budget)" while the Joinery Item dropdown said
+    "Laundry W (41h budget)". Display only.
+    - Cause: `EntryModal`'s `totalHours` is `form.totalHours ||
+      selectedSub.totalHours` - when editing an existing entry,
+      `form.totalHours` carries some other number, so the note uses it
+      instead of the item's real budget.
+    - Fix direction: the note should always use the selected item's own
+      `totalHours`. Not yet fixed.
+    - Also seen in the same test: one "Failed to save entry." that worked
+      on retry. Could not be reproduced with the same steps - most likely
+      a brief connection drop to the database. Watch for it recurring.
 
 ### 2G. Regression test suite (tests/)
 Rebuilt from scratch this session (the old scratchpad suite was lost with
