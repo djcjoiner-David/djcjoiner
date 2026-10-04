@@ -740,6 +740,22 @@ look rather than being folded into any of the four above.
       and grows Thu 15 for David and Ian (4.5h each) - still 36h.
     - USER'S DECISION: no change - a single drag stays as it is.
 
+### 2G. Regression test suite (tests/)
+Rebuilt from scratch this session (the old scratchpad suite was lost with
+an earlier container) and kept in the repo so it can't be lost again. Run
+with `tests/run-all.sh` against the app on port 5183; `tests/baseline.sh
+<commit>` runs an older version on another port. Every test was checked
+to FAIL on the code from just before the fix it covers and PASS after.
+Coverage: every fix from PR #28 onward (one or more tests each), plus the
+core behaviours from before the QA pass - moves (full-day restore, shared
+days), labels (0h, locked, Misc), manual edits (stick, rebalance a
+colleague), copies, auto-fill (capacity-aware, slot-consistent),
+multi-staff auto-fill and its stagger confirmation, past entries locked,
+First Available keeping the chosen slot, stale locks cleared on a move,
+and the server's safety checks (`test-api-safety.mjs`: API key, signed
+sessions, role rules, no unfiltered update/delete, no SQL injection,
+hashed passwords never sent back, no leaked database errors).
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
