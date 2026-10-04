@@ -2224,8 +2224,22 @@ function MainApp({currentUser,onLogout}) {
         const otherSlot=newSlot===0?1:0;
         const otherTakenByMove=intendedCells.has(`${newStaffId}|${newDate}|${otherSlot}`);
         const otherBlocker=entries.find(e=>e.staffId===newStaffId&&e.dateStr===newDate&&e.slot===otherSlot&&!movingIds.has(e.id));
-        if(!otherTakenByMove&&!otherBlocker)displacements.push({blocker,newSlot:otherSlot});
-        else skippedIds.add(id);
+        if(otherTakenByMove||otherBlocker){skippedIds.add(id);return;}
+        if(blocker.hoursLocked){
+          // A LOCKED entry in the way is never moved, unlocked or changed
+          // (TESTING_NOTES.md 2E #9, user's rule). It was there first, so it
+          // keeps its slot and hours; the incoming entry - a moved entry
+          // always counts as the newest - takes the person's OTHER slot
+          // instead, gets whatever hours they have left that day, and the
+          // rest of its item is scheduled further out (extendItemIfShort
+          // below). No hours left at all: the Scheduling Conflict pop-up
+          // below asks first (see askNoRoom).
+          intendedCells.delete(`${newStaffId}|${newDate}|${newSlot}`);
+          intendedCells.set(`${newStaffId}|${newDate}|${otherSlot}`,id);
+          idToSlot[id]=otherSlot;
+          return;
+        }
+        displacements.push({blocker,newSlot:otherSlot});
       });
       const activeIds=idsToMove.filter(id=>!skippedIds.has(id));
       if(activeIds.length===0){
