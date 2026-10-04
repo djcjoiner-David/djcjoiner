@@ -804,6 +804,29 @@ look rather than being folded into any of the four above.
       on retry. Could not be reproduced with the same steps - most likely
       a brief connection drop to the database. Watch for it recurring.
 
+17. **New rules (user): alerts for gaps when scheduling an item.**
+    a. Multi-staff auto-fill: the existing "start dates more than 2
+       working days apart" alert only fires when every selected person
+       actually gets work. If the others finish the item before someone
+       is free, that person gets NO entries and is left off silently - no
+       alert. USER'S DECISION: alert in that case too (e.g. "Jenny can't
+       start until Mon 19 Oct - the job is finished before then, so she
+       won't be scheduled. Schedule anyway?").
+    b. When entering (scheduling) an item through the entry form, if its
+       days would have a break of MORE than 1 working day (weekends don't
+       count; a 1-day break is fine), alert before saving. Agreed pop-up
+       (single person), title "⚠ Break in schedule":
+       "This would schedule with a {x} day break for {Staff Member} on
+       {day/dd/mmm}" then "First available start with no break longer
+       than 1 day: {date}." Buttons: "Schedule from {date}" (re-scans the
+       grid for the first start date where the item never has a break
+       longer than 1 day, and schedules the whole item from there) /
+       "Schedule Anyway" (keeps the original dates) / "Go Back".
+       Applies to new schedules via the entry form, not drags/moves.
+    c. The same alert applies to multi-staff entries too - details to be
+       agreed with the user before building.
+    - Not yet built.
+
 ### 2G. Regression test suite (tests/)
 Rebuilt from scratch this session (the old scratchpad suite was lost with
 an earlier container) and kept in the repo so it can't be lost again. Run
