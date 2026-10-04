@@ -645,6 +645,27 @@ look rather than being folded into any of the four above.
       `claude/auto-delete-zero-hours`) then only ever applies to an entry
       emptied by its own item's budget being used up elsewhere - never to
       one squeezed out by a different job, since that's now a conflict.
+    - Agreed case by case with the user (Mon 5 Oct example: David 7h/day,
+      slot 1 full 7h; work put into his empty slot 2):
+      1. New manual entry: the Hours box accepts the typed number; Save
+         shows the pop-up. Go Back = back to the form, nothing saved.
+         Schedule Anyway = saved at the typed hours (David 11h).
+      2. Drag one entry: pop-up on drop. Go Back = entry stays where it
+         was. Schedule Anyway = it moves, keeping its full hours.
+      3. Ctrl-drag copy: pop-up on drop. Go Back = no copy. Schedule
+         Anyway = copy made at full hours (Catch-up only if its item's
+         budget is already full - 2E #11).
+      4. Group move: ONE pop-up for the whole group listing every full
+         day. Go Back = nothing moves. Schedule Anyway = whole group moves;
+         full-day ones keep their hours. All or nothing, never split.
+      5. Group copy: same as 4, for copies.
+      In every Schedule Anyway case: both of that person's entries that day
+      show the red "⚠ Conflict", and the app never shrinks or deletes
+      either one.
+    - Some room but not enough (e.g. 2h left, 7.5h entry dragged in): stays
+      as today - cut to the 2h that fits, the other 5.5h added as a new day
+      at the end of the item's schedule ("Extended by 1 day" message). The
+      pop-up is only for 0h left. (User: "Try that".)
     - Not yet built.
 
 13. **FIXED (PR #61). An entry left with 0h now deletes
