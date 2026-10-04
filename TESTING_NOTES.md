@@ -720,7 +720,8 @@ look rather than being folded into any of the four above.
     - Test: `test-zero-hours-self-delete.mjs` (fails on main before this
       change, passes after). Full suite 34/34.
 
-14. **Moving an item's entry earlier must re-flow it with no gaps.**
+14. **RESOLVED, NO CHANGE. Moving an item's entry earlier must re-flow it
+    with no gaps.**
     User's example (live schedule): David Mon 12 Oct has Kerrigan Pantry
     2h in slot 1, so 5h free in slot 2. Moving 101214 Driscoll Laundry S
     from Tue 13 onto Mon 12 slot 2 should: give it the 5h David has free
@@ -730,9 +731,14 @@ look rather than being folded into any of the four above.
     be done as a GROUP move (all Driscoll Laundry S entries), which
     shifts every day back together; a single-entry drag today leaves Tue
     13 empty and adds the leftover at the end of the schedule instead.
-    - Next step: reproduce this exact situation in a test, both as a group
-      move and a single drag, and show the user what the app does today
-      before deciding any change.
+    - Checked with the exact situation (pretend data): a GROUP move of all
+      6 Driscoll Laundry S entries one day earlier gives David Mon 12 5h,
+      Tue 13 7h, Wed 14 4.5h and Ian Mon 12 7.5h, Tue 13 7.5h, Wed 14 4.5h
+      - exactly 36h, no gaps. Already works as the user wants. (Dropping
+      the group on slot 2 moves every entry in it to slot 2.)
+    - A single drag of David's Tue 13 gives Mon 12 5h, leaves Tue 13 empty
+      and grows Thu 15 for David and Ian (4.5h each) - still 36h.
+    - USER'S DECISION: no change - a single drag stays as it is.
 
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
