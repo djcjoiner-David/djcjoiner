@@ -805,7 +805,8 @@ look rather than being folded into any of the four above.
    avoid nagging - needs a decision on whether to re-prompt on every
    load or just once per job).
 
-7. **Show real hours when a person has two entries on one day.** User's
+7. **FIXED (two-entry day PR). Show real hours when a person has two
+   entries on one day.** User's
    request (from a live review of 309 Harries, which looked over-booked
    but wasn't): when a staff member has entries in BOTH slots on a day,
    each entry shows its own assigned hours, not the item's total-budget
@@ -813,7 +814,13 @@ look rather than being folded into any of the four above.
    for both David and Mark - it should show David 5h and Mark 3h (their
    real saved hours; David's other slot has Laundry 2h, Mark's 3.5h).
    A day with only one entry keeps the current display. Changes 2D #1's
-   "placeholder is intentional" rule for this case. Not yet built.
+   "placeholder is intentional" rule for this case.
+   - What shipped: `computeJobEntryMeta` treats an entry as showing its
+     real hours (`isGenuinePartial`) whenever the same person has an entry
+     in their other slot that day, as well as the existing partial-day
+     case. Display only - no saved hours change.
+   - Test: `test-two-entry-day-real-hours.mjs` (the Harries numbers) -
+     fails on main (shows 14h), passes after.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
