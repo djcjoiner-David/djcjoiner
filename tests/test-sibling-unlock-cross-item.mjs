@@ -1,7 +1,7 @@
-// PR #35: saving a manual edit unlocks a LOCKED entry in the person's other
-// slot that day even when it belongs to a DIFFERENT job/item, and that
-// sibling then yields to the typed value. Pre-fix only a same-item sibling
-// was unlocked, so the other job's stale locked value stayed put.
+// Was PR #35 (the other slot yields to a manual edit). REPLACED by the
+// user's rule, TESTING_NOTES 2E #15: a manual edit never shrinks the
+// person's other entry. Going over their day asks first; Schedule Anyway
+// keeps both - the other job's locked entry stays exactly as it was.
 import { launch, settle, block, input, button, at, staff, job, item, entry, businessDayStr, reporter } from './harness.mjs';
 
 const r = reporter('manual edit unlocks a different-item sibling');
@@ -20,11 +20,12 @@ try {
   await (await block(page, 'Mark', D1, 1)).click();
   await input(page, 'Hours').fill('5');
   await button(page, 'Save').click();
+  r.check('6h + 5h = 11h of 8h: Scheduling Conflict pop-up', await page.locator('text=/Mark has 8hrs max per day/').count() > 0);
+  await button(page, 'Schedule Anyway').click();
   await settle(db, 3000);
   const a = at(db, 's1', D1, 0)[0], b = at(db, 's1', D1, 1)[0];
   r.check('edited entry saved at 5h', Number(b.hours) === 5, b);
-  r.check('other-job sibling unlocked', a && !a.hours_locked, a);
-  r.check('sibling yields to the typed value (8-5=3h)', a && Number(a.hours) === 3, a);
+  r.check('other-job entry NOT shrunk - still 6h, still locked', a && Number(a.hours) === 6 && a.hours_locked === true, a);
 } catch (e) { r.error(e); }
 await browser.close();
 r.done();
