@@ -487,6 +487,92 @@ look rather than being folded into any of the four above.
    separate code path not yet found. Explicitly deferred until desktop
    is fully tested and stable - do not start mobile work before then.
 
+9. **Group move strips a displaced entry's lock and overwrites its
+   manually typed hours.** Found while rebuilding the regression suite.
+   PR #42 says a group move's displaced entry (the one moved to the
+   day's other slot to make room) keeps its lock and hours exactly as
+   they were - and the displacement PATCH itself does (`{slot}` only).
+   But `performGroupMove` (`App.jsx` ~line 2260) then adds the displaced
+   entry's own item to `byItemArrivals`, so `unlockAllLocksInItem` clears
+   its lock and `recalculateItem` re-derives its hours, replacing a
+   deliberately typed number.
+   - Live repro (`tests/known-bug-group-move-displace-keeps-lock.mjs`):
+     Ian has Laundry locked at a manual 5h in slot 1. Group-move two
+     Kitchen days onto Ian's slot 1 row. Laundry correctly moves to slot
+     2, but is unlocked and changed 5h -> 8h.
+   - Knock-on, timing-dependent (seen on one run, not the next): the two
+     items recalculate in parallel against the same starting state, so
+     Kitchen sized its day around Laundry's 5h while Laundry grew to 8h -
+     stored hours for Ian that day added up to 11h on an 8h day (the
+     on-screen numbers are recalculated live, so the screen looked right;
+     the stored value was stale).
+   - Fix direction: re-settle the displaced entry's item WITHOUT clearing
+     its locks (add it to `byItem` for the recalculation, not to
+     `byItemArrivals`), so a locked displaced entry keeps its number and
+     the rest of its item settles around it. Expected to also remove the
+     knock-on, since that only happens when the lock is lost.
+   - Not yet fixed - waiting on the user's go-ahead.
+
+10. **HIGH PRIORITY - CONFIRMED, LIVE ON MAIN. Batch 6's "regrow" rule
+    rewrites correct stored hours just by opening the app.** Found while
+    rebuilding the regression suite. Introduced by PR #57 (Batch 6).
+    `oneCorrectionPass` (`App.jsx` ~line 2634, `regrowableIds`) grows the
+    sole unlocked, non-final entry in an item straight up to the person's
+    full available day (`maxPossibleHours`) with NO check against the
+    item's budget. The ambient pass runs on every entries change,
+    including the initial page load, and PATCHes the result.
+    - Live repro 1 (shared day): item 11.5h, Mary 8h + TJ 3.5h on the
+      same day, TJ's entry created first. Opening the app PATCHes TJ to
+      8h and then Mary to 3.5h - their hours are swapped and saved, with
+      no user action at all. (If Mary's entry was created first, nothing
+      happens - it depends on creation order.)
+    - Live repro 2 (zeroed entry): item 8h, Mark 8h + Ian 0h same day.
+      Opening the app PATCHes Ian to 8h - the item now has 16h stored
+      against an 8h budget and Ian's entry shows "over-run" instead of
+      "0h".
+    - Confirmed against the pre-Batch-6 baseline (`c03b969~1`): neither
+      repro changes anything there.
+    - Since Batch 6 is merged to main, real schedule data may already
+      have been changed this way whenever the app was opened since.
+    - Fix direction (needs a decision): either (a) remove the regrow rule
+      (back to the old shrink-only behaviour - loses Batch 6 rule 2's
+      "grows back" half), or (b) cap the regrow so the item can never go
+      over its budget (grow only by what the item still actually needs).
+    - User's decision: fix B (keep the grow-back, but make it safe), plus
+      the app must never recalculate just from being opened.
+    - FIX BUILT AND TESTED, NOT YET SHIPPED (no PR yet, per the user):
+      1. The background check skips the schedule exactly as loaded from
+         the database (`loadedStateRef` in `App.jsx`), so opening the app
+         or pressing Refresh never saves anything. Every load is
+         remembered, not just the latest, because two loads can overlap
+         (seen in testing; a double-clicked Refresh would do the same).
+      2. The grow-back now only applies to an entry on an EARLIER day
+         than the item's finishing entry (people sharing the finishing day
+         are a split, so growing one just swapped their numbers), and can
+         never grow past the item's budget. The grown value is worked out
+         before the finishing entry's own hours, so the finishing entry
+         takes exactly what's left (down to 0h) in the same step - a first
+         version that skipped this left a 5h item at 6h (caught by test).
+      - Tests: `test-no-change-on-open.mjs` (open, reopen, Refresh save
+        nothing; Mary/TJ not swapped and 0h stays 0h even after a grid
+        action; a genuinely too-big entry still shrinks) and
+        `test-regrow-budget-cap.mjs` (item can't go over budget). Both FAIL
+        on current `main`, PASS on the fix. `test-batch6-staff-hours.mjs`
+        (grow-back still works) and `test-core-labels.mjs` (0h label) pass.
+
+11. **QUESTION - copy onto an item with SOME budget left becomes all
+    Catch-up.** The copy rule added in PR #48 (`performGroupCopy` and
+    `handleDrop`'s ctrl-copy, `App.jsx` ~lines 2355, 2470) marks a copy
+    Catch-up whenever `used + copy hours > budget` - so an item with 4h
+    of 16h left, given an 8h copy, gets the WHOLE 8h as Catch-up and the
+    remaining 4h of budget never gets filled. The PR #48 description, the
+    code's own comment and 2E #2 all say this should only apply to an
+    item whose budget is ALREADY FULLY used. Before PR #48, such a copy
+    re-balanced the item to its budget instead.
+    - Needs the user's call: (a) only use Catch-up when the budget is
+      already fully used (copy otherwise re-balances, as before), or
+      (b) split it - fill what's left, rest as Catch-up, or (c) keep as is.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**
