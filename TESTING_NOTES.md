@@ -85,6 +85,13 @@ changes — re-verify line numbers against the file before relying on them.
     happening in a row when it's really one process settling. Sequence the
     writes if correctness requires it; don't force the user to watch each
     intermediate render.
+11. **Undo must handle every record in a spot, not just one.** Normally
+    each spot on a schedule holds one job, but if the app lets a user put
+    two jobs in the same spot on purpose (e.g. a "Schedule Anyway"
+    option), undo/redo has to track and restore both of them. Undo code
+    written as if a spot can only ever hold one record will quietly lose
+    track of the second one and can delete it for good. Test undo/redo
+    specifically on a doubled-up spot.
 
 ---
 
