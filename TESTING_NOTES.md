@@ -547,6 +547,47 @@ look rather than being folded into any of the four above.
      knock-on, since that only happens when the lock is lost.
    - Not yet fixed - waiting on the user's go-ahead.
 
+10. **HIGH PRIORITY - CONFIRMED, LIVE ON MAIN. Batch 6's "regrow" rule
+    rewrites correct stored hours just by opening the app.** Found while
+    rebuilding the regression suite. Introduced by PR #57 (Batch 6).
+    `oneCorrectionPass` (`App.jsx` ~line 2634, `regrowableIds`) grows the
+    sole unlocked, non-final entry in an item straight up to the person's
+    full available day (`maxPossibleHours`) with NO check against the
+    item's budget. The ambient pass runs on every entries change,
+    including the initial page load, and PATCHes the result.
+    - Live repro 1 (shared day): item 11.5h, Mary 8h + TJ 3.5h on the
+      same day, TJ's entry created first. Opening the app PATCHes TJ to
+      8h and then Mary to 3.5h - their hours are swapped and saved, with
+      no user action at all. (If Mary's entry was created first, nothing
+      happens - it depends on creation order.)
+    - Live repro 2 (zeroed entry): item 8h, Mark 8h + Ian 0h same day.
+      Opening the app PATCHes Ian to 8h - the item now has 16h stored
+      against an 8h budget and Ian's entry shows "over-run" instead of
+      "0h".
+    - Confirmed against the pre-Batch-6 baseline (`c03b969~1`): neither
+      repro changes anything there.
+    - Since Batch 6 is merged to main, real schedule data may already
+      have been changed this way whenever the app was opened since.
+    - Fix direction (needs a decision): either (a) remove the regrow rule
+      (back to the old shrink-only behaviour - loses Batch 6 rule 2's
+      "grows back" half), or (b) cap the regrow so the item can never go
+      over its budget (grow only by what the item still actually needs).
+    - Tests: `test-core-labels.mjs` ("0h" label) currently fails because
+      of this; a dedicated test will be added with the fix.
+
+11. **QUESTION - copy onto an item with SOME budget left becomes all
+    Catch-up.** The copy rule added in PR #48 (`performGroupCopy` and
+    `handleDrop`'s ctrl-copy, `App.jsx` ~lines 2355, 2470) marks a copy
+    Catch-up whenever `used + copy hours > budget` - so an item with 4h
+    of 16h left, given an 8h copy, gets the WHOLE 8h as Catch-up and the
+    remaining 4h of budget never gets filled. The PR #48 description, the
+    code's own comment and 2E #2 all say this should only apply to an
+    item whose budget is ALREADY FULLY used. Before PR #48, such a copy
+    re-balanced the item to its budget instead.
+    - Needs the user's call: (a) only use Catch-up when the budget is
+      already fully used (copy otherwise re-balances, as before), or
+      (b) split it - fill what's left, rest as Catch-up, or (c) keep as is.
+
 ### 2F. UI/UX changes logged for a later batch (not yet built)
 
 1. **Default view on opening should be 4 Weeks, not 2 Weeks.**

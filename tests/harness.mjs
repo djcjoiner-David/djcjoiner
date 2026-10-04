@@ -124,7 +124,10 @@ export async function launch(seed, { width = 1800, height = 1100, role = 'admin'
   await page.goto(BASE);
   await page.waitForSelector('text=Today', { timeout: 20000 });
   // Same grid width on every code version (older versions defaulted to 2).
-  if (weeks) await page.locator('button', { hasText: new RegExp(`^${weeks} Weeks$`) }).click();
+  if (weeks) {
+    const b = page.locator('button', { hasText: new RegExp(`^${weeks} Weeks$`) });
+    if (await b.count()) await b.click();
+  }
   await settle(db);
   return { browser, page, db, pageErrors };
 }
