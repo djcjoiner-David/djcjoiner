@@ -2717,7 +2717,12 @@ function MainApp({currentUser,onLogout}) {
     const corrections=[];
     entries.forEach((orig,idx)=>{
       const fixed=working[idx];
-      if(Math.abs(Number(orig.hours)-fixed.hours)>0.05)corrections.push({id:orig.id,oldHours:Number(orig.hours),newHours:fixed.hours});
+      // An entry left with 0h (just reduced to it, or already sitting at it)
+      // is listed even when its number didn't change, so the caller can
+      // remove it - see the useEffect below. A locked entry is never
+      // touched, and a past-dated one is history, not something to tidy.
+      const isEmpty=fixed.hours<=0.05&&!orig.hoursLocked&&!isPast(orig.dateStr);
+      if(isEmpty||Math.abs(Number(orig.hours)-fixed.hours)>0.05)corrections.push({id:orig.id,oldHours:Number(orig.hours),newHours:isEmpty?0:fixed.hours});
     });
     return corrections;
   }
@@ -2761,9 +2766,21 @@ function MainApp({currentUser,onLogout}) {
     correctingRef.current=true;
     (async()=>{
       try{
-        await Promise.all(corrections.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)));
-        setEntries(prev=>prev.map(e=>{
-          const c=corrections.find(x=>x.id===e.id);
+        // An entry left with nothing (someone else's entry now covers the
+        // whole day/budget for it) has nothing left to represent, so it
+        // deletes itself instead of sitting on the grid as an empty "0h"
+        // block. This only ever happens after a real change on the grid
+        // (never on opening - see above), and that change's own Undo brings
+        // it back, since Undo restores the whole schedule as it was.
+        const toDelete=corrections.filter(c=>c.newHours<=0.05);
+        const toPatch=corrections.filter(c=>c.newHours>0.05);
+        await Promise.all([
+          ...toPatch.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)),
+          ...(toDelete.length>0?[db("DELETE","entries",null,`?id=in.(${toDelete.map(c=>c.id).join(",")})`)]:[]),
+        ]);
+        const deletedIds=new Set(toDelete.map(c=>c.id));
+        setEntries(prev=>prev.filter(e=>!deletedIds.has(e.id)).map(e=>{
+          const c=toPatch.find(x=>x.id===e.id);
           return c?{...e,hours:c.newHours}:e;
         }));
       }catch(err){
