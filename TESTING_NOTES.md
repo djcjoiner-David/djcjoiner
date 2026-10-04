@@ -572,8 +572,27 @@ look rather than being folded into any of the four above.
       (back to the old shrink-only behaviour - loses Batch 6 rule 2's
       "grows back" half), or (b) cap the regrow so the item can never go
       over its budget (grow only by what the item still actually needs).
-    - Tests: `test-core-labels.mjs` ("0h" label) currently fails because
-      of this; a dedicated test will be added with the fix.
+    - User's decision: fix B (keep the grow-back, but make it safe), plus
+      the app must never recalculate just from being opened.
+    - FIX BUILT AND TESTED, NOT YET SHIPPED (no PR yet, per the user):
+      1. The background check skips the schedule exactly as loaded from
+         the database (`loadedStateRef` in `App.jsx`), so opening the app
+         or pressing Refresh never saves anything. Every load is
+         remembered, not just the latest, because two loads can overlap
+         (seen in testing; a double-clicked Refresh would do the same).
+      2. The grow-back now only applies to an entry on an EARLIER day
+         than the item's finishing entry (people sharing the finishing day
+         are a split, so growing one just swapped their numbers), and can
+         never grow past the item's budget. The grown value is worked out
+         before the finishing entry's own hours, so the finishing entry
+         takes exactly what's left (down to 0h) in the same step - a first
+         version that skipped this left a 5h item at 6h (caught by test).
+      - Tests: `test-no-change-on-open.mjs` (open, reopen, Refresh save
+        nothing; Mary/TJ not swapped and 0h stays 0h even after a grid
+        action; a genuinely too-big entry still shrinks) and
+        `test-regrow-budget-cap.mjs` (item can't go over budget). Both FAIL
+        on current `main`, PASS on the fix. `test-batch6-staff-hours.mjs`
+        (grow-back still works) and `test-core-labels.mjs` (0h label) pass.
 
 11. **QUESTION - copy onto an item with SOME budget left becomes all
     Catch-up.** The copy rule added in PR #48 (`performGroupCopy` and
