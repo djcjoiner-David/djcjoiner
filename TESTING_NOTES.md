@@ -594,8 +594,8 @@ look rather than being folded into any of the four above.
         on current `main`, PASS on the fix. `test-batch6-staff-hours.mjs`
         (grow-back still works) and `test-core-labels.mjs` (0h label) pass.
 
-11. **QUESTION - copy onto an item with SOME budget left becomes all
-    Catch-up.** The copy rule added in PR #48 (`performGroupCopy` and
+11. **FIXED (copy Catch-up PR). (Was: copy onto an item with SOME budget
+    left became all Catch-up.)** The copy rule added in PR #48 (`performGroupCopy` and
     `handleDrop`'s ctrl-copy, `App.jsx` ~lines 2355, 2470) marks a copy
     Catch-up whenever `used + copy hours > budget` - so an item with 4h
     of 16h left, given an 8h copy, gets the WHOLE 8h as Catch-up and the
@@ -608,6 +608,14 @@ look rather than being folded into any of the four above.
       (b) split it - fill what's left, rest as Catch-up, or (c) keep as is.
     - USER'S DECISION: (a). Catch-up is judged per item only (that item's
       own budget) - a different item with budget left schedules normally.
+    - What shipped: both copy paths (`performGroupCopy`, `handleDrop`'s
+      ctrl-copy) now mark a copy Catch-up only when its item's budget is
+      ALREADY fully used before that copy. Otherwise it's a normal entry
+      and the item's own recalculation settles it to the budget. A group
+      copy tracks usage per item as it goes, so the copy that fills the
+      last of the budget is normal and any after it are Catch-up.
+    - Test: `test-copy-partial-budget.mjs` (was the known-bug file) -
+      fails on main before this change, passes after.
 
 12. **Adding work to someone with no hours left that day never warns -
     except auto-fill.** Found by a read-only check (pretend data): David
