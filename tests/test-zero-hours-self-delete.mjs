@@ -3,7 +3,7 @@
 //   0h (e.g. a colleague's edit uses the whole budget) deletes itself, and
 //   so does any unlocked entry already sitting at 0h;
 // - never on opening the app, never a past-dated entry;
-// - the change's one Undo brings it back.
+// - the change's one Undo brings back anything that had hours.
 import { launch, settle, block, cell, drag, input, button, rows, snap, eq, staff, job, item, entry, businessDayStr, pastBusinessDayStr, reporter } from './harness.mjs';
 
 const r = reporter('0h entries delete themselves after a grid change');
@@ -36,7 +36,12 @@ try {
   r.check('older 0h Pantry entry also tidied up', !has('p2'));
   r.check('past-dated 0h entry kept (history)', has('v2'));
   await page.click('text=↩ Undo'); await settle(db, 3000);
-  r.check('one Undo brings everything back exactly', eq(snap(db), s0), snap(db));
+  // Undo restores everything that had hours. An entry that was ALREADY 0h
+  // before the change (Ian's Pantry) is restored and then deletes itself
+  // again straight away - by the same rule (TESTING_NOTES 2E #12 note).
+  const expected = s0.filter(x => !x.startsWith(`s2|${D(4)}|0|i2|`));
+  r.check('one Undo brings back everything that had hours', eq(snap(db), expected), { got: snap(db), expected });
+  r.check('Ian\'s Kitchen 4h and Mark\'s 4h restored', Number(rows(db, e => e.id === 'k1')[0]?.hours) === 4 && rows(db, e => e.sub_item_id === 'i1' && e.staff_id === 's2' && Number(e.hours) === 4).length === 1);
 } catch (e) { r.error(e); }
 await browser.close();
 r.done();
