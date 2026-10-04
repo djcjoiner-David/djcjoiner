@@ -167,18 +167,20 @@ export async function block(page, staffName, dateStr, slot, hasText) {
   const c = await cell(page, staffName, dateStr, slot);
   return hasText ? c.locator('div[draggable]', { hasText }).first() : c.locator('div[draggable]').first();
 }
-export async function drag(page, db, from, to, { copy = false } = {}) {
-  if (copy) {
+export async function drag(page, db, from, to, { copy = false, dispatch = false } = {}) {
+  // dispatch: fire the HTML5 drag events directly - Playwright's dragTo can
+  // silently miss some drop targets (e.g. an "Hours Available" cell).
+  if (copy || dispatch) {
     // Playwright's dragTo can't hold Ctrl, so fire the HTML5 events directly.
     const src = await from.elementHandle();
     const dst = await to.elementHandle();
-    await page.evaluate(([s, d]) => {
+    await page.evaluate(([s, d, c]) => {
       const dt = new DataTransfer();
       s.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-      d.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, ctrlKey: true }));
-      d.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, ctrlKey: true }));
+      d.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, ctrlKey: c }));
+      d.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, ctrlKey: c }));
       s.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
-    }, [src, dst]);
+    }, [src, dst, copy]);
   } else {
     await from.dragTo(to);
   }
