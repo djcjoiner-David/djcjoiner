@@ -41,7 +41,10 @@ try {
   await settle(db, 3000);
   r.check('after a grid action: Mary/TJ NOT swapped', h('m1') === 8 && h('t1') === 3.5, rows(db, e => e.sub_item_id === 'i1'));
   r.check('after a grid action: Living W still 11.5h', itemTotal(db, 'i1') === 11.5);
-  r.check('after a grid action: Ian still 0h (Kitchen not over budget)', h('k2') === 0 && itemTotal(db, 'i2') === 8, rows(db, e => e.sub_item_id === 'i2'));
+  // Ian's 0h entry: never grown into an over-run. Since the 0h auto-delete
+  // rule it's removed after a grid action instead of left at 0h.
+  r.check('after a grid action: Ian\'s 0h entry not grown (removed by the 0h rule)', !rows(db, e => e.id === 'k2').some(e => Number(e.hours) > 0), rows(db, e => e.sub_item_id === 'i2'));
+  r.check('after a grid action: Kitchen still exactly 8h', itemTotal(db, 'i2') === 8, rows(db, e => e.sub_item_id === 'i2'));
   r.check('after a grid action: David\'s too-big 7h day shrinks to his 6h', h('d1') === 6, rows(db, e => e.sub_item_id === 'i3'));
   r.check('after a grid action: Pantry still totals 10h', itemTotal(db, 'i3') === 10, rows(db, e => e.sub_item_id === 'i3'));
 } catch (e) { r.error(e); }
