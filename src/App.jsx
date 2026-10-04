@@ -3634,6 +3634,12 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   const productiveHours=selectedStaff?.productiveHours||8;
   const selectedSub=jobSubs.find(s=>s.id===form.subItemId);
   const totalHours=form.totalHours||selectedSub?.totalHours||0;
+  // The selected item's own budget. `totalHours` above is the hours to
+  // schedule (it can be the hours LEFT, from Job Summary's "+ Schedule", or
+  // the first item's budget when editing) - budget checks and labels must
+  // never use it (TESTING_NOTES.md 2E #16: the Catch-up note said "12h
+  // budget" for a 41h item).
+  const itemBudget=Number(selectedSub?.totalHours)||0;
   // Raw stored hours already scheduled against this item, same definition
   // computeItemPlan uses (excluding this entry itself if editing, and
   // excluding Catch-up Hours entries - they were deliberately agreed to
@@ -3772,7 +3778,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       // zero it back out moments after save.
       if(form.mode==="new"&&form.entryType!=="misc"&&form.subItemId&&!autoFill&&!form.isCatchUp){
         const newHoursTotal=combined.reduce((s,c)=>s+(Number(c.hours)||0),0);
-        if(itemBudgetUsed+newHoursTotal>totalHours+0.05){
+        if(itemBudgetUsed+newHoursTotal>itemBudget+0.05){
           setCatchUpPrompt({combined,staffId:staffToSchedule[0]});
           return;
         }
@@ -3859,7 +3865,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
               )}
               {form.subItemId&&itemCatchUpLogged>0&&(
                 <div style={{fontSize:11,color:"#64748B",marginTop:4}}>
-                  + {itemCatchUpLogged}h Catch-up Hours logged for this item (not counted in its {totalHours}h budget)
+                  + {itemCatchUpLogged}h Catch-up Hours logged for this item (not counted in its {itemBudget}h budget)
                 </div>
               )}
               {form.mode==="new"&&(
@@ -3984,7 +3990,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     {staggerConfirm&&<ConfirmModal title="⚠ Schedule Confirmation" message={staggerConfirm.message} confirmLabel="Schedule Anyway" cancelLabel="Go Back"
       onConfirm={()=>{onSave({...form,staffId:staggerConfirm.staffId,autoFill},staggerConfirm.combined);setStaggerConfirm(null);}}
       onCancel={()=>setStaggerConfirm(null)}/>}
-    {catchUpPrompt&&<ConfirmModal title="⚠ All hours allocated" message={`All ${totalHours}h for "${selectedSub?.name}" ${totalHours===1?"is":"are"} already scheduled. Add ${catchUpPrompt.combined.reduce((s,c)=>s+(Number(c.hours)||0),0)}h as Catch-up Hours instead? They'll be logged against this item but won't count toward its ${totalHours}h budget.`} confirmLabel="Add Catch-up Hours" cancelLabel="Cancel"
+    {catchUpPrompt&&<ConfirmModal title="⚠ All hours allocated" message={`All ${itemBudget}h for "${selectedSub?.name}" ${itemBudget===1?"is":"are"} already scheduled. Add ${catchUpPrompt.combined.reduce((s,c)=>s+(Number(c.hours)||0),0)}h as Catch-up Hours instead? They'll be logged against this item but won't count toward its ${itemBudget}h budget.`} confirmLabel="Add Catch-up Hours" cancelLabel="Cancel"
       onConfirm={()=>{onSave({...form,staffId:catchUpPrompt.staffId,autoFill,isCatchUp:true},catchUpPrompt.combined);setCatchUpPrompt(null);}}
       onCancel={()=>setCatchUpPrompt(null)}/>}
     {startConflictPrompt&&<ConfirmModal title="⚠ No Room That Day" message={`${staff.find(s=>s.id===startConflictPrompt.sid)?.name} has no room left on ${formatDate(parseISO(form.dateStr))} - first available is ${startConflictPrompt.availLabel}. Schedule there instead?`} confirmLabel={`Schedule First Available (${startConflictPrompt.availLabel})`} cancelLabel="Go Back"
