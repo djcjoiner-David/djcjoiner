@@ -92,6 +92,17 @@ changes — re-verify line numbers against the file before relying on them.
     written as if a spot can only ever hold one record will quietly lose
     track of the second one and can delete it for good. Test undo/redo
     specifically on a doubled-up spot.
+12. **Give every form label one shared style, defined once.** When each
+    pop-up writes its own label styling inline, they drift apart and a
+    "make the headings clearer" request means hunting down every copy.
+    One shared style constant used by every field label (and by the
+    shared input/select components) keeps every form consistent and
+    makes a future restyle a one-line change.
+13. **Tests that find things by their on-screen wording break when the
+    wording changes.** Re-wording a message is a normal request; when it
+    happens, update every test that looked for the old text in the same
+    change, and prefer finding inputs by type or structure (e.g. "the
+    number box under this heading") over matching a whole sentence.
 
 ---
 
@@ -939,6 +950,61 @@ hashed passwords never sent back, no leaked database errors).
      case. Display only - no saved hours change.
    - Test: `test-two-entry-day-real-hours.mjs` (the Harries numbers) -
      fails on main (shows 14h), passes after.
+
+8. **FIXED (form tidy-up PR). Pop-up forms made clearer (user's marked-up
+   screenshots "NSE with Job" and "ESE Catch Up").**
+   - Every field heading in every pop-up (entry form, Job, Staff, Work
+     Hours, User Management) uses one shared style: larger, solid
+     near-black (`FIELD_LABEL`, also used by `Inp`/`Sel`/`ColorPicker`).
+   - "drag to move" removed from every pop-up title (they still drag).
+   - Job Entry / Misc Entry tabs look like the Slot 1 / Slot 2 buttons.
+   - Start Date box shorter, with First Available beside it on one row.
+   - "Total Hours to Deduct from Budget" -> "Hours to Deduct from Budget".
+   - Auto-fill tick box moved to the right column, straight under the
+     hours box and above the green auto-fill preview.
+   - The orange "⚡ {name}'s other slot that day has 4h - it'll
+     recalculate..." line is now black, one line, no symbol:
+     "Mary 6 has 4 hours assigned on Thu 08 Oct" (the entry's own date,
+     not "today" - user's choice).
+   - The Catch-up note moved under that line and reads "3.5hrs Catch-up
+     logged for this item, not deducted from item total hrs." (no budget
+     figure, so it can't show the wrong item's number again - see 2E #16).
+   - No change to how hours are worked out or saved.
+   - Tests updated for the new wording: `test-catchup-new-entry`,
+     `test-catchup-note-budget`, `test-overcommit-shortfall`,
+     `test-schedule-gap-alerts`.
+
+9. **PLANNED (agreed with user, build in order after #8).**
+   a. **Tentative items.** Set per joinery item (not whole job, not per
+      entry), by a "Tentative" switch on the entry form. Tentative entries
+      follow every normal rule (auto-fill, gap alerts, Catch-up, locks,
+      conflicts) except: (1) shown faded with a dashed border and a
+      "Tentative" label; (2) their hours never reduce what the same
+      person's OTHER slot can hold. Only one tentative slot per person per
+      day. A new tentative item schedules around confirmed work, but
+      confirmed work booked later never moves for it. Job Summary: the
+      item's row gets a different colour and a "Tentative" tag, all other
+      figures unchanged. Confirm by the row's "Confirm Booking" button OR
+      by unticking Tentative in Edit Schedule Entry; either way, if anyone
+      goes over their max on a day, warn first: "Confirming this job puts
+      Mark over his 7.5hrs max on Tue 13 Oct and Wed 14 Oct. Those days
+      will show a conflict. Consider moving hours to the next day. Confirm
+      anyway?" (Confirm Anyway / Cancel); confirmed days over max show the
+      red Conflict. Needs a database column on `sub_items` (user pastes
+      one line into Neon before merge).
+   b. **Public holidays (all staff).** A "Days Off" list kept separate
+      from job entries. Holidays load automatically from a free online
+      public-holiday list for the country/state picked once in Settings
+      (so other businesses can pick their own); editable. Shown as a grey
+      labelled block across every staff row; auto-fill / First Available
+      / gap alerts treat it like a weekend. Adding a day off where work is
+      already booked moves each affected person's entries from that day
+      on forward by the working days lost (user confirmed: Ian's Driscoll
+      Mon-Thu + holiday Tue -> ends Fri, his next job moves along too;
+      staff with nothing booked that day don't move).
+   c. **RDOs** (one date, all or selected staff) and **Annual Closure**
+      (date range, all staff, with a "Hide these days" option and a
+      grid button to show/hide them) - details to agree when reached.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed

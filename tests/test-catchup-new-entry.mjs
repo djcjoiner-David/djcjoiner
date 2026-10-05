@@ -27,7 +27,7 @@ try {
   r.check('grid shows the Catch-up tag', (await cellText(page, 'Ian', D(3), 0)).includes('Catch-up'), await cellText(page, 'Ian', D(3), 0));
   // running total shown when scheduling the same item again
   await newEntry(page, 'Ian', D(4), 0, { itemId: 'i1', autoFill: false });
-  r.check('modal shows "+ 4h Catch-up Hours logged"', await page.locator('text=/\\+ 4h Catch-up Hours logged/').count() > 0);
+  r.check('modal shows "4hrs Catch-up logged for this item"', await page.locator('text=/^4hrs Catch-up logged for this item, not deducted from item total hrs\\.$/').count() > 0);
 } catch (e) { r.error(e); }
 await browser.close();
 r.done();

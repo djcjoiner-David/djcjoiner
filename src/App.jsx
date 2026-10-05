@@ -623,10 +623,14 @@ const JOINERY_ITEM_PRESETS = [
 
 // ── UI Primitives ─────────────────────────────────────────────
 
+// One heading style for every form field label, in every pop-up, so they
+// all read the same: larger, solid near-black text.
+const FIELD_LABEL={fontSize:13,color:"#0F172A",marginBottom:4,fontWeight:600};
+
 function ColorPicker({label,value,onChange}) {
   return (
     <div style={{marginBottom:10}}>
-      <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>{label}</div>
+      <div style={FIELD_LABEL}>{label}</div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
         <input type="color" value={value} onChange={e=>onChange(e.target.value)} style={{width:32,height:32,padding:2,border:"1px solid #CBD5E1",borderRadius:6,cursor:"pointer"}}/>
         <input type="text" value={value} onChange={e=>onChange(e.target.value)} style={{flex:1,padding:"5px 8px",border:"1px solid #CBD5E1",borderRadius:6,fontSize:16,fontFamily:"monospace"}}/>
@@ -668,7 +672,7 @@ function Modal({title,onClose,children,wide,small}) {
       onClick={e=>{if(!pos&&e.target===e.currentTarget)onClose();}}>
       <div ref={modalRef} style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:wide?820:small?420:460,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)",pointerEvents:"auto",...style}}>
         <div onMouseDown={onMouseDown} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px 12px",borderBottom:"1px solid #E2E8F0",cursor:"grab",userSelect:"none"}}>
-          <div style={{fontSize:16,fontWeight:600,color:"#1E293B"}}>{title} <span style={{fontSize:11,color:"#94A3B8",fontWeight:400}}>drag to move</span></div>
+          <div style={{fontSize:16,fontWeight:600,color:"#1E293B"}}>{title}</div>
           <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#94A3B8"}}>×</button>
         </div>
         <div style={{padding:"16px 20px 20px"}}>{children}</div>
@@ -700,7 +704,7 @@ function ConfirmModal({title="Confirm",message,confirmLabel="Confirm",cancelLabe
 function Inp({label,...props}) {
   return (
     <div style={{marginBottom:10}}>
-      {label&&<div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>{label}</div>}
+      {label&&<div style={FIELD_LABEL}>{label}</div>}
       <input style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}} {...props}/>
     </div>
   );
@@ -709,7 +713,7 @@ function Inp({label,...props}) {
 function Sel({label,children,...props}) {
   return (
     <div style={{marginBottom:10}}>
-      {label&&<div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>{label}</div>}
+      {label&&<div style={FIELD_LABEL}>{label}</div>}
       <select style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,background:"#fff",outline:"none"}} {...props}>
         {children}
       </select>
@@ -3493,11 +3497,11 @@ function MainApp({currentUser,onLogout}) {
       {workHoursOpen&&(
         <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
           <div style={{marginBottom:12}}>
-            <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Work Day Start</div>
+            <div style={FIELD_LABEL}>Work Day Start</div>
             <input type="time" value={workStart} onChange={e=>setWorkStart(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box"}}/>
           </div>
           <div style={{marginBottom:16}}>
-            <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Work Day End</div>
+            <div style={FIELD_LABEL}>Work Day End</div>
             <input type="time" value={workEnd} onChange={e=>setWorkEnd(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box"}}/>
           </div>
           <div style={{padding:"10px 14px",background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,fontSize:13,color:"#15803D",fontWeight:500,marginBottom:12}}>
@@ -3867,14 +3871,31 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     return()=>window.removeEventListener("keydown",onKey);
   },[form,autoFill,preview]);
 
+  // Shown under the Hours box: the auto-fill switch (new job entries only),
+  // what's already booked in this person's other slot that day, and any
+  // Catch-up Hours already logged against the item.
+  const autoFillToggle=form.mode==="new"&&form.entryType!=="misc"&&(
+    <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155",marginTop:8}}>
+      <input type="checkbox" checked={autoFill} onChange={e=>setAutoFill(e.target.checked)} style={{width:15,height:15}}/>
+      Auto-fill consecutive days at each person's daily cap
+    </label>
+  );
+  const otherSlotHours=Number(otherSlotEntry?.hours)||0;
+  const assignedLine=otherSlotEntry&&editingLockedEntry&&otherSlotHours>0.05&&form.dateStr&&(
+    <div style={{fontSize:12,color:"#1E293B",marginTop:8,whiteSpace:"nowrap"}}>{selectedStaff?.name} has {otherSlotHours} hour{otherSlotHours===1?"":"s"} assigned on {gapDayLabel(form.dateStr)}</div>
+  );
+  const catchUpLine=form.entryType!=="misc"&&form.subItemId&&itemCatchUpLogged>0&&(
+    <div style={{fontSize:12,color:"#1E293B",marginTop:8}}>{itemCatchUpLogged}{itemCatchUpLogged===1?"hr":"hrs"} Catch-up logged for this item, not deducted from item total hrs.</div>
+  );
   return(
     <>
     <Modal title={form.mode==="new"?"New Schedule Entry":"Edit Schedule Entry"} onClose={onClose} wide>
       {/* Entry type switcher */}
-      <div style={{display:"flex",gap:6,marginBottom:14,background:"#F1F5F9",borderRadius:8,padding:3}}>
+      {/* Same look as the Slot 1 / Slot 2 buttons, so the choice stands out */}
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
         {[["job","📋 Job Entry"],["misc","Misc Entry"]].map(([type,label])=>(
-          <button key={type} onClick={()=>set("entryType",type)}
-            style={{flex:1,padding:"6px",borderRadius:6,border:"none",fontSize:12,fontWeight:500,cursor:"pointer",background:form.entryType===type?"#fff":"transparent",color:form.entryType===type?"#1E293B":"#64748B",boxShadow:form.entryType===type?"0 1px 3px rgba(0,0,0,0.1)":"none"}}>
+          <button key={type} type="button" onClick={()=>set("entryType",type)}
+            style={{flex:1,padding:"8px",borderRadius:8,border:`1.5px solid ${form.entryType===type?"#1D4ED8":"#93C5FD"}`,background:form.entryType===type?"#3B82F6":"#EFF6FF",color:form.entryType===type?"#fff":"#1D4ED8",fontSize:13,fontWeight:600,cursor:"pointer"}}>
             {label}
           </button>
         ))}
@@ -3884,7 +3905,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         {/* Left column: who, and what */}
         <div>
           <div style={{marginBottom:10}}>
-            <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Staff Member(s)</div>
+            <div style={FIELD_LABEL}>Staff Member(s)</div>
             <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:160,overflowY:"auto",border:"1px solid #CBD5E1",borderRadius:8,padding:"6px 10px"}}>
               {staff.map(s=>(
                 <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155"}}>
@@ -3913,7 +3934,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                 {jobs.filter(j=>!j.completed||j.id===form.jobId).map(j=><option key={j.id} value={j.id}>{j.jobNo} – {j.name}{j.completed?" (completed)":""}</option>)}
               </Sel>
               <div style={{marginBottom:10}}>
-                <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Description (e.g. Wash Cars, Study Leave)</div>
+                <div style={FIELD_LABEL}>Description (e.g. Wash Cars, Study Leave)</div>
                 <textarea value={form.miscNote} onChange={e=>set("miscNote",e.target.value)} placeholder="Enter description... (up to two lines)" rows={2}
                   style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none",resize:"vertical",fontFamily:"inherit"}}/>
               </div>
@@ -3934,17 +3955,6 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                   <option value="">General / no item</option>
                 </Sel>
               )}
-              {form.subItemId&&itemCatchUpLogged>0&&(
-                <div style={{fontSize:11,color:"#64748B",marginTop:4}}>
-                  + {itemCatchUpLogged}h Catch-up Hours logged for this item (not counted in its {itemBudget}h budget)
-                </div>
-              )}
-              {form.mode==="new"&&(
-                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155",marginTop:8}}>
-                  <input type="checkbox" checked={autoFill} onChange={e=>setAutoFill(e.target.checked)} style={{width:15,height:15}}/>
-                  Auto-fill consecutive days at each person's daily cap
-                </label>
-              )}
             </>
           )}
         </div>
@@ -3959,11 +3969,14 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
               </button>
             ))}
           </div>
-          <div style={{marginBottom:8}}>
-            <Inp label="Start Date" type="date" value={form.dateStr} min={todayStr} onChange={e=>setForm(f=>({...f,dateStr:e.target.value}))}/>
-          </div>
-          {form.mode==="new"&&(
-            <button type="button" onClick={()=>{
+          <div style={{marginBottom:14}}>
+            <div style={FIELD_LABEL}>Start Date</div>
+            {/* A shorter date box, with First Available right beside it */}
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input type="date" value={form.dateStr} min={todayStr} onChange={e=>setForm(f=>({...f,dateStr:e.target.value}))}
+                style={{width:170,padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+              {form.mode==="new"&&(
+                <button type="button" onClick={()=>{
                 const ids=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
                 if(ids.length===0)return;
                 if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
@@ -3990,23 +4003,28 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                   const{dateStr,slot}=nextAvailableDate(ids,entries,todayStr,form.slot,staff);
                   setForm(f=>({...f,dateStr,slot}));
                 }
-              }} style={{width:"100%",padding:"7px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:12,cursor:"pointer",marginBottom:14}}>
-              First Available
-            </button>
-          )}
+              }} style={{flex:1,padding:"9px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                  First Available
+                </button>
+              )}
+            </div>
+          </div>
 
           {form.entryType==="misc"?(
-            <div style={{width:130}}>
-              <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
+            <div>
+              <div style={{width:130}}>
+                <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
+              </div>
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
-              {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day has {otherSlotEntry.hours}h - it'll recalculate automatically once you save</div>}
+              {assignedLine}
             </div>
           ):autoFill&&form.mode==="new"?(
             <div>
-              <div style={{fontSize:12,color:"#64748B",marginBottom:3,fontWeight:500}}>Total Hours to Deduct from Budget</div>
+              <div style={FIELD_LABEL}>Hours to Deduct from Budget</div>
               <div style={{width:130}}>
                 <input type="number" min={0.5} max={999} step={0.5} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
               </div>
+              {autoFillToggle}
               {form.staffIds.length<=1&&otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
               {form.staffIds.length>1&&(()=>{
                 // The real computed outcome, not an upfront-by-rate estimate -
@@ -4037,12 +4055,17 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                   </div>
                 </div>
               )}
+              {catchUpLine}
             </div>
           ):(
-            <div style={{width:130}}>
-              <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
+            <div>
+              <div style={{width:130}}>
+                <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
+              </div>
+              {autoFillToggle}
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
-              {otherSlotEntry&&editingLockedEntry&&(Number(otherSlotEntry.hours)||0)>0.05&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s other slot that day has {otherSlotEntry.hours}h - it'll recalculate automatically once you save</div>}
+              {assignedLine}
+              {catchUpLine}
             </div>
           )}
         </div>
@@ -4152,7 +4175,7 @@ function JobModal({data,onSave,onDelete,onToggleComplete,onClose,saving}) {
           <Inp label="Job Number" value={form.jobNo} onChange={e=>set("jobNo",e.target.value)} autoFocus/>
           <Inp label="Job Name" value={form.name} onChange={e=>set("name",e.target.value)}/>
           <div style={{marginBottom:10}}>
-            <div style={{fontSize:12,color:"#64748B",marginBottom:6,fontWeight:500}}>Colour</div>
+            <div style={{...FIELD_LABEL,marginBottom:6}}>Colour</div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {JOB_COLOUR_PRESETS.map((p,i)=>{
                 const selected=form.bgColor===p.bgColor&&form.borderColor===p.borderColor&&form.textColor===p.textColor;
@@ -4170,7 +4193,7 @@ function JobModal({data,onSave,onDelete,onToggleComplete,onClose,saving}) {
         </div>
         <div>
           <div style={{marginBottom:14}}>
-            <div style={{fontSize:12,color:"#64748B",marginBottom:6,fontWeight:500}}>Preview</div>
+            <div style={{...FIELD_LABEL,marginBottom:6}}>Preview</div>
             <div style={{background:form.bgColor,border:`1.5px solid ${form.borderColor}`,borderRadius:8,padding:"10px 14px"}}>
               <div style={{fontSize:11,fontWeight:700,color:form.textColor}}>{form.jobNo} · {form.name}</div>
               <div style={{fontSize:11,fontWeight:400,color:form.textColor,margin:"3px 0"}}>Example Item Name</div>
@@ -4178,7 +4201,7 @@ function JobModal({data,onSave,onDelete,onToggleComplete,onClose,saving}) {
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-            <div style={{fontSize:12,color:"#64748B",fontWeight:500}}>Joinery Items <span style={{fontWeight:400,color:"#94A3B8"}}>(name + hour budget)</span></div>
+            <div style={{...FIELD_LABEL,marginBottom:0}}>Joinery Items <span style={{fontWeight:400,color:"#94A3B8"}}>(name + hour budget)</span></div>
             <button type="button" onClick={()=>fileInputRef.current?.click()}
               style={{fontSize:11,color:"#3B82F6",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:6,padding:"4px 9px",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
               📥 Import from Excel
@@ -4242,7 +4265,7 @@ function StaffModal({data,onSave,onRemove,onClose,onMove,isFirst,isLast,saving})
       <Inp label="Name" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
       {!form.isNew&&onMove&&(
         <div style={{marginBottom:12}}>
-          <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Position in schedule</div>
+          <div style={FIELD_LABEL}>Position in schedule</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>onMove(form.id,"up")} disabled={isFirst}
               style={{flex:1,padding:"7px 0",border:"1px solid #CBD5E1",borderRadius:8,background:isFirst?"#F8FAFC":"#fff",color:isFirst?"#CBD5E1":"#334155",cursor:isFirst?"not-allowed":"pointer",fontSize:13,fontWeight:600}}>
@@ -4256,7 +4279,7 @@ function StaffModal({data,onSave,onRemove,onClose,onMove,isFirst,isLast,saving})
         </div>
       )}
       <div style={{marginBottom:12}}>
-        <div style={{fontSize:12,color:"#64748B",marginBottom:4,fontWeight:500}}>Daily hour cap</div>
+        <div style={FIELD_LABEL}>Daily hour cap</div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <input type="range" min={1} max={8} step={0.5} value={form.productiveHours}
             onChange={e=>setForm(f=>({...f,productiveHours:Number(e.target.value)}))}
