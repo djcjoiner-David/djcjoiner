@@ -1054,7 +1054,10 @@ hashed passwords never sent back, no leaked database errors).
           entry form's hour limits and its other-slot line ("...has 7hrs
           tentative assigned...") all follow the same rule.
         - UI: "Tentative" switch on the entry form (job entries); grid
-          block faded (0.45), dashed border, "Tentative" label; Job
+          block faded (0.45), dashed border, "Tentative" label - CHANGED
+          after live testing (user: "too easy to miss"; chose option A
+          from a side-by-side on a real grid): diagonal stripes in the
+          job's colour, full-strength text, dashed border, label kept; Job
           Summary row amber with a "Tentative" tag and "Confirm Booking";
           unticking in Edit confirms the whole item. Over-max warning
           "⚠ Confirm Booking": "Confirming Vanity puts Mark over the 8hrs
