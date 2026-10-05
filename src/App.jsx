@@ -418,7 +418,7 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
         // still wins whenever one exists. Once a slot's established for
         // this item, though, only that slot is tried - consistency wins
         // over flexibility from here on.
-        const trySlots=establishedSlot!==undefined?slotsKeepingTo(establishedSlot,entries,staffId,ds,tentative):slotSearchOrder(slot);
+        const trySlots=establishedSlot!==undefined?slotsKeepingTo(establishedSlot):slotSearchOrder(slot);
         for(const trySlot of trySlots){
           const slotTaken=entries.some(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
@@ -493,7 +493,7 @@ function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, s
         if(isDayOff(cur,sid))return;
         const sf=staffList.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
-        const trySlots=establishedSlots.has(sid)?slotsKeepingTo(establishedSlots.get(sid),pool,sid,ds,tentative):slotSearchOrder(slot);
+        const trySlots=establishedSlots.has(sid)?slotsKeepingTo(establishedSlots.get(sid)):slotSearchOrder(slot);
         for(const trySlot of trySlots){
           const slotTaken=pool.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
@@ -537,14 +537,14 @@ const SEARCH_HORIZON_DAYS=3650;
 // genuinely full, not "throw away a perfectly good same-slot fit just
 // because the other slot's search happens to be tried first."
 function slotSearchOrder(preferredSlot){ return preferredSlot===1?[1,0]:[0,1]; }
-// An item sticks to the slot it started in (see buildAutoFill) - except
-// that confirmed work may use the other slot on a day where a tentative
-// entry sits in its usual one, so a tentative booking never pushes
-// confirmed work to a later day (TESTING_NOTES 2F #9a).
-function slotsKeepingTo(established, pool, sid, ds, tentative){
-  if(tentative)return[established];
-  const occupant=pool.find(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===established);
-  return occupant&&occupant.isTentative?[established,established===1?0:1]:[established];
+// An item prefers the slot it started in (see buildAutoFill), but on a day
+// where that slot is taken (or has no room) and the other slot does have
+// room, it uses the other slot rather than skipping the day - skipping
+// split a 10h item across a whole week (user, live review: David's Vanity
+// W). The next day it goes back to its usual slot if that's free. Still
+// tries the usual slot first, so nothing hops when it doesn't need to.
+function slotsKeepingTo(established){
+  return [established,established===1?0:1];
 }
 
 function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff, tentative=false) {
