@@ -804,6 +804,44 @@ look rather than being folded into any of the four above.
       on retry. Could not be reproduced with the same steps - most likely
       a brief connection drop to the database. Watch for it recurring.
 
+17. **FIXED (gap alerts PR). New rules (user): alerts for gaps when
+    scheduling an item.**
+    a. Multi-staff auto-fill: the existing "start dates more than 2
+       working days apart" alert only fires when every selected person
+       actually gets work. If the others finish the item before someone
+       is free, that person gets NO entries and is left off silently - no
+       alert. USER'S DECISION: alert in that case too (e.g. "Jenny can't
+       start until Mon 19 Oct - the job is finished before then, so she
+       won't be scheduled. Schedule anyway?").
+    b. When entering (scheduling) an item through the entry form, if its
+       days would have a break of MORE than 1 working day (weekends don't
+       count; a 1-day break is fine), alert before saving. Agreed pop-up
+       (single person), title "⚠ Break in schedule":
+       "This would schedule with a {x} day break for {Staff Member} on
+       {day/dd/mmm}" then "First available start with no break longer
+       than 1 day: {date}." Buttons: "Schedule from {date}" (re-scans the
+       grid for the first start date where the item never has a break
+       longer than 1 day, and schedules the whole item from there) /
+       "Schedule Anyway" (keeps the original dates) / "Go Back".
+       Applies to new schedules via the entry form, not drags/moves.
+    c. The same alert applies to multi-staff entries: one pop-up lists
+       every problem (each person's break, anyone left off), and "first
+       available start" means the first date where nobody has a break
+       longer than 1 day, everyone selected gets work, and their start
+       days are no more than 2 working days apart. Dates read "Wed 07 Oct"
+       (user: no slashes).
+    - What shipped: `EntryModal` - `scheduleGapProblems` (breaks > 1
+      working day per person, people left off), `findCleanStart` (re-scans
+      day by day from the next working day), `askAboutGaps`, and a third
+      button on `ConfirmModal` ("Schedule from {date}"). Checked for
+      single-staff and multi-staff auto-fill before saving. A plain
+      "start dates more than 2 days apart" case with no break/left-off
+      still shows the existing "⚠ Schedule Confirmation".
+    - Test: `test-schedule-gap-alerts.mjs` (single: wording, Schedule from
+      / Schedule Anyway / Go Back, 1-day break no pop-up; multi: a
+      person's break, a person left off, Schedule from gives everyone
+      work) - fails on main (no alert), passes after.
+
 ### 2G. Regression test suite (tests/)
 Rebuilt from scratch this session (the old scratchpad suite was lost with
 an earlier container) and kept in the repo so it can't be lost again. Run
