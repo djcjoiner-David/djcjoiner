@@ -960,28 +960,13 @@ function LoginScreen({onLogin}) {
 
 // ── User Management Modal ─────────────────────────────────────
 
-function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo,companyName,onChangeCompanyName,companyTagline,onChangeCompanyTagline}) {
+function UserManagementModal({onClose}) {
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [form,setForm]=useState({name:"",email:"",password:"",role:"staff"});
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState("");
-  const [logoUploading,setLogoUploading]=useState(false);
-  const [nameInput,setNameInput]=useState(companyName);
-  const [taglineInput,setTaglineInput]=useState(companyTagline);
   const [confirmDialog,setConfirmDialog]=useState(null);
-
-  async function handleLogoFile(e){
-    const file=e.target.files[0];
-    if(!file)return;
-    setLogoUploading(true);setError("");
-    try{
-      const dataUrl=await resizeImageToDataUrl(file,LOGO_MAX_HEIGHT);
-      await onChangeLogo(dataUrl);
-    }catch(err){setError(err.message||"Could not use that image.");}
-    setLogoUploading(false);
-    e.target.value="";
-  }
 
   useEffect(()=>{db("GET","user_roles","","?order=created_at").then(data=>{setUsers(data);setLoading(false);});},[]);
 
@@ -1028,36 +1013,6 @@ function UserManagementModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLog
     <Modal title="👥 User Management" wide onClose={onClose}>
       {loading?<Spinner text="Loading users..."/>:(
         <>
-          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
-            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Colour Theme</div>
-            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Sets the colour of the header bar (logo, tabs, buttons) for everyone.</div>
-            <Sel label="" value={themeKey} onChange={e=>onChangeTheme(e.target.value)}>
-              {Object.entries(THEMES).map(([key,t])=><option key={key} value={key}>{t.name}</option>)}
-            </Sel>
-          </div>
-          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
-            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Company Branding</div>
-            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Shown on the login screen and in the header, for everyone.</div>
-            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
-              <div style={{width:64,height:64,border:"1px solid #E2E8F0",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:"#F8FAFC",overflow:"hidden",flexShrink:0}}>
-                <img src={logoSrc} alt="Current logo" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/>
-              </div>
-              <div>
-                <label style={{display:"inline-flex",alignItems:"center",gap:8,padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:logoUploading?"not-allowed":"pointer",border:"1px solid #CBD5E1",background:"#fff",color:"#475569",opacity:logoUploading?0.75:1}}>
-                  {logoUploading&&<span style={{width:13,height:13,border:"2px solid currentColor",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/>}
-                  {logoUploading?"Uploading...":"Upload New Logo"}
-                  <input type="file" accept="image/*" onChange={handleLogoFile} disabled={logoUploading} style={{display:"none"}}/>
-                  {logoUploading&&<style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>}
-                </label>
-                <button onClick={onResetLogo} style={{marginLeft:8,padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid #E2E8F0",background:"none",color:"#94A3B8"}}>Reset to default</button>
-                <div style={{fontSize:11,color:"#94A3B8",marginTop:6}}>PNG, JPG, or similar - up to 5MB.</div>
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <Inp label="Company Name" value={nameInput} onChange={e=>setNameInput(e.target.value)} onBlur={()=>onChangeCompanyName(nameInput)} placeholder="Company Name"/>
-              <Inp label="Tagline" value={taglineInput} onChange={e=>setTaglineInput(e.target.value)} onBlur={()=>onChangeCompanyTagline(taglineInput)} placeholder="Tagline"/>
-            </div>
-          </div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:24}}>
             <thead>
               <tr style={{background:"#F8FAFC",borderBottom:"1px solid #E2E8F0"}}>
@@ -1153,6 +1108,105 @@ export default function DJCJoiner() {
   return <MainApp currentUser={currentUser} onLogout={()=>{sessionStorage.removeItem("djc_user");setCurrentUser(null);}}/>;
 }
 
+// ── Settings Modal ────────────────────────────────────────────
+// Company-wide settings (admin only, TESTING_NOTES 2F #11): colour theme
+// and branding (moved here from User Management), work hours, and the
+// public holiday region. Every change saves straight away, for everyone.
+const AU_STATES=[["NSW","New South Wales"],["VIC","Victoria"],["QLD","Queensland"],["SA","South Australia"],["WA","Western Australia"],["TAS","Tasmania"],["ACT","Australian Capital Territory"],["NT","Northern Territory"]];
+const QUARTER_HOURS=Array.from({length:96},(_,i)=>`${String(Math.floor(i/4)).padStart(2,"0")}:${String((i%4)*15).padStart(2,"0")}`);
+const LUNCH_OPTIONS=Array.from({length:8},(_,i)=>(i+1)*15);
+function lunchLabel(m){const h=Math.floor(m/60),r=m%60;return h&&r?`${h}h ${r}m`:h?`${h}h`:`${r}m`;}
+// Paid hours in a day: finish minus start, less the unpaid lunch.
+function paidHours(start,end,lunch){
+  const [sh,sm]=start.split(":").map(Number),[eh,em]=end.split(":").map(Number);
+  return Math.max(0,(eh*60+em-sh*60-sm-(Number(lunch)||0))/60);
+}
+function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo,companyName,onChangeCompanyName,companyTagline,onChangeCompanyTagline,workStart,workEnd,lunchMinutes,onChangeWorkHours,holidayRegion,onChangeHolidayRegion}) {
+  const [error,setError]=useState("");
+  const [logoUploading,setLogoUploading]=useState(false);
+  const [nameInput,setNameInput]=useState(companyName);
+  const [taglineInput,setTaglineInput]=useState(companyTagline);
+  async function handleLogoFile(e){
+    const file=e.target.files[0];
+    if(!file)return;
+    setLogoUploading(true);setError("");
+    try{
+      const dataUrl=await resizeImageToDataUrl(file,LOGO_MAX_HEIGHT);
+      await onChangeLogo(dataUrl);
+    }catch(err){setError(err.message||"Could not use that image.");}
+    setLogoUploading(false);
+    e.target.value="";
+  }
+  const paid=paidHours(workStart,workEnd,lunchMinutes);
+  const region=(holidayRegion||"").split("-");
+  return (
+    <Modal title="⚙ Settings" wide onClose={onClose}>
+      {error&&<div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#DC2626",marginBottom:12}}>{error}</div>}
+          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Colour Theme</div>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Sets the colour of the header bar (logo, tabs, buttons) for everyone.</div>
+            <Sel label="" value={themeKey} onChange={e=>onChangeTheme(e.target.value)}>
+              {Object.entries(THEMES).map(([key,t])=><option key={key} value={key}>{t.name}</option>)}
+            </Sel>
+          </div>
+          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Company Branding</div>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Shown on the login screen and in the header, for everyone.</div>
+            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+              <div style={{width:64,height:64,border:"1px solid #E2E8F0",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:"#F8FAFC",overflow:"hidden",flexShrink:0}}>
+                <img src={logoSrc} alt="Current logo" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/>
+              </div>
+              <div>
+                <label style={{display:"inline-flex",alignItems:"center",gap:8,padding:"7px 14px",borderRadius:8,fontSize:13,fontWeight:600,cursor:logoUploading?"not-allowed":"pointer",border:"1px solid #CBD5E1",background:"#fff",color:"#475569",opacity:logoUploading?0.75:1}}>
+                  {logoUploading&&<span style={{width:13,height:13,border:"2px solid currentColor",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0}}/>}
+                  {logoUploading?"Uploading...":"Upload New Logo"}
+                  <input type="file" accept="image/*" onChange={handleLogoFile} disabled={logoUploading} style={{display:"none"}}/>
+                  {logoUploading&&<style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>}
+                </label>
+                <button onClick={onResetLogo} style={{marginLeft:8,padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid #E2E8F0",background:"none",color:"#94A3B8"}}>Reset to default</button>
+                <div style={{fontSize:11,color:"#94A3B8",marginTop:6}}>PNG, JPG, or similar - up to 5MB.</div>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <Inp label="Company Name" value={nameInput} onChange={e=>setNameInput(e.target.value)} onBlur={()=>onChangeCompanyName(nameInput)} placeholder="Company Name"/>
+              <Inp label="Tagline" value={taglineInput} onChange={e=>setTaglineInput(e.target.value)} onBlur={()=>onChangeCompanyTagline(taglineInput)} placeholder="Tagline"/>
+            </div>
+          </div>
+          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Work Hours</div>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>The normal work day, for everyone. Unpaid lunch is taken off the start to finish time.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+              <Sel label="Start" value={workStart} onChange={e=>onChangeWorkHours({workStart:e.target.value})}>
+                {QUARTER_HOURS.map(t=><option key={t} value={t}>{t}</option>)}
+              </Sel>
+              <Sel label="Finish" value={workEnd} onChange={e=>onChangeWorkHours({workEnd:e.target.value})}>
+                {QUARTER_HOURS.map(t=><option key={t} value={t}>{t}</option>)}
+              </Sel>
+              <Sel label="Unpaid Lunch" value={lunchMinutes} onChange={e=>onChangeWorkHours({lunchMinutes:Number(e.target.value)})}>
+                {LUNCH_OPTIONS.map(m=><option key={m} value={m}>{lunchLabel(m)}</option>)}
+              </Sel>
+            </div>
+            <div style={{padding:"10px 14px",background:paid>0?"#F0FDF4":"#FEF2F2",border:`1px solid ${paid>0?"#BBF7D0":"#FECACA"}`,borderRadius:8,fontSize:13,color:paid>0?"#15803D":"#DC2626",fontWeight:500}}>
+              {paid>0?`${workStart}–${workEnd}, ${lunchLabel(lunchMinutes)} lunch = ${Math.round(paid*100)/100}hrs paid`:"Finish must be after start, with time left after lunch."}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Public Holidays</div>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Which public holidays apply to this business.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <Sel label="Country" value="AU" onChange={()=>{}}>
+                <option value="AU">Australia</option>
+              </Sel>
+              <Sel label="State / Territory" value={region[1]||""} onChange={e=>onChangeHolidayRegion(e.target.value?`AU-${e.target.value}`:null)}>
+                <option value="">— Choose —</option>
+                {AU_STATES.map(([code,name])=><option key={code} value={code}>{name}</option>)}
+              </Sel>
+            </div>
+          </div>
+    </Modal>
+  );
+}
+
 function MainApp({currentUser,onLogout}) {
   const isAdmin=currentUser.role==="admin";
   const isManager=currentUser.role==="admin"||currentUser.role==="manager";
@@ -1210,6 +1264,12 @@ function MainApp({currentUser,onLogout}) {
   const [logoSrc,setLogoSrc]=useState(CLIENT_LOGO);
   const [companyName,setCompanyName]=useState(CLIENT_NAME);
   const [companyTagline,setCompanyTagline]=useState(CLIENT_TAGLINE);
+  // Work hours and holiday region (Settings) - saved for everyone in
+  // app_settings; they used to reset on every page load.
+  const [workStart,setWorkStart]=useState("07:00");
+  const [workEnd,setWorkEnd]=useState("15:30");
+  const [lunchMinutes,setLunchMinutes]=useState(30);
+  const [holidayRegion,setHolidayRegion]=useState(null);
 
   useEffect(()=>{
     db("GET","app_settings").then(rows=>{
@@ -1218,6 +1278,10 @@ function MainApp({currentUser,onLogout}) {
       if(saved?.logo_data)setLogoSrc(saved.logo_data);
       if(saved?.company_name)setCompanyName(saved.company_name);
       if(saved?.company_tagline)setCompanyTagline(saved.company_tagline);
+      if(saved?.work_start)setWorkStart(saved.work_start);
+      if(saved?.work_end)setWorkEnd(saved.work_end);
+      if(saved?.lunch_minutes)setLunchMinutes(Number(saved.lunch_minutes));
+      if(saved?.holiday_region)setHolidayRegion(saved.holiday_region);
     }).catch(()=>{}); // table may not exist yet on older deployments - just keep the defaults
   },[]);
 
@@ -1253,6 +1317,20 @@ function MainApp({currentUser,onLogout}) {
     catch{setError("Could not save the tagline - it'll reset next time the page loads.");}
   }
 
+  async function changeWorkHours(change){
+    const fields={workStart:"work_start",workEnd:"work_end",lunchMinutes:"lunch_minutes"};
+    const setters={workStart:setWorkStart,workEnd:setWorkEnd,lunchMinutes:setLunchMinutes};
+    Object.entries(change).forEach(([k,v])=>setters[k](v));
+    try{await db("PATCH","app_settings",Object.fromEntries(Object.entries(change).map(([k,v])=>[fields[k],v])),"?id=eq.1");}
+    catch{setError("Could not save the work hours - they'll reset next time the page loads.");}
+  }
+
+  async function changeHolidayRegion(value){
+    setHolidayRegion(value);
+    try{await db("PATCH","app_settings",{holiday_region:value},"?id=eq.1");}
+    catch{setError("Could not save the public holiday region - it'll reset next time the page loads.");}
+  }
+
   const [viewWeeks,setViewWeeks]=useState(4);
   const [anchorDate,setAnchorDate]=useState(()=>mondayOf(TODAY));
 
@@ -1267,16 +1345,7 @@ function MainApp({currentUser,onLogout}) {
   const [conflictAlert,setConflictAlert]=useState(null);
   const [confirmDialog,setConfirmDialog]=useState(null);
   const [userMgmtOpen,setUserMgmtOpen]=useState(false);
-  const [workHoursOpen,setWorkHoursOpen]=useState(false);
-  const [workStart,setWorkStart]=useState("07:00");
-  const [workEnd,setWorkEnd]=useState("15:30");
-
-  const workHoursPerDay=useMemo(()=>{
-    const [sh,sm]=workStart.split(":").map(Number);
-    const [eh,em]=workEnd.split(":").map(Number);
-    const total=(eh*60+em-sh*60-sm)/60;
-    return Math.max(1,Math.round(total*2)/2);
-  },[workStart,workEnd]);
+  const [settingsOpen,setSettingsOpen]=useState(false);
   const [error,setError]=useState(null);
 
   const dragEntry=useRef(null);
@@ -3254,12 +3323,6 @@ function MainApp({currentUser,onLogout}) {
                 + Add Job
               </button>
             )}
-            {!isMobile&&(
-              <button onClick={()=>setWorkHoursOpen(true)}
-                    style={{padding:"7px 12px",borderRadius:8,fontSize:12,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.5)}`,background:hexToRgba(theme.heading,0.1),color:theme.heading,fontWeight:500}}>
-                    🕐 {workStart}–{workEnd}
-                  </button>
-            )}
             {isAdmin&&!isMobile&&(
               <button onClick={()=>setUserMgmtOpen(true)}
                 style={{padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.4)}`,background:"transparent",color:theme.heading}}
@@ -3269,6 +3332,17 @@ function MainApp({currentUser,onLogout}) {
                   <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
                 </svg>
                 Users
+              </button>
+            )}
+            {isAdmin&&!isMobile&&(
+              <button onClick={()=>setSettingsOpen(true)}
+                style={{padding:"7px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:`1.5px solid ${hexToRgba(theme.heading,0.4)}`,background:"transparent",color:theme.heading}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=theme.heading;}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=hexToRgba(theme.heading,0.4);}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{display:"inline-block",verticalAlign:"-2px",marginRight:5}}>
+                  <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54A.48.48 0 0 0 13.93 2h-3.86c-.24 0-.44.17-.48.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.71 8.47a.49.49 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.86c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
+                </svg>
+                Settings
               </button>
             )}
             {isManager&&!isMobile&&(
@@ -3659,25 +3733,8 @@ function MainApp({currentUser,onLogout}) {
       {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={jobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onToggleComplete={toggleJobCompleted} onClose={()=>setJobModal(null)} saving={saving}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id} saving={saving}/>}
-      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline}/>}
-      {workHoursOpen&&(
-        <Modal title="🕐 Work Hours" onClose={()=>setWorkHoursOpen(false)} small>
-          <div style={{marginBottom:12}}>
-            <div style={FIELD_LABEL}>Work Day Start</div>
-            <input type="time" value={workStart} onChange={e=>setWorkStart(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box"}}/>
-          </div>
-          <div style={{marginBottom:16}}>
-            <div style={FIELD_LABEL}>Work Day End</div>
-            <input type="time" value={workEnd} onChange={e=>setWorkEnd(e.target.value)} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box"}}/>
-          </div>
-          <div style={{padding:"10px 14px",background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,fontSize:13,color:"#15803D",fontWeight:500,marginBottom:12}}>
-            Work day: {workStart} – {workEnd} = {workHoursPerDay}h/day
-          </div>
-          <div style={{display:"flex",justifyContent:"flex-end"}}>
-            <Btn variant="primary" onClick={()=>setWorkHoursOpen(false)}>Save</Btn>
-          </div>
-        </Modal>
-      )}
+      {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)}/>}
+      {settingsOpen&&<SettingsModal onClose={()=>setSettingsOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline} workStart={workStart} workEnd={workEnd} lunchMinutes={lunchMinutes} onChangeWorkHours={changeWorkHours} holidayRegion={holidayRegion} onChangeHolidayRegion={changeHolidayRegion}/>}
       {conflictAlert&&<ConfirmModal title={conflictAlert.title||"⚠ Scheduling Conflict"} message={conflictAlert.message} cancelLabel={conflictAlert.cancelLabel||"Go Back"} confirmLabel={conflictAlert.confirmLabel||"Schedule Anyway"} danger onConfirm={conflictAlert.onConfirm} onCancel={conflictAlert.onCancel}/>}
       {idleJobPrompt&&<ConfirmModal title="Job idle a month" message={`Job ${idleJobPrompt.job.jobNo}, ${idleJobPrompt.job.name} most recent scheduled date is ${formatDate(parseISO(idleJobPrompt.job.maxDate))}. Do you want to close this Job?`} confirmLabel="Close Job" cancelLabel="Not Yet"
         onConfirm={()=>{toggleJobCompleted(idleJobPrompt.job.id,true);dismissedIdleJobsRef.current.add(idleJobPrompt.job.id);setIdleJobPrompt(null);}}
