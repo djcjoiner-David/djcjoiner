@@ -418,7 +418,7 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
         // still wins whenever one exists. Once a slot's established for
         // this item, though, only that slot is tried - consistency wins
         // over flexibility from here on.
-        const trySlots=establishedSlot!==undefined?slotsKeepingTo(establishedSlot,entries,staffId,ds,tentative):slotSearchOrder(slot);
+        const trySlots=establishedSlot!==undefined?slotsKeepingTo(establishedSlot):slotSearchOrder(slot);
         for(const trySlot of trySlots){
           const slotTaken=entries.some(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
@@ -493,7 +493,7 @@ function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, s
         if(isDayOff(cur,sid))return;
         const sf=staffList.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
-        const trySlots=establishedSlots.has(sid)?slotsKeepingTo(establishedSlots.get(sid),pool,sid,ds,tentative):slotSearchOrder(slot);
+        const trySlots=establishedSlots.has(sid)?slotsKeepingTo(establishedSlots.get(sid)):slotSearchOrder(slot);
         for(const trySlot of trySlots){
           const slotTaken=pool.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
@@ -537,14 +537,14 @@ const SEARCH_HORIZON_DAYS=3650;
 // genuinely full, not "throw away a perfectly good same-slot fit just
 // because the other slot's search happens to be tried first."
 function slotSearchOrder(preferredSlot){ return preferredSlot===1?[1,0]:[0,1]; }
-// An item sticks to the slot it started in (see buildAutoFill) - except
-// that confirmed work may use the other slot on a day where a tentative
-// entry sits in its usual one, so a tentative booking never pushes
-// confirmed work to a later day (TESTING_NOTES 2F #9a).
-function slotsKeepingTo(established, pool, sid, ds, tentative){
-  if(tentative)return[established];
-  const occupant=pool.find(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===established);
-  return occupant&&occupant.isTentative?[established,established===1?0:1]:[established];
+// An item prefers the slot it started in (see buildAutoFill), but on a day
+// where that slot is taken (or has no room) and the other slot does have
+// room, it uses the other slot rather than skipping the day - skipping
+// split a 10h item across a whole week (user, live review: David's Vanity
+// W). The next day it goes back to its usual slot if that's free. Still
+// tries the usual slot first, so nothing hops when it doesn't need to.
+function slotsKeepingTo(established){
+  return [established,established===1?0:1];
 }
 
 function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff, tentative=false) {
@@ -868,8 +868,9 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
   // A past-dated entry is locked, full stop - not editable by anyone
   // (including admins), so none of the interaction affordances apply to it.
   const editable=canEdit&&!isPastDate;
-  // Tentative (TESTING_NOTES 2F #9a): faded like a past entry, dashed
-  // border, and a "Tentative" label - still fully editable.
+  // Tentative (TESTING_NOTES 2F #9a): diagonal stripes in the job's colour
+  // (user chose this over "faded" - too easy to miss), dashed border, and a
+  // "Tentative" label; text stays full strength. Still fully editable.
   return (
     <div
       draggable={!isMobile&&editable&&!copyMode&&!moveMode}
@@ -877,7 +878,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
       onDragEnd={editable?onDragEnd:undefined}
       onClick={editable?onClick:undefined}
       onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate||isTentative?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":isTentative?`repeating-linear-gradient(135deg,${job.bgColor} 0 6px,#fff 6px 12px)`:job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {isMobile?(
         <>
