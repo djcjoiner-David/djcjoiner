@@ -1206,10 +1206,16 @@ hashed passwords never sent back, no leaked database errors).
       marked checked only once saved.
     - With a 250ms server delay per call: edit 0.56s -> 0.28s to screen,
       new entry 0.64s -> 0.32s, load 2.7s -> 2.4s.
-    - Still to decide (user): run the server code in the same region as
-      the Neon database (no vercel.json = USA by default); remember each
-      login's role for up to a minute instead of one extra database query
-      per click.
+    - Server (server speed PR, user agreed): the Neon database is in
+      Sydney but the server code ran in Vercel's default USA region (no
+      vercel.json), so every click crossed the Pacific twice -
+      `vercel.json` now sets `"regions": ["syd1"]`. And each click used to
+      check the person's role with its own database query before doing
+      the work; the role is now remembered per user for 60 seconds
+      (`roleCache` in api/db.js; any change to users clears it on that
+      server instance; a role change can take up to a minute elsewhere -
+      user accepted). `test-api-safety` uses one pretend user per role and
+      checks the memory.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
