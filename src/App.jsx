@@ -680,15 +680,16 @@ function Modal({title,onClose,children,wide,small}) {
 // A centered, app-styled stand-in for window.confirm/alert - those render
 // as a generic browser dialog wherever the browser decides to put it,
 // instead of looking like part of the app.
-function ConfirmModal({title="Confirm",message,confirmLabel="Confirm",cancelLabel="Cancel",danger,onConfirm,onCancel}) {
+function ConfirmModal({title="Confirm",message,confirmLabel="Confirm",cancelLabel="Cancel",danger,onConfirm,onCancel,extraLabel,onExtra}) {
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
       onClick={e=>{if(e.target===e.currentTarget)onCancel();}}>
       <div style={{background:"#fff",borderRadius:14,maxWidth:420,width:"100%",padding:24,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
         <div style={{fontSize:16,fontWeight:600,color:"#1E293B",marginBottom:12}}>{title}</div>
-        <div style={{fontSize:14,color:"#475569",marginBottom:20,lineHeight:1.6}}>{message}</div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <div style={{fontSize:14,color:"#475569",marginBottom:20,lineHeight:1.6,whiteSpace:"pre-line"}}>{message}</div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
           <Btn variant="ghost" onClick={onCancel}>{cancelLabel}</Btn>
+          {extraLabel&&onExtra&&<Btn variant="primary" onClick={onExtra}>{extraLabel}</Btn>}
           <Btn variant={danger?"danger":"primary"} onClick={onConfirm}>{confirmLabel}</Btn>
         </div>
       </div>
@@ -3625,6 +3626,60 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   });
   const [autoFill,setAutoFill]=useState(data.autoFill!==false);
   const [staggerConfirm,setStaggerConfirm]=useState(null); // {message,combined,staffId}
+  const [gapPrompt,setGapPrompt]=useState(null); // {message,combined,staffId,clean:{dateStr,combined}|null}
+  // Gaps in a new auto-filled schedule (TESTING_NOTES.md 2E #17, user's
+  // rules): a break of MORE than 1 working day in someone's run on the
+  // item, or a selected person who'd get no hours at all because the
+  // others finish first. Returns one plain-English line per problem.
+  const gapDayLabel=ds=>parseISO(ds).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"}).replace(",","");
+  function scheduleGapProblems(combined,staffIds){
+    const lines=[];
+    staffIds.forEach(sid=>{
+      const name=staff.find(s=>s.id===sid)?.name||"This person";
+      const days=[...new Set(combined.filter(c=>c.staffId===sid).map(c=>c.dateStr))].sort();
+      if(days.length===0){
+        const nextFree=nextAvailableDate([sid],entries,form.dateStr,form.slot,staff).dateStr;
+        lines.push(`${name} can't start until ${gapDayLabel(nextFree)} - the job is finished before then, so ${name} won't be scheduled.`);
+        return;
+      }
+      for(let i=1;i<days.length;i++){
+        const breakDays=autoFillDayGap(days[i-1],days[i])-1;
+        if(breakDays>1){
+          const firstMissing=isoDate(addWorkingDays(parseISO(days[i-1]),1));
+          lines.push(`This would schedule with a ${breakDays} day break for ${name} on ${gapDayLabel(firstMissing)}`);
+          break;
+        }
+      }
+    });
+    return lines;
+  }
+  function startSpread(combined){
+    const first={};
+    combined.forEach(({staffId,dateStr})=>{if(!first[staffId]||dateStr<first[staffId])first[staffId]=dateStr;});
+    const d=Object.values(first);
+    if(d.length<2)return 0;
+    return autoFillDayGap(d.reduce((a,b)=>a<b?a:b),d.reduce((a,b)=>a>b?a:b));
+  }
+  // Re-scans the grid day by day from the next working day for the first
+  // start that has none of those problems (and, with several staff, start
+  // days no more than 2 working days apart).
+  function findCleanStart(build,staffIds){
+    let d=parseISO(form.dateStr);
+    for(let i=0;i<260;i++){
+      d=addWorkingDays(d,1);
+      const c=build(isoDate(d));
+      if(c.length===0)continue;
+      if(scheduleGapProblems(c,staffIds).length===0&&(staffIds.length<2||startSpread(c)<=2)){
+        return {dateStr:c.map(x=>x.dateStr).sort()[0],combined:c};
+      }
+    }
+    return null;
+  }
+  function askAboutGaps(lines,combined,staffId,build,staffIds){
+    const clean=findCleanStart(build,staffIds);
+    const second=clean?`First available start with no break longer than 1 day: ${gapDayLabel(clean.dateStr)}.`:"No start date in the next year avoids a break longer than 1 day.";
+    setGapPrompt({message:`${lines.join("\n")}\n${second}`,combined,staffId,clean});
+  }
   const [catchUpPrompt,setCatchUpPrompt]=useState(null); // {combined,staffId}
   const [startConflictPrompt,setStartConflictPrompt]=useState(null); // {availDate,availLabel}
 
@@ -3727,6 +3782,11 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       // available works together once there's real work left for more than
       // one of them).
       const combined=buildGroupAutoFill(staffToSchedule,form.totalHours,form.dateStr,form.slot,entries,staff,form.subItemId);
+      const groupGaps=scheduleGapProblems(combined,staffToSchedule);
+      if(groupGaps.length>0){
+        askAboutGaps(groupGaps,combined,staffToSchedule[0],ds=>buildGroupAutoFill(staffToSchedule,form.totalHours,ds,form.slot,entries,staff,form.subItemId),staffToSchedule);
+        return;
+      }
       // Still confirm if the actual resulting start dates end up more than
       // 2 working days apart, regardless of how the schedule was arrived
       // at - this check stands on its own and isn't tied to whichever
@@ -3771,6 +3831,17 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           combined.push({dateStr:form.dateStr,hours:personalMax>0?Math.min(Number(form.hours)||0,personalMax):(Number(form.hours)||0),staffId:sid,slot:form.slot});
         }
       });
+      // A new auto-filled schedule with a break longer than 1 working day:
+      // ask first, offering the first start with no such break (2E #17).
+      if(form.mode==="new"&&autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length===1){
+        const gaps=scheduleGapProblems(combined,staffToSchedule);
+        if(gaps.length>0){
+          const sid=staffToSchedule[0];
+          const ph=Number(staff.find(s=>s.id===sid)?.productiveHours)||8;
+          askAboutGaps(gaps,combined,sid,ds=>buildAutoFill(ds,form.totalHours,ph,sid,form.slot,entries,form.subItemId).map(p=>({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot})),staffToSchedule);
+          return;
+        }
+      }
       // A brand-new, manually-typed job entry that would push this item
       // past its total budget has nowhere to go under the normal budget
       // system - offer Catch-up Hours (logged against the item, but never
@@ -3987,6 +4058,11 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         </div>
       </div>
     </Modal>
+    {gapPrompt&&<ConfirmModal title="⚠ Break in schedule" message={gapPrompt.message} confirmLabel="Schedule Anyway" cancelLabel="Go Back"
+      extraLabel={gapPrompt.clean?`Schedule from ${gapDayLabel(gapPrompt.clean.dateStr)}`:undefined}
+      onExtra={()=>{const c=gapPrompt.clean;onSave({...form,staffId:gapPrompt.staffId,dateStr:c.dateStr,autoFill},c.combined);setGapPrompt(null);}}
+      onConfirm={()=>{onSave({...form,staffId:gapPrompt.staffId,autoFill},gapPrompt.combined);setGapPrompt(null);}}
+      onCancel={()=>setGapPrompt(null)}/>}
     {staggerConfirm&&<ConfirmModal title="⚠ Schedule Confirmation" message={staggerConfirm.message} confirmLabel="Schedule Anyway" cancelLabel="Go Back"
       onConfirm={()=>{onSave({...form,staffId:staggerConfirm.staffId,autoFill},staggerConfirm.combined);setStaggerConfirm(null);}}
       onCancel={()=>setStaggerConfirm(null)}/>}

@@ -804,7 +804,8 @@ look rather than being folded into any of the four above.
       on retry. Could not be reproduced with the same steps - most likely
       a brief connection drop to the database. Watch for it recurring.
 
-17. **New rules (user): alerts for gaps when scheduling an item.**
+17. **FIXED (gap alerts PR). New rules (user): alerts for gaps when
+    scheduling an item.**
     a. Multi-staff auto-fill: the existing "start dates more than 2
        working days apart" alert only fires when every selected person
        actually gets work. If the others finish the item before someone
@@ -823,9 +824,23 @@ look rather than being folded into any of the four above.
        longer than 1 day, and schedules the whole item from there) /
        "Schedule Anyway" (keeps the original dates) / "Go Back".
        Applies to new schedules via the entry form, not drags/moves.
-    c. The same alert applies to multi-staff entries too - details to be
-       agreed with the user before building.
-    - Not yet built.
+    c. The same alert applies to multi-staff entries: one pop-up lists
+       every problem (each person's break, anyone left off), and "first
+       available start" means the first date where nobody has a break
+       longer than 1 day, everyone selected gets work, and their start
+       days are no more than 2 working days apart. Dates read "Wed 07 Oct"
+       (user: no slashes).
+    - What shipped: `EntryModal` - `scheduleGapProblems` (breaks > 1
+      working day per person, people left off), `findCleanStart` (re-scans
+      day by day from the next working day), `askAboutGaps`, and a third
+      button on `ConfirmModal` ("Schedule from {date}"). Checked for
+      single-staff and multi-staff auto-fill before saving. A plain
+      "start dates more than 2 days apart" case with no break/left-off
+      still shows the existing "⚠ Schedule Confirmation".
+    - Test: `test-schedule-gap-alerts.mjs` (single: wording, Schedule from
+      / Schedule Anyway / Go Back, 1-day break no pop-up; multi: a
+      person's break, a person left off, Schedule from gives everyone
+      work) - fails on main (no alert), passes after.
 
 ### 2G. Regression test suite (tests/)
 Rebuilt from scratch this session (the old scratchpad suite was lost with
