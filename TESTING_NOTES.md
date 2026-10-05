@@ -978,9 +978,32 @@ hashed passwords never sent back, no leaked database errors).
      `test-catchup-note-budget`, `test-overcommit-shortfall`,
      `test-schedule-gap-alerts`.
 
+10. **FIXED (edit form lines PR). Edit form's two info lines (user's live
+    review: Ian 7.5, Laundry W, Mon 19 Oct).**
+    - Was: the Catch-up line added up EVERY Catch-up entry on the item
+      (a 4h Catch-up on another day + this 0.5h showed "4.5hrs Catch-up
+      logged for this item") and showed on normal entries too.
+    - Now (user's wording): first line "Ian 7.5 has 7hrs assigned on Mon
+      19 Oct leaving 0.5hrs available for scheduling" (available = daily
+      max minus the other slot), same for normal and Catch-up entries.
+      Catch-up line only when editing a Catch-up entry, with that entry's
+      own hours: "0.5hrs Catch-up logged for this entry, not deducted from
+      item total hrs."
+    - Test: `test-ese-catchup-lines.mjs` (both screenshots) - fails on
+      main (shows 4.5hrs), passes after. `test-catchup-new-entry`,
+      `test-catchup-note-budget`, `test-overcommit-shortfall` updated.
+
 9. **PLANNED (agreed with user, build in order after #8).**
-   a. **Tentative items.** Set per joinery item (not whole job, not per
-      entry), by a "Tentative" switch on the entry form. Tentative entries
+   a. **Tentative.** UPDATED (user): chosen each time you schedule, by a
+      "Tentative" switch on the entry form - NOT forced on the whole item
+      (e.g. Laundry W booked, then 4hrs of Catch-up added as Tentative:
+      only those 4hrs are tentative). Stored per entry (`is_tentative` on
+      `entries`, like `is_catch_up`). Job Summary shows the row as
+      "Tentative" when any part of the item is; "Confirm Booking"
+      confirms all of that item's tentative entries at once. A tentative
+      entry gives way to confirmed work booked later in the other slot
+      (shrinks, rest moves to the end of the item - same as a normal
+      entry), user confirmed. Tentative entries
       follow every normal rule (auto-fill, gap alerts, Catch-up, locks,
       conflicts) except: (1) shown faded with a dashed border and a
       "Tentative" label; (2) their hours never reduce what the same

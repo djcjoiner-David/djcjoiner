@@ -3703,10 +3703,8 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   // computeItemPlan uses (excluding this entry itself if editing, and
   // excluding Catch-up Hours entries - they were deliberately agreed to
   // sit outside this budget entirely). Used both to warn before creating a
-  // NEW entry that would push the item over budget, and to show what's
-  // already logged as catch-up alongside it.
+  // NEW entry that would push the item over budget.
   const itemBudgetUsed=form.subItemId?entries.filter(e=>e.subItemId===form.subItemId&&!e.miscNote&&!e.isCatchUp&&e.id!==form.id).reduce((s,e)=>s+(Number(e.hours)||0),0):0;
-  const itemCatchUpLogged=form.subItemId?entries.filter(e=>e.subItemId===form.subItemId&&e.isCatchUp).reduce((s,e)=>s+(Number(e.hours)||0),0):0;
 
   function handleJobChange(jobId){const subs=subItems.filter(s=>s.jobId===jobId);const first=subs[0];setForm(f=>({...f,jobId,subItemId:first?.id||"",totalHours:first?.totalHours||0}));}
   function handleSubChange(subItemId){const sub=jobSubs.find(s=>s.id===subItemId);setForm(f=>({...f,subItemId,totalHours:sub?.totalHours||f.totalHours}));}
@@ -3881,11 +3879,15 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     </label>
   );
   const otherSlotHours=Number(otherSlotEntry?.hours)||0;
+  const hrs=n=>`${Math.round(n*2)/2}${Math.round(n*2)/2===1?"hr":"hrs"}`;
   const assignedLine=otherSlotEntry&&editingLockedEntry&&otherSlotHours>0.05&&form.dateStr&&(
-    <div style={{fontSize:12,color:"#1E293B",marginTop:8,whiteSpace:"nowrap"}}>{selectedStaff?.name} has {otherSlotHours} hour{otherSlotHours===1?"":"s"} assigned on {gapDayLabel(form.dateStr)}</div>
+    <div style={{fontSize:12,color:"#1E293B",marginTop:8,whiteSpace:"nowrap"}}>{selectedStaff?.name} has {hrs(otherSlotHours)} assigned on {gapDayLabel(form.dateStr)} leaving {hrs(Math.max(0,productiveHours-otherSlotHours))} available for scheduling</div>
   );
-  const catchUpLine=form.entryType!=="misc"&&form.subItemId&&itemCatchUpLogged>0&&(
-    <div style={{fontSize:12,color:"#1E293B",marginTop:8}}>{itemCatchUpLogged}{itemCatchUpLogged===1?"hr":"hrs"} Catch-up logged for this item, not deducted from item total hrs.</div>
+  // Only when editing a Catch-up entry, and only that entry's own hours -
+  // not every Catch-up entry on the item added together (user's live
+  // review: 4h on another day + this 0.5h showed as "4.5hrs").
+  const catchUpLine=form.mode==="edit"&&form.isCatchUp&&form.entryType!=="misc"&&(
+    <div style={{fontSize:12,color:"#1E293B",marginTop:8}}>{hrs(Number(form.hours)||0)} Catch-up logged for this entry, not deducted from item total hrs.</div>
   );
   return(
     <>
