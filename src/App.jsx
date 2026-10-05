@@ -4015,7 +4015,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
               <div style={{width:130}}>
                 <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
               </div>
-              {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
+              {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:12,color:"#1E293B",marginTop:8}}>Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
               {assignedLine}
             </div>
           ):autoFill&&form.mode==="new"?(
@@ -4025,7 +4025,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                 <input type="number" min={0.5} max={999} step={0.5} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
               </div>
               {autoFillToggle}
-              {form.staffIds.length<=1&&otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
+              {form.staffIds.length<=1&&otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:12,color:"#1E293B",marginTop:8}}>Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
               {form.staffIds.length>1&&(()=>{
                 // The real computed outcome, not an upfront-by-rate estimate -
                 // this is exactly what buildGroupAutoFill will actually save,
@@ -4046,7 +4046,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                   })}
                 </div>;
               })()}
-              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ {selectedStaff?.name}'s daily cap is {productiveHours}h</div>}
+              {form.staffIds.length<=1&&productiveHours<8&&<div style={{fontSize:12,color:"#1E293B",marginTop:8}}>{selectedStaff?.name}'s daily cap is {productiveHours}h</div>}
               {form.staffIds.length<=1&&preview.length>0&&(
                 <div style={{marginTop:8,background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:8,padding:"8px 10px"}}>
                   <div style={{fontSize:12,fontWeight:600,color:"#15803D",marginBottom:5}}>📅 {preview.length} day{preview.length>1?"s":""} · {preview.reduce((a,p)=>a+(p.deducted||p.hours),0)}h deducted · {productiveHours}h/day cap</div>
@@ -4063,7 +4063,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                 <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
               </div>
               {autoFillToggle}
-              {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:11,color:"#F59E0B",marginTop:6}}>⚡ Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
+              {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:12,color:"#1E293B",marginTop:8}}>Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
               {assignedLine}
               {catchUpLine}
             </div>
