@@ -1593,9 +1593,16 @@ function MainApp({currentUser,onLogout}) {
   useEffect(()=>{
     if(!canEdit||!daysOffLoaded||!holidayRegion||holidaySyncRef.current===holidayRegion)return;
     holidaySyncRef.current=holidayRegion;
+    // Checked once a week (and whenever the state changes) - the list rarely
+    // changes, so there's no need to fetch it on every page load.
+    const CHECK_KEY="djc_holiday_check";
+    try{
+      const last=JSON.parse(localStorage.getItem(CHECK_KEY)||"null");
+      if(last&&last.region===holidayRegion&&Date.now()-last.at<7*86400000)return;
+    }catch{}
     (async()=>{
       const list=await fetchPublicHolidays(holidayRegion);
-      if(list.length===0)return; // offline or list unavailable - change nothing
+      if(list.length===0)return; // offline or list unavailable - change nothing (try again next load)
       const wanted=new Map(list.filter(h=>h.dateStr>=todayStr).map(h=>[h.dateStr,h.name]));
       const ph=daysOff.filter(d=>d.kind==="public_holiday");
       const known=new Set(ph.map(d=>d.dateStr));
@@ -1606,6 +1613,8 @@ function MainApp({currentUser,onLogout}) {
         const inserted=fresh.length>0?await db("POST","days_off",fresh.map(([ds,name])=>({date_str:ds,kind:"public_holiday",label:name,auto:true}))):[];
         const staleIds=new Set(stale.map(d=>d.id));
         if(stale.length||inserted.length)setDaysOff(prev=>[...prev.filter(d=>!staleIds.has(d.id)),...inserted.map(mapDayOff)]);
+        // Only counted as checked once it's saved - a failed save retries next load.
+        try{localStorage.setItem(CHECK_KEY,JSON.stringify({region:holidayRegion,at:Date.now()}));}catch{}
       }catch{setError("Could not save the public holidays - they'll be tried again next time the page loads.");}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1925,11 +1934,14 @@ function MainApp({currentUser,onLogout}) {
   const loadAll=useCallback(async()=>{
     try {
       setLoading(true);
-      const [staffData,jobsData,subData,entriesData]=await Promise.all([
+      // Days off load alongside everything else (one wait, not two); a
+      // missing days_off table (before the database change) just means none.
+      const [staffData,jobsData,subData,entriesData,daysOffData]=await Promise.all([
         db("GET","staff","","?order=sort_order"),
         db("GET","jobs","","?order=created_at"),
         db("GET","sub_items","","?order=created_at"),
         db("GET","entries","","?order=created_at"),
+        db("GET","days_off","","?order=date_str").catch(()=>[]),
       ]);
       const staffSorted=staffData.map(s=>({id:s.id,name:s.name,productiveHours:Number(s.productive_hours)||8,sortOrder:s.sort_order}));
       setStaff(staffSorted);
@@ -1947,9 +1959,7 @@ function MainApp({currentUser,onLogout}) {
       loadedStateRef.current.subItems.add(loadedSubItems);
       setSubItems(loadedSubItems);
       setEntries(loadedEntries);
-      // Separate from the main load so a missing days_off table (before the
-      // database change is run) never stops the schedule loading.
-      try{setDaysOff((await db("GET","days_off","","?order=date_str")).map(mapDayOff));}catch{setDaysOff([]);}
+      setDaysOff((daysOffData||[]).map(mapDayOff));
       setDaysOffLoaded(true);
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
@@ -2351,6 +2361,11 @@ function MainApp({currentUser,onLogout}) {
   async function saveEntry(data,extraEntries){
     setSaving(true);
     const _u=snapshotEntries(entries);
+    // Speed (TESTING_NOTES 2F #13): the result shows and the form closes as
+    // soon as the choice is made; the server catches up in the background,
+    // and a failed save is undone with a message.
+    let closedEarly=false;
+    const closeNow=()=>{if(closedEarly)return;closedEarly=true;setEntryModal(null);setTab("schedule");setSaving(false);};
     try{
       if(data.mode==="new"){
         const all=extraEntries&&extraEntries.length>0?extraEntries:[{dateStr:data.dateStr,hours:data.hours,staffId:data.staffId,slot:data.slot}];
@@ -2406,9 +2421,17 @@ function MainApp({currentUser,onLogout}) {
         // Saves the new entries. forcedKeys: staff|date days the person had
         // no hours left and Schedule Anyway was chosen (see askNoRoom).
         const insertNew=async(forcedKeys)=>{
-          const inserted=await db("POST","entries",buildRows(valid).map(r=>forcedKeys.has(noRoomKey(r.staff_id,r.date_str))?{...r,hours_locked:true}:r));
+          const rowsOut=buildRows(valid).map(r=>forcedKeys.has(noRoomKey(r.staff_id,r.date_str))?{...r,hours_locked:true}:r);
+          const stamp=Date.now();
+          const temps=rowsOut.map((r,i)=>({id:`temp_new_${stamp}_${i}`,staffId:r.staff_id,jobId:r.job_id,subItemId:r.sub_item_id,dateStr:r.date_str,slot:r.slot,hours:Number(r.hours),miscNote:r.misc_note||null,createdAt:new Date(stamp+i).toISOString(),hoursLocked:!!r.hours_locked,isCatchUp:!!r.is_catch_up,isTentative:!!r.is_tentative}));
+          const tempIds=new Set(temps.map(t=>t.id));
+          setEntries(prev=>[...prev,...temps]);
+          closeNow();
+          let inserted;
+          try{inserted=await db("POST","entries",rowsOut);}
+          catch(err){setEntries(prev=>prev.filter(e=>!tempIds.has(e.id)));throw err;}
           const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up,isTentative:!!e.is_tentative}));
-          setEntries(prev=>[...prev,...newMapped]);
+          setEntries(prev=>[...prev.filter(e=>!tempIds.has(e.id)),...newMapped]);
           let pool=[..._u,...newMapped];
           if(data.entryType!=="misc"&&data.subItemId&&newMapped.length>0){
             if(data.autoFill){
@@ -2514,11 +2537,6 @@ function MainApp({currentUser,onLogout}) {
           setSaving(true);
         }
         const keepOtherIds=editOverMax?new Set(editOthers.map(e=>e.id)):undefined;
-        if(editOverMax){
-          const unlocked=editOthers.filter(e=>!e.hoursLocked);
-          await Promise.all(unlocked.map(e=>db("PATCH","entries",{hours_locked:true},`?id=eq.${e.id}`)));
-          setEntries(prev=>prev.map(e=>keepOtherIds.has(e.id)?{...e,hoursLocked:true}:e));
-        }
         // Saving an edit through this modal is always a deliberate choice of
         // hours, so it locks the entry - job or Misc alike - the background
         // correction pass will leave it as the person set it instead of
@@ -2527,17 +2545,24 @@ function MainApp({currentUser,onLogout}) {
         // is purely what protects it from the same-day effective-hours
         // capping step, see oneCorrectionPass).
         const hoursLocked=true;
-        await db("PATCH","entries",{
-          staff_id:data.staffId,
-          job_id:data.jobId||null,
-          sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
-          date_str:data.dateStr,slot:data.slot,hours:data.hours,
-          misc_note:data.entryType==="misc"?data.miscNote:null,
-          hours_locked:hoursLocked,
-          ...(nowTentative&&!prevEntry?.isTentative?{is_tentative:true}:{}),
-          ...(newCreatedAt?{created_at:newCreatedAt}:{})
-        },`?id=eq.${data.id}`);
-        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,isTentative:confirmItem?!!prevEntry?.isTentative:nowTentative,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
+        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,isTentative:confirmItem?!!prevEntry?.isTentative:nowTentative,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:(keepOtherIds?.has(e.id)?{...e,hoursLocked:true}:e)));
+        closeNow();
+        try{
+          if(editOverMax){
+            const unlocked=editOthers.filter(e=>!e.hoursLocked);
+            await Promise.all(unlocked.map(e=>db("PATCH","entries",{hours_locked:true},`?id=eq.${e.id}`)));
+          }
+          await db("PATCH","entries",{
+            staff_id:data.staffId,
+            job_id:data.jobId||null,
+            sub_item_id:data.entryType==="misc"?null:data.subItemId||null,
+            date_str:data.dateStr,slot:data.slot,hours:data.hours,
+            misc_note:data.entryType==="misc"?data.miscNote:null,
+            hours_locked:hoursLocked,
+            ...(nowTentative&&!prevEntry?.isTentative?{is_tentative:true}:{}),
+            ...(newCreatedAt?{created_at:newCreatedAt}:{})
+          },`?id=eq.${data.id}`);
+        }catch(err){setEntries(()=>_u);throw err;}
         let pool=_u.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,isTentative:confirmItem?!!prevEntry?.isTentative:nowTentative,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:(keepOtherIds?.has(e.id)?{...e,hoursLocked:true}:e));
         if(prevEntry){
           if(hoursLocked&&data.subItemId){
@@ -2565,8 +2590,8 @@ function MainApp({currentUser,onLogout}) {
         pushUndoSnapshot(_u,pool);
         }
       }
-      setEntryModal(null);setTab("schedule");
-    }catch(e){setError("Failed to save entry.");}
+      if(!closedEarly){setEntryModal(null);setTab("schedule");}
+    }catch(e){setError("Failed to save entry - the change was undone.");}
     setSaving(false);
   }
 
@@ -3572,9 +3597,16 @@ function MainApp({currentUser,onLogout}) {
     if(!canEdit||correctingRef.current)return;
     const loaded=loadedStateRef.current;
     if(loaded.entries.has(entries)&&loaded.subItems.has(subItems))return;
-    const corrections=computeHoursCorrections();
+    // Entries still being saved (temporary ids) are left alone until the
+    // server has given them real ids.
+    const corrections=computeHoursCorrections().filter(c=>!String(c.id).startsWith("temp_"));
     if(corrections.length===0)return;
     correctingRef.current=true;
+    // Speed (2F #13): show the corrected hours straight away; save behind.
+    const delIds=new Set(corrections.filter(c=>c.newHours<=0.05).map(c=>c.id));
+    const patchHours=new Map(corrections.filter(c=>c.newHours>0.05).map(c=>[c.id,c.newHours]));
+    const before=new Map(entries.filter(e=>delIds.has(e.id)||patchHours.has(e.id)).map(e=>[e.id,e]));
+    setEntries(prev=>prev.filter(e=>!delIds.has(e.id)).map(e=>patchHours.has(e.id)?{...e,hours:patchHours.get(e.id)}:e));
     (async()=>{
       try{
         // An entry left with nothing (someone else's entry now covers the
@@ -3589,15 +3621,14 @@ function MainApp({currentUser,onLogout}) {
           ...toPatch.map(c=>db("PATCH","entries",{hours:c.newHours},`?id=eq.${c.id}`)),
           ...(toDelete.length>0?[db("DELETE","entries",null,`?id=in.(${toDelete.map(c=>c.id).join(",")})`)]:[]),
         ]);
-        const deletedIds=new Set(toDelete.map(c=>c.id));
-        setEntries(prev=>prev.filter(e=>!deletedIds.has(e.id)).map(e=>{
-          const c=toPatch.find(x=>x.id===e.id);
-          return c?{...e,hours:c.newHours}:e;
-        }));
       }catch(err){
-        // Silent - the grid's own display still recalculates correctly from
-        // whatever's stored, so a failed background correction here isn't
-        // shown as a user-facing error. It'll be retried on the next change.
+        // Silent, but put back what was on screen so it matches what's
+        // stored; it'll be retried on the next change.
+        setEntries(prev=>{
+          const have=new Set(prev.map(e=>e.id));
+          const restored=prev.map(e=>before.has(e.id)&&patchHours.has(e.id)?before.get(e.id):e);
+          return [...restored,...[...delIds].filter(id=>!have.has(id)&&before.has(id)).map(id=>before.get(id))];
+        });
       }
       correctingRef.current=false;
     })();

@@ -114,6 +114,13 @@ changes — re-verify line numbers against the file before relying on them.
     keeps saving normally whether or not the schema change has been run
     yet - deploy order then can't break live saving.
 
+16. **"It feels slow" - measure where the time goes before changing
+    anything.** Compare against a known-good version on the same data,
+    in the optimised build, with a realistic server delay added. Here the
+    code itself wasn't slower at all - the screen was waiting for the
+    server. Show the result straight away and save in the background
+    (undo it with a message if the save fails); that's what makes an app
+    feel sharp, whatever the network speed.
 ---
 
 ## PART 2 — djcjoiner-Specific Implementation Notes
@@ -1177,6 +1184,32 @@ hashed passwords never sent back, no leaked database errors).
     - Test: `test-slot-hop.mjs` (David's real hours, tentative + normal) -
       fails on main (shows the break), passes after. `test-core-autofill`
       wording updated (its skipped day had no room in either slot).
+
+13. **FIXED (speed PR). App felt slow / clunky after this round of changes
+    (user: "it worked perfectly, sharp and crisp; now it's clunky").**
+    - Measured, not guessed: same data (6 staff, ~900 entries), optimised
+      build, today vs the version before this chat (2b34987). On-screen
+      speed (load, week switching, opening the form, typing) was the same;
+      database calls per action were the same. The difference was WAITING
+      on the server: a new entry or an edit only appeared (and the form
+      only closed) after the save came back; the background hour
+      correction only showed after its saves came back; and page load
+      waited one extra round trip for the days-off list. Public holidays
+      were also fetched from the internet on every load.
+    - What shipped: new entries show at once with temporary ids (swapped
+      for real ones when saved; removed with "Failed to save entry - the
+      change was undone." if the save fails); edits show at once (put back
+      on failure); the form closes straight away; background corrections
+      show at once and save behind (put back on failure; temporary ids
+      skipped); days off load in the same batch as everything else; the
+      holiday list is checked once a week (or when the state changes),
+      marked checked only once saved.
+    - With a 250ms server delay per call: edit 0.56s -> 0.28s to screen,
+      new entry 0.64s -> 0.32s, load 2.7s -> 2.4s.
+    - Still to decide (user): run the server code in the same region as
+      the Neon database (no vercel.json = USA by default); remember each
+      login's role for up to a minute instead of one extra database query
+      per click.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
