@@ -191,6 +191,18 @@ function formatDateRangeCompact(start,end) {
 }
 function formatDateLong(d) { return d.toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
 function isWeekend(d) { return d.getDay()===0||d.getDay()===6; }
+// Days off (TESTING_NOTES 2F #9b/#9c): public holidays (everyone) now, and
+// later closures and RDOs (everyone or chosen staff). MainApp keeps this
+// registry in step with its days_off rows (setDaysOffRegistry) so every
+// scheduling helper below can skip them the same way it skips weekends.
+let DAYS_OFF_ALL=new Set();
+let DAYS_OFF_BY_STAFF=new Map();
+function setDaysOffRegistry(all,byStaff){ DAYS_OFF_ALL=all; DAYS_OFF_BY_STAFF=byStaff; }
+function isDayOff(d,staffId){
+  const ds=typeof d==="string"?d:isoDate(d);
+  return DAYS_OFF_ALL.has(ds)||(!!staffId&&!!DAYS_OFF_BY_STAFF.get(staffId)?.has(ds));
+}
+function isNonWorkingDay(d,staffId){ return isWeekend(d)||isDayOff(d,staffId); }
 function isSunday(d) { return d.getDay()===0; }
 
 // Count working days (Mon-Sat) between two dates
@@ -214,25 +226,25 @@ function workingDaysBetween(d1,d2) {
 // column being schedulable), which is a different scale and would call a
 // perfectly on-target 2-day stagger "3 days apart" whenever a weekend falls
 // between the two dates.
-function autoFillDayGap(dateStr1,dateStr2){
+function autoFillDayGap(dateStr1,dateStr2,staffId){
   const start=dateStr1<dateStr2?dateStr1:dateStr2;
   const end=dateStr1<dateStr2?dateStr2:dateStr1;
   let cur=parseISO(start);
   let count=0;
   while(isoDate(cur)!==end){
     cur=addDays(cur,1);
-    if(!isWeekend(cur))count++;
+    if(!isNonWorkingDay(cur,staffId))count++;
   }
   return count;
 }
 // Shift a date by N working days (Mon-Sat, skip Sundays only)
-function addWorkingDays(d, n) {
+function addWorkingDays(d, n, staffId) {
   let cur=new Date(d);
   const step=n>0?1:-1;
   let remaining=Math.abs(n);
   while(remaining>0) {
     cur.setDate(cur.getDate()+step);
-    if(!isWeekend(cur)) remaining--;
+    if(!isNonWorkingDay(cur,staffId)) remaining--;
   }
   return cur;
 }
@@ -313,6 +325,53 @@ function maxPossibleHours(e, allEntries, staffList, otherEntry) {
   const otherHours = Math.min(Number(other.hours) || 0, cap);
   return Math.max(0, cap - otherHours);
 }
+// Work booked on a day off moves forward (TESTING_NOTES 2F #9b, user's
+// rule): for each person with work on a day off, ALL their entries from
+// that day on move later by the working days lost - the run keeps its
+// shape, and the next job moves along too. People with nothing booked that
+// day don't move. Returns [{id,dateStr}] for the entries that change.
+// affected: [{staffId,dateStr}] - the days off that have work on them.
+function planMoveForward(pool,affected){
+  const out=[];
+  const byStaff=new Map();
+  affected.forEach(a=>{if(!byStaff.has(a.staffId))byStaff.set(a.staffId,[]);byStaff.get(a.staffId).push(a.dateStr);});
+  byStaff.forEach((dates,sid)=>{
+    const first=dates.slice().sort()[0];
+    const mine=pool.filter(e=>e.staffId===sid&&e.dateStr>=first&&!isPast(e.dateStr));
+    const origDates=[...new Set(mine.map(e=>e.dateStr))].sort();
+    const newFor=new Map();
+    let prevNew=null;
+    origDates.forEach(od=>{
+      // Days off for this person between the first affected day and this
+      // one (inclusive) = working days this entry has to move by.
+      let n=0;
+      for(let c=parseISO(first);isoDate(c)<=od;c=addDays(c,1))if(!isWeekend(c)&&isDayOff(c,sid))n++;
+      let nd=n>0?isoDate(addWorkingDays(parseISO(od),n,sid)):od;
+      if(isNonWorkingDay(parseISO(nd),sid))nd=isoDate(addWorkingDays(parseISO(nd),1,sid));
+      // Never land two original days on the same new day - keep the order.
+      if(prevNew&&nd<=prevNew)nd=isoDate(addWorkingDays(parseISO(prevNew),1,sid));
+      newFor.set(od,nd);prevNew=nd;
+    });
+    mine.forEach(e=>{const nd=newFor.get(e.dateStr);if(nd&&nd!==e.dateStr)out.push({id:e.id,dateStr:nd});});
+  });
+  return out;
+}
+function mapDayOff(r){ return {id:r.id,dateStr:r.date_str,kind:r.kind,label:r.label||"",staffIds:r.staff_ids?String(r.staff_ids).split(",").filter(Boolean):null,auto:!!r.auto,removed:!!r.removed,createdAt:r.created_at}; }
+// Public holidays for one country/state (e.g. "AU-NSW") from the free
+// Nager.Date list, this year and next. Only real public holidays: "Bank"
+// days and anything named Bank Holiday are left out (banking only - user).
+async function fetchPublicHolidays(region){
+  if(!region)return[];
+  const y=TODAY.getFullYear();
+  const lists=await Promise.all([y,y+1].map(yr=>fetch(`https://date.nager.at/api/v3/PublicHolidays/${yr}/AU`).then(r=>r.ok?r.json():[]).catch(()=>[])));
+  const seen=new Set();
+  return lists.flat().filter(h=>{
+    if(!h||!h.date||seen.has(h.date))return false;
+    const ok=(h.types||["Public"]).includes("Public")&&(h.global||(h.counties||[]).includes(region))&&!/bank holiday/i.test(`${h.localName||""} ${h.name||""}`);
+    if(ok)seen.add(h.date);
+    return ok;
+  }).map(h=>({dateStr:h.date,name:h.localName||h.name||"Public Holiday"}));
+}
 function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); return isoDate(d); }
 
 // Shared between undo and redo: the row shape the API expects for an insert,
@@ -348,7 +407,7 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
   let guard=0;
   while (remaining>0.001 && guard<730) {
     guard++;
-    if (!isWeekend(cur)) {
+    if (!isNonWorkingDay(cur,staffId)) {
       const ds=isoDate(cur);
       if(capacityAware){
         // A person's day isn't hard-locked to whichever slot the modal
@@ -431,6 +490,7 @@ function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, s
       const ds=isoDate(cur);
       const candidates=[];
       staffIds.forEach(sid=>{
+        if(isDayOff(cur,sid))return;
         const sf=staffList.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
         const trySlots=establishedSlots.has(sid)?slotsKeepingTo(establishedSlots.get(sid),pool,sid,ds,tentative):slotSearchOrder(slot);
@@ -499,6 +559,7 @@ function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff,
         // 0h here, which isn't actually "available" (same capacity check
         // personalBlockFits uses for the auto-fill/group case).
         const ok=staffIds.every(sid=>{
+          if(isDayOff(cur,sid))return false;
           const slotTaken=entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===slot);
           if(slotTaken)return false;
           const ph=Number(staff?.find(s=>s.id===sid)?.productiveHours)||8;
@@ -520,7 +581,7 @@ function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff,
 // takes it from there (including any later partial days or gaps), so this
 // only needs to answer for the one day being considered as a candidate.
 function personalBlockFits(sid, ph, slot, entries, startDateStr, tentative=false) {
-  if(isWeekend(parseISO(startDateStr)))return false;
+  if(isNonWorkingDay(parseISO(startDateStr),sid))return false;
   return slotSearchOrder(slot).some(trySlot=>{
     const slotTaken=entries.some(e=>e.staffId===sid&&e.dateStr===startDateStr&&e.slot===trySlot);
     if(slotTaken)return false;
@@ -564,6 +625,7 @@ function earliestAnyAvailable(staffIds, entries, staffList, fromDateStr, preferr
     if(!isWeekend(cur)){
       const ds=isoDate(cur);
       for(const sid of staffIds){
+        if(isDayOff(cur,sid))continue;
         const sf=staffList.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
         for(const trySlot of slotSearchOrder(preferredSlot)){
@@ -888,6 +950,20 @@ function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours}) {
   );
 }
 
+// A day off (public holiday now; closures and RDOs later) on the grid: a
+// plain grey block, labelled in Slot 1 only (user: just "Public Holiday",
+// not the holiday's name). Still clickable for editors - saving work on it
+// asks first (see askDayOff).
+function DayOffSlot({label,onClick,canEdit,isPastDate}){
+  const clickable=canEdit&&!isPastDate&&!!onClick;
+  return (
+    <div onClick={clickable?onClick:undefined}
+      style={{minHeight:34,background:"#E2E8F0",borderRadius:5,border:"1px solid #CBD5E1",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#475569",cursor:clickable?"pointer":"default",userSelect:"none"}}>
+      {label}
+    </div>
+  );
+}
+
 // ── Login Screen ──────────────────────────────────────────────
 
 function LoginScreen({onLogin}) {
@@ -1121,7 +1197,7 @@ function paidHours(start,end,lunch){
   const [sh,sm]=start.split(":").map(Number),[eh,em]=end.split(":").map(Number);
   return Math.max(0,(eh*60+em-sh*60-sm-(Number(lunch)||0))/60);
 }
-function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo,companyName,onChangeCompanyName,companyTagline,onChangeCompanyTagline,workStart,workEnd,lunchMinutes,onChangeWorkHours,holidayRegion,onChangeHolidayRegion}) {
+function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo,companyName,onChangeCompanyName,companyTagline,onChangeCompanyTagline,workStart,workEnd,lunchMinutes,onChangeWorkHours,holidayRegion,onChangeHolidayRegion,daysOff=[],onRemoveDayOff,onAddHoliday}) {
   const [error,setError]=useState("");
   const [logoUploading,setLogoUploading]=useState(false);
   const [nameInput,setNameInput]=useState(companyName);
@@ -1138,6 +1214,9 @@ function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onRe
     e.target.value="";
   }
   const paid=paidHours(workStart,workEnd,lunchMinutes);
+  const [newHoliday,setNewHoliday]=useState("");
+  const upcomingHolidays=daysOff.filter(d=>d.kind==="public_holiday"&&!d.removed&&d.dateStr>=todayStr).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+  const holidayLabel=ds=>parseISO(ds).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short",year:"numeric"}).replace(",","");
   const region=(holidayRegion||"").split("-");
   return (
     <Modal title="⚙ Settings" wide onClose={onClose}>
@@ -1202,6 +1281,23 @@ function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onRe
                 {AU_STATES.map(([code,name])=><option key={code} value={code}>{name}</option>)}
               </Sel>
             </div>
+            <div style={FIELD_LABEL}>Upcoming Public Holidays</div>
+            <div style={{border:"1px solid #E2E8F0",borderRadius:8,maxHeight:220,overflowY:"auto",marginBottom:10}}>
+              {upcomingHolidays.length===0
+                ?<div style={{padding:"10px 12px",fontSize:13,color:"#94A3B8"}}>{holidayRegion?"None loaded yet.":"Choose a state to load them."}</div>
+                :upcomingHolidays.map(d=>(
+                  <div key={d.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"6px 12px",borderBottom:"1px solid #F1F5F9",fontSize:13,color:"#1E293B"}}>
+                    <span><strong style={{fontWeight:600}}>{holidayLabel(d.dateStr)}</strong> <span style={{color:"#64748B"}}>{d.label}</span></span>
+                    {onRemoveDayOff&&<button type="button" onClick={()=>onRemoveDayOff(d.id)} style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}}>Remove</button>}
+                  </div>
+                ))}
+            </div>
+            {onAddHoliday&&(
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input type="date" value={newHoliday} min={todayStr} onChange={e=>setNewHoliday(e.target.value)} style={{width:170,padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+                <Btn variant="primary" disabled={!newHoliday} onClick={()=>{onAddHoliday(newHoliday);setNewHoliday("");}}>Add Day</Btn>
+              </div>
+            )}
           </div>
     </Modal>
   );
@@ -1338,6 +1434,118 @@ function MainApp({currentUser,onLogout}) {
   const [jobs,setJobs]=useState([]);
   const [subItems,setSubItems]=useState([]);
   const [entries,setEntries]=useState([]);
+  // Days off (public holidays now; closures and RDOs later) - days_off rows.
+  const [daysOff,setDaysOff]=useState([]);
+  const [daysOffLoaded,setDaysOffLoaded]=useState(false);
+
+  // Keeps the scheduling helpers' days-off registry in step (see isDayOff).
+  const daysOffIndex=useMemo(()=>{
+    const all=new Set(),byStaff=new Map();
+    daysOff.filter(d=>!d.removed).forEach(d=>{
+      if(!d.staffIds)all.add(d.dateStr);
+      else d.staffIds.forEach(sid=>{if(!byStaff.has(sid))byStaff.set(sid,new Set());byStaff.get(sid).add(d.dateStr);});
+    });
+    setDaysOffRegistry(all,byStaff);
+    return {all,byStaff};
+  },[daysOff]);
+
+  // Public holidays load themselves for the region chosen in Settings
+  // (TESTING_NOTES 2F #9b): new ones are added; automatic ones from today on
+  // that no longer apply (region changed) are removed. A holiday someone
+  // removed in Settings stays removed. Editors only - viewers never write.
+  const holidaySyncRef=useRef(null);
+  useEffect(()=>{
+    if(!canEdit||!daysOffLoaded||!holidayRegion||holidaySyncRef.current===holidayRegion)return;
+    holidaySyncRef.current=holidayRegion;
+    (async()=>{
+      const list=await fetchPublicHolidays(holidayRegion);
+      if(list.length===0)return; // offline or list unavailable - change nothing
+      const wanted=new Map(list.filter(h=>h.dateStr>=todayStr).map(h=>[h.dateStr,h.name]));
+      const ph=daysOff.filter(d=>d.kind==="public_holiday");
+      const known=new Set(ph.map(d=>d.dateStr));
+      const stale=ph.filter(d=>d.auto&&!d.removed&&d.dateStr>=todayStr&&!wanted.has(d.dateStr));
+      const fresh=[...wanted.entries()].filter(([ds])=>!known.has(ds));
+      try{
+        if(stale.length>0)await db("DELETE","days_off",null,`?id=in.(${stale.map(d=>d.id).join(",")})`);
+        const inserted=fresh.length>0?await db("POST","days_off",fresh.map(([ds,name])=>({date_str:ds,kind:"public_holiday",label:name,auto:true}))):[];
+        const staleIds=new Set(stale.map(d=>d.id));
+        if(stale.length||inserted.length)setDaysOff(prev=>[...prev.filter(d=>!staleIds.has(d.id)),...inserted.map(mapDayOff)]);
+      }catch{setError("Could not save the public holidays - they'll be tried again next time the page loads.");}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[canEdit,daysOffLoaded,holidayRegion]);
+
+  // Settings: remove a holiday (kept as removed, so it isn't re-added) or
+  // add one (e.g. a local show day).
+  // Work that was booked BEFORE a day off was added, sitting on that day off
+  // (work put there afterwards was a deliberate Schedule Anyway). Editors
+  // get one pop-up listing it; nothing moves until they click Move Forward.
+  const moveForwardAskedRef=useRef("");
+  useEffect(()=>{
+    if(!canEdit||!daysOffLoaded)return;
+    const affected=[];
+    const seen=new Set();
+    daysOff.filter(d=>!d.removed&&d.dateStr>=todayStr).forEach(d=>{
+      entries.forEach(e=>{
+        if(e.dateStr!==d.dateStr||(d.staffIds&&!d.staffIds.includes(e.staffId)))return;
+        if(d.createdAt&&e.createdAt&&new Date(e.createdAt)>=new Date(d.createdAt))return;
+        const k=`${e.staffId}|${e.dateStr}`;
+        if(!seen.has(k)){seen.add(k);affected.push({staffId:e.staffId,dateStr:e.dateStr});}
+      });
+    });
+    const sig=affected.map(a=>`${a.staffId}|${a.dateStr}`).sort().join(",");
+    if(!sig||moveForwardAskedRef.current===sig||conflictAlert)return;
+    moveForwardAskedRef.current=sig;
+    const lines=affected.sort((a,b)=>a.dateStr.localeCompare(b.dateStr)).map(a=>`${staff.find(s=>s.id===a.staffId)?.name||"Someone"} - ${parseISO(a.dateStr).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"}).replace(",","")} (${dayOffLabel(a.dateStr,a.staffId)})`);
+    setConflictAlert({
+      title:"⚠ Work booked on a day off",
+      message:`${lines.join("\n")}\nMove Forward moves each person's work from that day on by the working days lost.`,
+      confirmLabel:"Move Forward",cancelLabel:"Not Now",
+      onConfirm:()=>{setConflictAlert(null);moveWorkForward(affected);},
+      onCancel:()=>setConflictAlert(null),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[canEdit,daysOffLoaded,daysOff,entries]);
+  async function moveWorkForward(affected){
+    const _u=snapshotEntries(entries);
+    const moves=planMoveForward(_u,affected);
+    if(moves.length===0)return;
+    const to=new Map(moves.map(m=>[m.id,m.dateStr]));
+    const apply=e=>to.has(e.id)?{...e,dateStr:to.get(e.id)}:e;
+    setEntries(prev=>prev.map(apply));
+    try{
+      await Promise.all(moves.map(m=>db("PATCH","entries",{date_str:m.dateStr},`?id=eq.${m.id}`)));
+      pushUndoSnapshot(_u,_u.map(apply));
+    }catch(err){
+      setError("Failed to move the work forward - reverted.");
+      setEntries(()=>_u);
+    }
+  }
+  const DAY_OFF_KINDS={public_holiday:"Public Holiday"};
+  function dayOffLabel(ds,sid){
+    const d=daysOff.find(x=>!x.removed&&x.dateStr===ds&&(!x.staffIds||x.staffIds.includes(sid)));
+    return DAY_OFF_KINDS[d?.kind]||"Day Off";
+  }
+  async function removeDayOff(id){
+    setDaysOff(prev=>prev.map(d=>d.id===id?{...d,removed:true}:d));
+    try{await db("PATCH","days_off",{removed:true},`?id=eq.${id}`);}
+    catch{setError("Could not remove that day.");setDaysOff(prev=>prev.map(d=>d.id===id?{...d,removed:false}:d));}
+  }
+  async function addPublicHoliday(dateStr){
+    if(!dateStr)return;
+    const existing=daysOff.find(d=>d.kind==="public_holiday"&&d.dateStr===dateStr);
+    try{
+      if(existing){
+        if(!existing.removed)return;
+        await db("PATCH","days_off",{removed:false},`?id=eq.${existing.id}`);
+        setDaysOff(prev=>prev.map(d=>d.id===existing.id?{...d,removed:false}:d));
+      }else{
+        const [row]=await db("POST","days_off",[{date_str:dateStr,kind:"public_holiday",label:"Public Holiday",auto:false}]);
+        setDaysOff(prev=>[...prev,mapDayOff(row)]);
+      }
+    }catch{setError("Could not add that day.");}
+  }
+
 
   const [jobModal,setJobModal]=useState(null);
   const [entryModal,setEntryModal]=useState(null);
@@ -1603,6 +1811,10 @@ function MainApp({currentUser,onLogout}) {
       loadedStateRef.current.subItems.add(loadedSubItems);
       setSubItems(loadedSubItems);
       setEntries(loadedEntries);
+      // Separate from the main load so a missing days_off table (before the
+      // database change is run) never stops the schedule loading.
+      try{setDaysOff((await db("GET","days_off","","?order=date_str")).map(mapDayOff));}catch{setDaysOff([]);}
+      setDaysOffLoaded(true);
     } catch(e){setError("Could not connect to database.");}
     finally{setLoading(false);}
   },[]);
@@ -2082,6 +2294,12 @@ function MainApp({currentUser,onLogout}) {
           pool=await settleTentativeBeside(_u,pool);
           pushUndoSnapshot(_u,pool);
         };
+        // On someone's day off: ask first (see askDayOff).
+        if(valid.some(p=>isDayOff(p.dateStr,p.staffId||data.staffId))){
+          setSaving(false);
+          if(!(await askDayOff(valid.map(p=>({staffId:p.staffId||data.staffId,dateStr:p.dateStr})))))return;
+          setSaving(true);
+        }
         // No hours left for that person that day: ask first (see askNoRoom).
         // Go Back returns to the form with nothing saved.
         const newNoRoom=noRoomDays(valid.map(p=>({staffId:p.staffId||data.staffId,dateStr:p.dateStr,slot:p.slot!==undefined?p.slot:data.slot,hours:p.hours,isTentative:data.entryType!=="misc"&&!!data.isTentative})),entries);
@@ -2107,6 +2325,11 @@ function MainApp({currentUser,onLogout}) {
         // a fresh conflict would still "win" on its original creation date,
         // even though it's the one that just showed up.
         const relocated=prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.slot!==data.slot);
+        if(prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.staffId!==data.staffId)&&isDayOff(data.dateStr,data.staffId)){
+          setSaving(false);
+          if(!(await askDayOff([{staffId:data.staffId,dateStr:data.dateStr}])))return;
+          setSaving(true);
+        }
         const newCreatedAt=relocated?new Date().toISOString():undefined;
         // Tentative switch (TESTING_NOTES 2F #9a): ticking it makes this entry
         // tentative; unticking it on a tentative entry confirms every
@@ -2459,6 +2682,7 @@ function MainApp({currentUser,onLogout}) {
       // their full hours, locked. All or nothing - never split.
       const groupPlacements=activeIds.map(id=>({id,staffId:idToStaff[id],dateStr:idToDate[id],slot:idToSlot[id],hours:Number(entries.find(x=>x.id===id)?.hours)||0,isTentative:!!entries.find(x=>x.id===id)?.isTentative}));
       const groupNoRoom=noRoomDays(groupPlacements,entries,movingIds);
+      if(!(await askDayOff(groupPlacements)))return;
       if(groupNoRoom.length>0&&!(await askNoRoom(groupNoRoom)))return;
       const noRoomSet=new Set(groupNoRoom.map(d=>noRoomKey(d.staffId,d.dateStr)));
       const forcedIds=new Set(groupPlacements.filter(p=>noRoomSet.has(noRoomKey(p.staffId,p.dateStr))).map(p=>p.id));
@@ -2623,6 +2847,7 @@ function MainApp({currentUser,onLogout}) {
       // locked. All or nothing - never split.
       const copyPlacements=toInsert.map(({en,newDate,newSlot,newStaffId})=>({staffId:newStaffId,dateStr:newDate,slot:newSlot,hours:Number(en.hours)||0,isTentative:!!en.isTentative}));
       const copyNoRoom=noRoomDays(copyPlacements,entries);
+      if(!(await askDayOff(copyPlacements)))return;
       if(copyNoRoom.length>0&&!(await askNoRoom(copyNoRoom)))return;
       const copyNoRoomSet=new Set(copyNoRoom.map(d=>noRoomKey(d.staffId,d.dateStr)));
       const forcedFlags=copyPlacements.map(p=>copyNoRoomSet.has(noRoomKey(p.staffId,p.dateStr)));
@@ -2823,6 +3048,25 @@ function MainApp({currentUser,onLogout}) {
   }
   // Shows the existing Scheduling Conflict pop-up and resolves true for
   // Schedule Anyway, false for Go Back.
+  // Work landing on someone's day off (public holiday etc.): ask first
+  // (user, 2F #9b). Resolves true for Schedule Anyway, false for Go Back.
+  // placements: [{staffId,dateStr}].
+  function askDayOff(placements){
+    const seen=new Set(),lines=[];
+    placements.forEach(p=>{
+      const k=`${p.staffId}|${p.dateStr}`;
+      if(seen.has(k)||!isDayOff(p.dateStr,p.staffId))return;
+      seen.add(k);
+      lines.push(`${staff.find(s=>s.id===p.staffId)?.name||"This person"} - ${parseISO(p.dateStr).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"}).replace(",","")} (${dayOffLabel(p.dateStr,p.staffId)})`);
+    });
+    if(lines.length===0)return Promise.resolve(true);
+    return new Promise(resolve=>setConflictAlert({
+      title:"⚠ Day Off",
+      message:`This puts work on a day off:\n${lines.join("\n")}\nSchedule anyway?`,
+      onConfirm:()=>{setConflictAlert(null);resolve(true);},
+      onCancel:()=>{setConflictAlert(null);resolve(false);},
+    }));
+  }
   function askNoRoom(days){
     const lines=days.map(d=>`${staff.find(s=>s.id===d.staffId)?.name||"This person"} has no hours left on ${parseISO(d.dateStr).toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})} (${d.used}h of ${d.cap}h used).`);
     return new Promise(resolve=>setConflictAlert({
@@ -2861,6 +3105,7 @@ function MainApp({currentUser,onLogout}) {
       dragEntry.current=null;
       const copyNoRoom=noRoomDays([{staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:entry.hours,isTentative:!!entry.isTentative}],entries);
       const copyForced=copyNoRoom.length>0;
+      if(!(await askDayOff([{staffId:toStaffId,dateStr:toDateStr}])))return;
       if(copyForced&&!(await askNoRoom(copyNoRoom)))return;
       // Same as performGroupCopy: a copy never inherits the source's lock,
       // so it's always open to the normal budget math - unless its item's
@@ -2908,6 +3153,7 @@ function MainApp({currentUser,onLogout}) {
     dragEntry.current=null;
     const moveNoRoom=noRoomDays([{staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:entry.hours,isTentative:!!entry.isTentative}],entries,new Set([entry.id]));
     const moveForced=moveNoRoom.length>0;
+    if(!(await askDayOff([{staffId:toStaffId,dateStr:toDateStr}])))return;
     if(moveForced&&!(await askNoRoom(moveNoRoom)))return;
     const _u=snapshotEntries(entries);
     const prevState={staffId:entry.staffId,dateStr:entry.dateStr,slot:entry.slot,createdAt:entry.createdAt,hours:entry.hours,hoursLocked:entry.hoursLocked};
@@ -3486,7 +3732,7 @@ function MainApp({currentUser,onLogout}) {
                     // spanning 29 Sep-4 Oct), in that same spacer slot.
                     const isMonthChange=i>0&&d.getMonth()!==visibleDays[i-1].getMonth();
                     return(
-                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9,minWidth:isMobile?100:undefined}}>
+                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":daysOffIndex.all.has(ds)?"#E2E8F0":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9,minWidth:isMobile?100:undefined}}>
                         {/* Phone screens don't have room for a once-per-week
                             "Week of ..." banner AND a weekday/date line both -
                             that's the squeeze that was pushing the weekday
@@ -3682,6 +3928,8 @@ function MainApp({currentUser,onLogout}) {
                                     ))}
                                   </div>
                                 : renderEntryBlock(entry,overMaxDays.has(`${st.id}|${ds}`))
+                              : isDayOff(ds,st.id)&&!isDrop
+                                ? <DayOffSlot label={slot===0?dayOffLabel(ds,st.id):""} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} canEdit={canEdit} isPastDate={isPast(ds)}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} availableHours={availableHours}/>
                             }
                           </td>
@@ -3734,7 +3982,7 @@ function MainApp({currentUser,onLogout}) {
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onToggleComplete={toggleJobCompleted} onClose={()=>setJobModal(null)} saving={saving}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id} saving={saving}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)}/>}
-      {settingsOpen&&<SettingsModal onClose={()=>setSettingsOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline} workStart={workStart} workEnd={workEnd} lunchMinutes={lunchMinutes} onChangeWorkHours={changeWorkHours} holidayRegion={holidayRegion} onChangeHolidayRegion={changeHolidayRegion}/>}
+      {settingsOpen&&<SettingsModal onClose={()=>setSettingsOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline} workStart={workStart} workEnd={workEnd} lunchMinutes={lunchMinutes} onChangeWorkHours={changeWorkHours} holidayRegion={holidayRegion} onChangeHolidayRegion={changeHolidayRegion} daysOff={daysOff} onRemoveDayOff={removeDayOff} onAddHoliday={addPublicHoliday}/>}
       {conflictAlert&&<ConfirmModal title={conflictAlert.title||"⚠ Scheduling Conflict"} message={conflictAlert.message} cancelLabel={conflictAlert.cancelLabel||"Go Back"} confirmLabel={conflictAlert.confirmLabel||"Schedule Anyway"} danger onConfirm={conflictAlert.onConfirm} onCancel={conflictAlert.onCancel}/>}
       {idleJobPrompt&&<ConfirmModal title="Job idle a month" message={`Job ${idleJobPrompt.job.jobNo}, ${idleJobPrompt.job.name} most recent scheduled date is ${formatDate(parseISO(idleJobPrompt.job.maxDate))}. Do you want to close this Job?`} confirmLabel="Close Job" cancelLabel="Not Yet"
         onConfirm={()=>{toggleJobCompleted(idleJobPrompt.job.id,true);dismissedIdleJobsRef.current.add(idleJobPrompt.job.id);setIdleJobPrompt(null);}}
@@ -3876,9 +4124,10 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         return;
       }
       for(let i=1;i<days.length;i++){
-        const breakDays=autoFillDayGap(days[i-1],days[i])-1;
+        // A day off (public holiday etc.) isn't a break in the work.
+        const breakDays=autoFillDayGap(days[i-1],days[i],sid)-1;
         if(breakDays>1){
-          const firstMissing=isoDate(addWorkingDays(parseISO(days[i-1]),1));
+          const firstMissing=isoDate(addWorkingDays(parseISO(days[i-1]),1,sid));
           lines.push(`This would schedule with a ${breakDays} day break for ${name} on ${gapDayLabel(firstMissing)}`);
           break;
         }
