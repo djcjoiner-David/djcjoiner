@@ -1165,6 +1165,15 @@ hashed passwords never sent back, no leaked database errors).
     first (`slotsKeepingTo` returns [usual, other]); a day with no room in
     either slot is still skipped. Same for tentative and normal bookings.
     Result: Wed 7h top, Thu 3h bottom, no break.
+    - CORRECTED after live testing (user: "still puts first day in slot 1
+      and second day in slot 2, Fail"). The rule is per item: **an item
+      starts and finishes in the same slot.** A new run tries the chosen
+      slot for the whole run, then the other slot; the first that starts
+      the same day and finishes no later than the day-by-day fill wins
+      (`pickWholeRunSlot`, single and group fill). Only if neither does
+      it fall back to day-by-day. An item already scheduled for that
+      person keeps its slot, using the other one only on a taken day.
+      David: Wed 7h + Thu 3h, both Slot 2.
     - Test: `test-slot-hop.mjs` (David's real hours, tentative + normal) -
       fails on main (shows the break), passes after. `test-core-autofill`
       wording updated (its skipped day had no room in either slot).

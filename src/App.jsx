@@ -396,13 +396,36 @@ function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.st
 // sticks to that same slot rather than re-picking whichever's free - a
 // person's entries for one item shouldn't hop between Slot 1 and Slot 2
 // from day to day.
-function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId, slot, entries, subItemId, tentative=false) {
+// Keeps a NEW run in one slot where it can (user's rule, TESTING_NOTES 2F
+// #12): if the item won't fit in the chosen slot for its whole run but
+// fits in the other slot over the same days, the whole run goes in the
+// other slot - rather than starting in one row and hopping to the other.
+// Only when neither single slot covers the same days does it fall back to
+// using whichever slot has room each day.
+function pickWholeRunSlot(walk, slot){
+  const flex=walk(undefined);
+  if(flex.length===0)return flex;
+  const first=r=>r[0]?.dateStr, last=r=>r[r.length-1]?.dateStr;
+  const total=r=>r.reduce((a,x)=>a+(Number(x.hours)||0),0);
+  for(const s of slotSearchOrder(slot)){
+    const fixed=walk(s);
+    if(fixed.length&&first(fixed)===first(flex)&&last(fixed)<=last(flex)&&Math.abs(total(fixed)-total(flex))<0.01)return fixed;
+  }
+  return flex;
+}
+function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId, slot, entries, subItemId, tentative=false, forcedSlot) {
   if (!totalHours||totalHours<=0) return [];
   const ph = productiveHoursPerDay||8;
   const capacityAware=staffId!==undefined&&slot!==undefined&&!!entries;
-  let establishedSlot=capacityAware&&subItemId!==undefined
+  const existingSlot=capacityAware&&subItemId!==undefined
     ?entries.find(e=>e.staffId===staffId&&e.subItemId===subItemId)?.slot
     :undefined;
+  if(capacityAware&&forcedSlot===undefined&&existingSlot===undefined)
+    return pickWholeRunSlot(fs=>fs===undefined?buildAutoFill(startDateStr,totalHours,productiveHoursPerDay,staffId,slot,entries,subItemId,tentative,null):buildAutoFill(startDateStr,totalHours,productiveHoursPerDay,staffId,slot,entries,subItemId,tentative,fs),slot);
+  // forcedSlot: a number = this run uses only that slot; null = the
+  // day-by-day fallback (usual slot first, else the other).
+  const onlySlot=typeof forcedSlot==="number"?forcedSlot:undefined;
+  let establishedSlot=onlySlot!==undefined?onlySlot:existingSlot;
   const days=[]; let remaining=totalHours; let cur=parseISO(startDateStr);
   let guard=0;
   while (remaining>0.001 && guard<730) {
@@ -418,7 +441,7 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
         // still wins whenever one exists. Once a slot's established for
         // this item, though, only that slot is tried - consistency wins
         // over flexibility from here on.
-        const trySlots=establishedSlot!==undefined?slotsKeepingTo(establishedSlot):slotSearchOrder(slot);
+        const trySlots=onlySlot!==undefined?[onlySlot]:establishedSlot!==undefined?slotsKeepingTo(establishedSlot):slotSearchOrder(slot);
         for(const trySlot of trySlots){
           const slotTaken=entries.some(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
@@ -469,8 +492,12 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
 // every later day sticks to that same slot instead of re-picking whichever
 // one's free. Returns rows shaped like buildAutoFill's own output -
 // dateStr, hours, staffId, slot - ready to insert directly.
-function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, staffList, subItemId, tentative=false) {
+function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, staffList, subItemId, tentative=false, forcedSlot) {
   if (!totalHours||totalHours<=0||staffIds.length===0) return [];
+  const anyExisting=subItemId!==undefined&&staffIds.some(sid=>entries.some(e=>e.staffId===sid&&e.subItemId===subItemId));
+  if(forcedSlot===undefined&&!anyExisting)
+    return pickWholeRunSlot(fs=>buildGroupAutoFill(staffIds,totalHours,startDateStr,slot,entries,staffList,subItemId,tentative,fs===undefined?null:fs),slot);
+  const onlySlot=typeof forcedSlot==="number"?forcedSlot:undefined;
   let remaining=totalHours;
   let pool=entries;
   const rows=[];
@@ -493,7 +520,7 @@ function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, s
         if(isDayOff(cur,sid))return;
         const sf=staffList.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
-        const trySlots=establishedSlots.has(sid)?slotsKeepingTo(establishedSlots.get(sid)):slotSearchOrder(slot);
+        const trySlots=onlySlot!==undefined?[onlySlot]:establishedSlots.has(sid)?slotsKeepingTo(establishedSlots.get(sid)):slotSearchOrder(slot);
         for(const trySlot of trySlots){
           const slotTaken=pool.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
