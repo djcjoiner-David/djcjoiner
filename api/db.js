@@ -77,6 +77,7 @@ const ALLOWED_COLUMNS = {
   entries:        ['id', 'staff_id', 'job_id', 'sub_item_id', 'date_str', 'slot', 'hours', 'misc_note', 'created_at', 'hours_locked', 'is_catch_up', 'is_tentative'],
   user_roles:     ['id', 'email', 'role', 'name', 'password', 'created_at', 'failed_login_count', 'locked_until'],
   keepalive_ping: ['id', 'pinged_at'],
+  days_off:       ['id', 'date_str', 'kind', 'label', 'staff_ids', 'auto', 'removed', 'created_at'],
   app_settings:   ['id', 'theme', 'logo_data', 'company_name', 'company_tagline', 'work_start', 'work_end', 'lunch_minutes', 'holiday_region'],
 };
 const ALLOWED_TABLES = Object.keys(ALLOWED_COLUMNS);
