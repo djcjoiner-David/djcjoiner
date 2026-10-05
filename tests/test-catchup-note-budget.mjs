@@ -23,8 +23,10 @@ const { browser, page, db } = await launch(seed);
 try {
   // 1. edit the Catch-up entry: the note must say Laundry W's 41h
   await (await block(page, 'Ian', D(6), 1)).click();
-  const note = await page.locator('text=/Catch-up Hours logged for this item/').innerText();
-  r.check('note says "not counted in its 41h budget"', /not counted in its 41h budget/.test(note), note);
+  // (Wording since the form tidy-up: no budget figure at all, so it can't
+  // show the wrong item's number.)
+  const note = await page.locator('text=/Catch-up logged for this item/').innerText();
+  r.check('note reads "1hr Catch-up logged for this item, not deducted from item total hrs."', note.trim() === '1hr Catch-up logged for this item, not deducted from item total hrs.', note);
   await button(page, 'Cancel').click();
   // 2. Job Summary "+ Schedule" on Laundry W (11h left): a 4h manual entry still fits - no Catch-up prompt
   await page.locator('text=Job Summary').first().click();

@@ -25,7 +25,7 @@ try {
   await (await block(page, 'Mark', D1, 0)).click();
   await input(page, 'Hours').fill('4');
   r.check('Hours box accepts 4 (not clamped to 0)', (await input(page, 'Hours').inputValue()) === '4', await input(page, 'Hours').inputValue());
-  r.check('warns that the other slot already has hours', await page.locator('text=/other slot that day/').count() > 0);
+  r.check('warns that the other slot already has hours', await page.locator('text=/^Mark has 8 hours assigned on \\w{3} \\d{2} \\w{3}$/').count() > 0);
   await button(page, 'Save').click();
   // 4h + Laundry's 8h is still over Mark's 8h: asks first (2E #15).
   await button(page, 'Schedule Anyway').click();
