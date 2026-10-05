@@ -1156,6 +1156,19 @@ hashed passwords never sent back, no leaked database errors).
       lunch_minutes integer DEFAULT 30, ADD COLUMN holiday_region text;`
     - Test: `test-settings.mjs` - fails on main, passes after.
 
+12. **FIXED (slot fix PR). Auto-fill skipped days instead of using the
+    other slot (user's live review).** David 7's 10h tentative Vanity W
+    started Wed 7h in his top slot; Thu-Mon his top slot had Vanity S, so
+    the old "an item stays in its slot" rule skipped all of them and put
+    the last 3h on the next Tuesday. Rule now (user): if an item won't fit
+    in its slot, it goes in the other slot - the usual slot is still tried
+    first (`slotsKeepingTo` returns [usual, other]); a day with no room in
+    either slot is still skipped. Same for tentative and normal bookings.
+    Result: Wed 7h top, Thu 3h bottom, no break.
+    - Test: `test-slot-hop.mjs` (David's real hours, tentative + normal) -
+      fails on main (shows the break), passes after. `test-core-autofill`
+      wording updated (its skipped day had no room in either slot).
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
