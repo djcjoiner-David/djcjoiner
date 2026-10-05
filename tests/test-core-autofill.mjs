@@ -2,8 +2,9 @@
 // is capacity-aware - a day's free hours are what's left after the person's
 // other slot - and never overbooks anyone. If the chosen slot is taken on
 // the FIRST day but the other slot has room, it starts in the other slot;
-// once started, the person stays in that slot for the item (no hopping
-// between slots) and a later day where that slot is taken is skipped.
+// once started, the person stays in that slot for the item, using the
+// other slot only on a day their usual one is taken (TESTING_NOTES 2F #12);
+// a day with no room in either slot is skipped.
 import { launch, settle, newEntry, button, rows, itemTotal, staff, job, item, entry, businessDayStr, reporter } from './harness.mjs';
 
 const r = reporter('core: auto-fill is capacity-aware, slot-consistent');
@@ -29,7 +30,7 @@ try {
   r.check('Kitchen gets exactly its 16h', itemTotal(db, 'i2') === 16, k);
   r.check('day 2: starts in slot 2 with the 5h left', on(D(2))?.slot === 1 && Number(on(D(2))?.hours) === 5, k);
   r.check('day 3: stays in slot 2, full 8h', on(D(3))?.slot === 1 && Number(on(D(3))?.hours) === 8, k);
-  r.check('day 4: skipped (his slot 2 is taken)', !on(D(4)), k);
+  r.check('day 4: skipped (slot 2 taken, slot 1 has no room left)', !on(D(4)), k);
   r.check('day 5: the last 3h, still slot 2', on(D(5))?.slot === 1 && Number(on(D(5))?.hours) === 3, k);
   const byDay = {}; db.tables.entries.forEach(e => byDay[e.date_str] = (byDay[e.date_str] || 0) + Number(e.hours));
   r.check('Mark never booked past 8h on any day', Object.values(byDay).every(h => h <= 8), byDay);
