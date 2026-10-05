@@ -259,6 +259,30 @@ function wasScheduledFirst(a, b) {
   // deterministic and consistent everywhere this is checked.
   return a.slot < b.slot;
 }
+// Tentative entries (TESTING_NOTES 2F #9a, user's rules): a tentative
+// entry never reduces what the same person's OTHER slot can hold, but it
+// does work around confirmed work there - so between a tentative and a
+// confirmed entry on one day, the confirmed one always has first claim,
+// whatever order they were booked in. Two entries of the same kind use the
+// normal "scheduled first" rule.
+function otherCountsAgainst(e, other) {
+  if (!!e.isTentative !== !!other.isTentative) return !!e.isTentative;
+  return !wasScheduledFirst(e, other);
+}
+// Hours the other slot takes from this person's day, for new work being
+// placed in `slot`. Confirmed work ignores a tentative entry beside it;
+// tentative work counts everything, and can't share a day with another
+// tentative entry (only one tentative slot per person per day) - Infinity
+// means no room at all.
+function otherSlotUse(pool, sid, ds, slot, tentative) {
+  let used = 0;
+  for (const e of pool) {
+    if (e.staffId !== sid || e.dateStr !== ds || e.slot === slot) continue;
+    if (tentative) { if (e.isTentative) return Infinity; used += Number(e.hours) || 0; }
+    else if (!e.isTentative) used += Number(e.hours) || 0;
+  }
+  return used;
+}
 // `otherEntry`: see maxPossibleHours - same optional pre-looked-up value,
 // same reason (skip the linear scan when a caller already has an index).
 function effectiveEntryHours(e, allEntries, staffList, otherEntry) {
@@ -266,7 +290,7 @@ function effectiveEntryHours(e, allEntries, staffList, otherEntry) {
   const stf = staffList.find(s => s.id === e.staffId);
   const cap = Number(stf?.productiveHours) || 8;
   const other = otherEntry!==undefined ? otherEntry : allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
-  if (!other || wasScheduledFirst(e, other)) return Math.min(myHours, cap);
+  if (!other || !otherCountsAgainst(e, other)) return Math.min(myHours, cap);
   const otherHours = Math.min(Number(other.hours) || 0, cap);
   return Math.min(myHours, Math.max(0, cap - otherHours));
 }
@@ -285,7 +309,7 @@ function maxPossibleHours(e, allEntries, staffList, otherEntry) {
   const stf = staffList.find(s => s.id === e.staffId);
   const cap = Number(stf?.productiveHours) || 8;
   const other = otherEntry!==undefined ? otherEntry : allEntries.find(o => o.staffId === e.staffId && o.dateStr === e.dateStr && o.slot !== e.slot);
-  if (!other || wasScheduledFirst(e, other)) return cap;
+  if (!other || !otherCountsAgainst(e, other)) return cap;
   const otherHours = Math.min(Number(other.hours) || 0, cap);
   return Math.max(0, cap - otherHours);
 }
@@ -293,8 +317,8 @@ function oneMonthAgo() { const d=new Date(TODAY); d.setMonth(d.getMonth()-1); re
 
 // Shared between undo and redo: the row shape the API expects for an insert,
 // and the entry shape the app uses once that insert comes back with an id.
-function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked,is_catch_up:!!e.isCatchUp}; }
-function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at,hoursLocked:!!inserted.hours_locked,isCatchUp:!!inserted.is_catch_up}; }
+function entryFields(e) { return {staff_id:e.staffId,job_id:e.jobId,sub_item_id:e.subItemId,date_str:e.dateStr,slot:e.slot,hours:e.hours,misc_note:e.miscNote,hours_locked:!!e.hoursLocked,is_catch_up:!!e.isCatchUp,...(e.isTentative?{is_tentative:true}:{})}; }
+function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.staff_id,jobId:inserted.job_id,subItemId:inserted.sub_item_id,dateStr:inserted.date_str,slot:inserted.slot,hours:Number(inserted.hours),miscNote:inserted.misc_note||null,createdAt:inserted.created_at,hoursLocked:!!inserted.hours_locked,isCatchUp:!!inserted.is_catch_up,isTentative:!!inserted.is_tentative}; }
 
 // Lays out a total across consecutive weekdays at a daily rate. When
 // staffId/slot/entries are supplied, it also checks what that person
@@ -313,7 +337,7 @@ function mapInsertedEntry(inserted) { return {id:inserted.id,staffId:inserted.st
 // sticks to that same slot rather than re-picking whichever's free - a
 // person's entries for one item shouldn't hop between Slot 1 and Slot 2
 // from day to day.
-function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId, slot, entries, subItemId) {
+function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId, slot, entries, subItemId, tentative=false) {
   if (!totalHours||totalHours<=0) return [];
   const ph = productiveHoursPerDay||8;
   const capacityAware=staffId!==undefined&&slot!==undefined&&!!entries;
@@ -335,11 +359,11 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
         // still wins whenever one exists. Once a slot's established for
         // this item, though, only that slot is tried - consistency wins
         // over flexibility from here on.
-        const trySlots=establishedSlot!==undefined?[establishedSlot]:slotSearchOrder(slot);
+        const trySlots=establishedSlot!==undefined?slotsKeepingTo(establishedSlot,entries,staffId,ds,tentative):slotSearchOrder(slot);
         for(const trySlot of trySlots){
           const slotTaken=entries.some(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
-          const usedElsewhere=entries.filter(e=>e.staffId===staffId&&e.dateStr===ds&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+          const usedElsewhere=otherSlotUse(entries,staffId,ds,trySlot,tentative);
           const available=Math.max(0,Math.round((ph-usedElsewhere)*2)/2);
           if(available>0.001){
             const deducted=Math.min(available,remaining);
@@ -386,7 +410,7 @@ function buildAutoFill(startDateStr, totalHours, productiveHoursPerDay, staffId,
 // every later day sticks to that same slot instead of re-picking whichever
 // one's free. Returns rows shaped like buildAutoFill's own output -
 // dateStr, hours, staffId, slot - ready to insert directly.
-function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, staffList, subItemId) {
+function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, staffList, subItemId, tentative=false) {
   if (!totalHours||totalHours<=0||staffIds.length===0) return [];
   let remaining=totalHours;
   let pool=entries;
@@ -409,11 +433,11 @@ function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, s
       staffIds.forEach(sid=>{
         const sf=staffList.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
-        const trySlots=establishedSlots.has(sid)?[establishedSlots.get(sid)]:slotSearchOrder(slot);
+        const trySlots=establishedSlots.has(sid)?slotsKeepingTo(establishedSlots.get(sid),pool,sid,ds,tentative):slotSearchOrder(slot);
         for(const trySlot of trySlots){
           const slotTaken=pool.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
-          const usedElsewhere=pool.filter(e=>e.staffId===sid&&e.dateStr===ds&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+          const usedElsewhere=otherSlotUse(pool,sid,ds,trySlot,tentative);
           const available=Math.max(0,Math.round((ph-usedElsewhere)*2)/2);
           if(available>0.001){candidates.push({sid,ph,cap:available,slot:trySlot});break;}
         }
@@ -429,7 +453,7 @@ function buildGroupAutoFill(staffIds, totalHours, startDateStr, slot, entries, s
             const party=parties.find(x=>x.sid===p.sid);
             const row={dateStr:ds,hours:p.hours,staffId:p.sid,slot:party.slot};
             rows.push(row);
-            pool=[...pool,row];
+            pool=[...pool,{...row,isTentative:tentative}];
             started.add(p.sid);
             if(!establishedSlots.has(p.sid))establishedSlots.set(p.sid,party.slot);
           }
@@ -453,8 +477,17 @@ const SEARCH_HORIZON_DAYS=3650;
 // genuinely full, not "throw away a perfectly good same-slot fit just
 // because the other slot's search happens to be tried first."
 function slotSearchOrder(preferredSlot){ return preferredSlot===1?[1,0]:[0,1]; }
+// An item sticks to the slot it started in (see buildAutoFill) - except
+// that confirmed work may use the other slot on a day where a tentative
+// entry sits in its usual one, so a tentative booking never pushes
+// confirmed work to a later day (TESTING_NOTES 2F #9a).
+function slotsKeepingTo(established, pool, sid, ds, tentative){
+  if(tentative)return[established];
+  const occupant=pool.find(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===established);
+  return occupant&&occupant.isTentative?[established,established===1?0:1]:[established];
+}
 
-function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff) {
+function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff, tentative=false) {
   const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
   let cur=parseISO(startStr);
   for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
@@ -469,7 +502,7 @@ function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff)
           const slotTaken=entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===slot);
           if(slotTaken)return false;
           const ph=Number(staff?.find(s=>s.id===sid)?.productiveHours)||8;
-          const usedElsewhere=entries.filter(e=>e.staffId===sid&&e.dateStr===ds&&e.slot!==slot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+          const usedElsewhere=otherSlotUse(entries,sid,ds,slot,tentative);
           return Math.max(0,Math.round((ph-usedElsewhere)*2)/2)>0.001;
         });
         if(ok)return{dateStr:ds,slot};
@@ -486,30 +519,30 @@ function nextAvailableDate(staffIds, entries, fromDateStr, preferredSlot, staff)
 // has genuine room, buildAutoFill's own day-by-day capacity/slot handling
 // takes it from there (including any later partial days or gaps), so this
 // only needs to answer for the one day being considered as a candidate.
-function personalBlockFits(sid, ph, slot, entries, startDateStr) {
+function personalBlockFits(sid, ph, slot, entries, startDateStr, tentative=false) {
   if(isWeekend(parseISO(startDateStr)))return false;
   return slotSearchOrder(slot).some(trySlot=>{
     const slotTaken=entries.some(e=>e.staffId===sid&&e.dateStr===startDateStr&&e.slot===trySlot);
     if(slotTaken)return false;
-    const usedElsewhere=entries.filter(e=>e.staffId===sid&&e.dateStr===startDateStr&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+    const usedElsewhere=otherSlotUse(entries,sid,startDateStr,trySlot,tentative);
     return Math.max(0,Math.round((ph-usedElsewhere)*2)/2)>0.001;
   });
 }
 // Like nextAvailableDate, but for an auto-fill block that spans multiple
 // days per person: checks that EVERY person actually has room to start on
 // startDateStr, not just the first one. staffShares is [{sid,ph,hours}].
-function blockFits(staffShares, slot, entries, startDateStr) {
-  return staffShares.every(({sid,ph})=>personalBlockFits(sid,ph,slot,entries,startDateStr));
+function blockFits(staffShares, slot, entries, startDateStr, tentative=false) {
+  return staffShares.every(({sid,ph})=>personalBlockFits(sid,ph,slot,entries,startDateStr,tentative));
 }
 
-function nextAvailableBlockDate(staffShares, entries, fromDateStr, preferredSlot) {
+function nextAvailableBlockDate(staffShares, entries, fromDateStr, preferredSlot, tentative=false) {
   const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
   let cur=parseISO(startStr);
   for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
     if(!isWeekend(cur)){
       const ds=isoDate(cur);
       for(const slot of slotSearchOrder(preferredSlot)){
-        if(blockFits(staffShares,slot,entries,ds))return{dateStr:ds,slot};
+        if(blockFits(staffShares,slot,entries,ds,tentative))return{dateStr:ds,slot};
       }
     }
     cur=addDays(cur,1);
@@ -524,7 +557,7 @@ function nextAvailableBlockDate(staffShares, entries, fromDateStr, preferredSlot
 // day by day instead of pre-splitting a fixed share per person up front).
 // This just gives "First Available" something sensible to put in the Start
 // Date field.
-function earliestAnyAvailable(staffIds, entries, staffList, fromDateStr, preferredSlot) {
+function earliestAnyAvailable(staffIds, entries, staffList, fromDateStr, preferredSlot, tentative=false) {
   const startStr=fromDateStr&&fromDateStr>=todayStr?fromDateStr:todayStr;
   let cur=parseISO(startStr);
   for(let i=0;i<SEARCH_HORIZON_DAYS;i++){
@@ -536,7 +569,7 @@ function earliestAnyAvailable(staffIds, entries, staffList, fromDateStr, preferr
         for(const trySlot of slotSearchOrder(preferredSlot)){
           const slotTaken=entries.some(e=>e.staffId===sid&&e.dateStr===ds&&e.slot===trySlot);
           if(slotTaken)continue;
-          const usedElsewhere=entries.filter(e=>e.staffId===sid&&e.dateStr===ds&&e.slot!==trySlot).reduce((a,e)=>a+(Number(e.hours)||0),0);
+          const usedElsewhere=otherSlotUse(entries,sid,ds,trySlot,tentative);
           if(Math.max(0,Math.round((ph-usedElsewhere)*2)/2)>0.001)return{dateStr:ds,slot:trySlot};
         }
       }
@@ -747,7 +780,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isGenuinePartial,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isGenuinePartial,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp,isTentative}) {
   // An entry the background correction has reduced to nothing (e.g. another
   // staff member now covers the whole day/budget) shouldn't be labelled
   // "over-run" or any other budget-math term - it has zero real hours left,
@@ -773,6 +806,8 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
   // A past-dated entry is locked, full stop - not editable by anyone
   // (including admins), so none of the interaction affordances apply to it.
   const editable=canEdit&&!isPastDate;
+  // Tentative (TESTING_NOTES 2F #9a): faded like a past entry, dashed
+  // border, and a "Tentative" label - still fully editable.
   return (
     <div
       draggable={!isMobile&&editable&&!copyMode&&!moveMode}
@@ -780,7 +815,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
       onDragEnd={editable?onDragEnd:undefined}
       onClick={editable?onClick:undefined}
       onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px solid ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate||isTentative?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {isMobile?(
         <>
@@ -789,6 +824,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
             {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
           {isCatchUp&&<div style={{fontSize:10,fontWeight:700,color:"#0891B2",lineHeight:1.3,whiteSpace:"nowrap"}}>↺ Catch-up</div>}
+          {isTentative&&<div style={{fontSize:10,fontWeight:700,color:job.textColor,lineHeight:1.3,whiteSpace:"nowrap"}}>Tentative</div>}
           {isOvercommitted&&<div style={{fontSize:10,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted{showShortfall?` · ${itemShortfall}h short`:""}</div>}
         </>
       ):(
@@ -798,6 +834,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
             {subItem?subItem.name:"General"} · <span style={{color:flagColor,fontWeight:(isOverRun||isUnderCap)?700:undefined}}>{hoursLabel}</span>
           </div>
           {isCatchUp&&<div style={{fontSize:9,fontWeight:700,color:"#0891B2",lineHeight:1.3,whiteSpace:"nowrap"}}>↺ Catch-up</div>}
+          {isTentative&&<div style={{fontSize:9,fontWeight:700,color:job.textColor,lineHeight:1.3,whiteSpace:"nowrap"}}>Tentative</div>}
           {isOvercommitted&&<div style={{fontSize:9,fontWeight:700,color:"#7C3AED",lineHeight:1.3,whiteSpace:"nowrap"}}>⚠ Overcommitted{showShortfall?` · ${itemShortfall}h short`:""}</div>}
         </>
       )}
@@ -1299,7 +1336,7 @@ function MainApp({currentUser,onLogout}) {
   // or items it touched.
   function snapshotEntries(pool){ return pool.map(e=>({...e})); }
 
-  function entrySignature(e){ return `${e.id}|${e.staffId}|${e.jobId||""}|${e.subItemId||""}|${e.dateStr}|${e.slot}|${e.hours}|${e.miscNote||""}|${e.hoursLocked?1:0}|${e.createdAt}`; }
+  function entrySignature(e){ return `${e.id}|${e.staffId}|${e.jobId||""}|${e.subItemId||""}|${e.dateStr}|${e.slot}|${e.hours}|${e.miscNote||""}|${e.hoursLocked?1:0}|${e.isTentative?1:0}|${e.createdAt}`; }
 
   function pushUndoSnapshot(before, after){
     const b=before.map(entrySignature).sort().join("\n");
@@ -1319,7 +1356,7 @@ function MainApp({currentUser,onLogout}) {
   function cellKey(e){ return `${e.staffId}|${e.dateStr}|${e.slot}`; }
 
   function sameEntry(a,b){
-    return a.jobId===b.jobId&&a.subItemId===b.subItemId&&Number(a.hours)===Number(b.hours)&&(a.miscNote||"")===(b.miscNote||"")&&!!a.hoursLocked===!!b.hoursLocked&&a.createdAt===b.createdAt;
+    return a.jobId===b.jobId&&a.subItemId===b.subItemId&&Number(a.hours)===Number(b.hours)&&(a.miscNote||"")===(b.miscNote||"")&&!!a.hoursLocked===!!b.hoursLocked&&!!a.isTentative===!!b.isTentative&&a.createdAt===b.createdAt;
   }
 
   // Syncs the database (and returns the resulting pool) to exactly match
@@ -1377,7 +1414,7 @@ function MainApp({currentUser,onLogout}) {
       }
       if(toPatch.length)
         await Promise.all(toPatch.map(({cur,target})=>
-          db("PATCH","entries",{...entryFields(target),created_at:target.createdAt},`?id=eq.${cur.id}`)
+          db("PATCH","entries",{...entryFields(target),...(cur.isTentative&&!target.isTentative?{is_tentative:false}:{}),created_at:target.createdAt},`?id=eq.${cur.id}`)
         ));
       const untouched=pairs.filter(({cur,target})=>sameEntry(cur,target)).map(({cur})=>cur);
       const patched=toPatch.map(({cur,target})=>({...target,id:cur.id}));
@@ -1492,7 +1529,7 @@ function MainApp({currentUser,onLogout}) {
       }
       setJobs(jobsData.map(j=>({id:j.id,jobNo:j.job_no,name:j.name,bgColor:j.bg_color,borderColor:j.border_color,textColor:j.text_color,completed:!!j.completed})));
       const loadedSubItems=subData.map(s=>({id:s.id,jobId:s.job_id,name:s.name,totalHours:Number(s.total_hours)||0}));
-      const loadedEntries=entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up}));
+      const loadedEntries=entriesData.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up,isTentative:!!e.is_tentative}));
       loadedStateRef.current.entries.add(loadedEntries);
       loadedStateRef.current.subItems.add(loadedSubItems);
       setSubItems(loadedSubItems);
@@ -1560,10 +1597,16 @@ function MainApp({currentUser,onLogout}) {
     const byDay={};
     for(const e of entries){const k=`${e.staffId}|${e.dateStr}`;(byDay[k]=byDay[k]||[]).push(e);}
     const out=new Set();
-    Object.entries(byDay).forEach(([k,list])=>{
-      if(new Set(list.map(e=>e.slot)).size<2||!list.some(e=>e.hoursLocked))return;
-      const cap=Number(staff.find(s=>s.id===list[0].staffId)?.productiveHours)||8;
-      if(list.reduce((a,e)=>a+(Number(e.hours)||0),0)>cap+0.05)out.add(k);
+    Object.entries(byDay).forEach(([k,all])=>{
+      // A tentative entry never puts the day over for the confirmed one
+      // beside it (TESTING_NOTES 2F #9a) - only entries of the same kind
+      // are added together. Confirming the tentative one later can raise
+      // the Conflict (the confirm warning says so first).
+      [all.filter(e=>!e.isTentative),all.filter(e=>e.isTentative)].forEach(list=>{
+        if(new Set(list.map(e=>e.slot)).size<2||!list.some(e=>e.hoursLocked))return;
+        const cap=Number(staff.find(s=>s.id===list[0].staffId)?.productiveHours)||8;
+        if(list.reduce((a,e)=>a+(Number(e.hours)||0),0)>cap+0.05)out.add(k);
+      });
     });
     return out;
   },[entries,staff]);
@@ -1791,6 +1834,27 @@ function MainApp({currentUser,onLogout}) {
     return pool.filter(e=>!deleteIds.has(e.id)).map(e=>patchMap.has(e.id)?{...e,hours:patchMap.get(e.id)}:e);
   }
 
+  // Confirmed work just placed beside a tentative entry takes first claim on
+  // that person's day, so the tentative entry shrinks to what's left and
+  // the rest of its item moves to the end of its schedule - the same as a
+  // normal entry giving way (TESTING_NOTES 2F #9a, user confirmed). Call
+  // after any action that places, moves or changes confirmed work, with
+  // the pool from before the action.
+  async function settleTentativeBeside(before,pool){
+    const prev=new Map(before.map(e=>[e.id,e]));
+    const placed=pool.filter(e=>{const b=prev.get(e.id);return !b||b.staffId!==e.staffId||b.dateStr!==e.dateStr||b.slot!==e.slot||Number(b.hours)!==Number(e.hours)||!!b.isTentative!==!!e.isTentative;});
+    const ids=new Set();
+    placed.forEach(e=>{
+      if(!e||e.isTentative)return;
+      pool.forEach(o=>{if(o.isTentative&&!o.isCatchUp&&o.subItemId&&o.staffId===e.staffId&&o.dateStr===e.dateStr&&o.slot!==e.slot)ids.add(o.subItemId);});
+    });
+    for(const subItemId of ids){
+      pool=await recalculateItem(subItemId,pool,[]);
+      pool=await extendItemIfShort(subItemId,pool);
+    }
+    return pool;
+  }
+
   // A move/copy can swap in staff with less combined daily capacity across
   // an item's existing days than it had before (e.g. lower-productive-hours
   // people replacing higher ones on the same days) - computeItemPlan only
@@ -1816,9 +1880,12 @@ function MainApp({currentUser,onLogout}) {
     const continuingStaffIds=[...new Set(itemEntries.filter(e=>e.dateStr===lastDate&&!e.hoursLocked).map(e=>e.staffId))];
     if(continuingStaffIds.length===0)return pool;
     const startDateStr=isoDate(addWorkingDays(parseISO(lastDate),1));
-    const extension=buildGroupAutoFill(continuingStaffIds,shortfall,startDateStr,0,pool,staff,subItemId);
+    // Carries on as whatever the run it continues was - a tentative run
+    // extends as tentative, a confirmed one as confirmed.
+    const tentative=itemEntries.some(e=>e.dateStr===lastDate&&!e.hoursLocked&&e.isTentative);
+    const extension=buildGroupAutoFill(continuingStaffIds,shortfall,startDateStr,0,pool,staff,subItemId,tentative);
     if(extension.length===0)return pool;
-    const rows=extension.map(r=>({staff_id:r.staffId,job_id:si.jobId,sub_item_id:subItemId,date_str:r.dateStr,slot:r.slot,hours:r.hours,misc_note:null,hours_locked:false}));
+    const rows=extension.map(r=>({staff_id:r.staffId,job_id:si.jobId,sub_item_id:subItemId,date_str:r.dateStr,slot:r.slot,hours:r.hours,misc_note:null,hours_locked:false,...(tentative?{is_tentative:true}:{})}));
     const inserted=await db("POST","entries",rows);
     const newEntries=inserted.map(mapInsertedEntry);
     setEntries(prev=>[...prev,...newEntries]);
@@ -1892,7 +1959,10 @@ function MainApp({currentUser,onLogout}) {
           // regardless of this flag). A Misc entry manually typed in
           // (autoFill off) needs the exact same protection a job entry gets.
           hours_locked:!data.autoFill,
-          is_catch_up:!!data.isCatchUp
+          is_catch_up:!!data.isCatchUp,
+          // Only sent when set, so saving still works on a database that
+          // doesn't have the column yet (see TESTING_NOTES 2F #9a).
+          ...(data.entryType!=="misc"&&data.isTentative?{is_tentative:true}:{})
         }));
         if(conflicts.length>0){
           setSaving(false);
@@ -1901,7 +1971,7 @@ function MainApp({currentUser,onLogout}) {
             onConfirm:async()=>{
               setSaving(true);
               const inserted=await db("POST","entries",buildRows(valid));
-              const confirmMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up}));
+              const confirmMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up,isTentative:!!e.is_tentative}));
               setEntries(prev=>[...prev,...confirmMapped]);
               pushUndoSnapshot(_u,[..._u,...confirmMapped]);
               setConflictAlert(null);setEntryModal(null);setTab("schedule");setSaving(false);
@@ -1914,7 +1984,7 @@ function MainApp({currentUser,onLogout}) {
         // no hours left and Schedule Anyway was chosen (see askNoRoom).
         const insertNew=async(forcedKeys)=>{
           const inserted=await db("POST","entries",buildRows(valid).map(r=>forcedKeys.has(noRoomKey(r.staff_id,r.date_str))?{...r,hours_locked:true}:r));
-          const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up}));
+          const newMapped=inserted.map(e=>({id:e.id,staffId:e.staff_id,jobId:e.job_id,subItemId:e.sub_item_id,dateStr:e.date_str,slot:e.slot,hours:Number(e.hours),miscNote:e.misc_note||null,createdAt:e.created_at,hoursLocked:!!e.hours_locked,isCatchUp:!!e.is_catch_up,isTentative:!!e.is_tentative}));
           setEntries(prev=>[...prev,...newMapped]);
           let pool=[..._u,...newMapped];
           if(data.entryType!=="misc"&&data.subItemId&&newMapped.length>0){
@@ -1940,11 +2010,12 @@ function MainApp({currentUser,onLogout}) {
             if(!forcedKeys.has(noRoomKey(created.staffId,created.dateStr)))
               pool=await unlockSiblingSlot(pool,created.staffId,created.dateStr,created.slot===0?1:0,created.id);
           }
+          pool=await settleTentativeBeside(_u,pool);
           pushUndoSnapshot(_u,pool);
         };
         // No hours left for that person that day: ask first (see askNoRoom).
         // Go Back returns to the form with nothing saved.
-        const newNoRoom=noRoomDays(valid.map(p=>({staffId:p.staffId||data.staffId,dateStr:p.dateStr,slot:p.slot!==undefined?p.slot:data.slot,hours:p.hours})),entries);
+        const newNoRoom=noRoomDays(valid.map(p=>({staffId:p.staffId||data.staffId,dateStr:p.dateStr,slot:p.slot!==undefined?p.slot:data.slot,hours:p.hours,isTentative:data.entryType!=="misc"&&!!data.isTentative})),entries);
         if(newNoRoom.length>0){
           setSaving(false);
           if(!(await askNoRoom(newNoRoom)))return;
@@ -1968,6 +2039,20 @@ function MainApp({currentUser,onLogout}) {
         // even though it's the one that just showed up.
         const relocated=prevEntry&&(prevEntry.dateStr!==data.dateStr||prevEntry.slot!==data.slot);
         const newCreatedAt=relocated?new Date().toISOString():undefined;
+        // Tentative switch (TESTING_NOTES 2F #9a): ticking it makes this entry
+        // tentative; unticking it on a tentative entry confirms every
+        // tentative entry of the item, warning first about any day that
+        // would go over someone's max (Cancel = nothing saved).
+        const nowTentative=data.entryType!=="misc"&&!!data.isTentative;
+        const confirmItem=!!prevEntry?.isTentative&&!nowTentative&&data.entryType!=="misc"&&data.subItemId?data.subItemId:null;
+        let confirmDays=[];
+        if(confirmItem){
+          const preview=entries.map(e=>e.id===data.id?{...e,staffId:data.staffId,dateStr:data.dateStr,slot:data.slot,hours:data.hours,subItemId:confirmItem,isTentative:true}:e);
+          confirmDays=confirmOverMaxDays(confirmItem,preview);
+          setSaving(false);
+          if(!(await askConfirmTentative(confirmItem,confirmDays)))return;
+          setSaving(true);
+        }
         // A manual edit never shrinks the person's OTHER entry that day
         // (TESTING_NOTES.md 2E #15, user's decision - replaces the old "the
         // other slot yields to a fresh edit" rule). If the typed hours would
@@ -1976,9 +2061,13 @@ function MainApp({currentUser,onLogout}) {
         // and shows the red "⚠ Conflict"; Go Back returns to the form.
         const editStaff=staff.find(s=>s.id===data.staffId);
         const editCap=Number(editStaff?.productiveHours)||8;
-        const editOthers=entries.filter(e=>e.staffId===data.staffId&&e.dateStr===data.dateStr&&e.slot!==data.slot&&e.id!==data.id);
+        // A tentative entry beside a confirmed one never counts against it
+        // (TESTING_NOTES 2F #9a); a tentative entry works around everything.
+        const editTentative=data.entryType!=="misc"&&!!data.isTentative;
+        const editOthers=entries.filter(e=>e.staffId===data.staffId&&e.dateStr===data.dateStr&&e.slot!==data.slot&&e.id!==data.id&&(editTentative||!e.isTentative));
         const editOthersHours=editOthers.reduce((a,e)=>a+(Number(e.hours)||0),0);
-        const editOverMax=editOthers.length>0&&(Number(data.hours)||0)+editOthersHours>editCap+0.05;
+        // Confirming a tentative item already warned about this day above.
+        const editOverMax=!confirmItem&&editOthers.length>0&&(Number(data.hours)||0)+editOthersHours>editCap+0.05;
         if(editOverMax){
           const otherName=editOthers.map(e=>e.miscNote||subItems.find(si=>si.id===e.subItemId)?.name||"the other entry").join(" / ");
           setSaving(false);
@@ -2011,10 +2100,11 @@ function MainApp({currentUser,onLogout}) {
           date_str:data.dateStr,slot:data.slot,hours:data.hours,
           misc_note:data.entryType==="misc"?data.miscNote:null,
           hours_locked:hoursLocked,
+          ...(nowTentative&&!prevEntry?.isTentative?{is_tentative:true}:{}),
           ...(newCreatedAt?{created_at:newCreatedAt}:{})
         },`?id=eq.${data.id}`);
-        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
-        let pool=_u.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:(keepOtherIds?.has(e.id)?{...e,hoursLocked:true}:e));
+        setEntries(prev=>prev.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,isTentative:confirmItem?!!prevEntry?.isTentative:nowTentative,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:e));
+        let pool=_u.map(e=>e.id===data.id?{...e,staffId:data.staffId,jobId:data.jobId||null,subItemId:data.entryType==="misc"?null:data.subItemId||null,dateStr:data.dateStr,slot:data.slot,hours:data.hours,miscNote:data.entryType==="misc"?data.miscNote:null,hoursLocked,isTentative:confirmItem?!!prevEntry?.isTentative:nowTentative,...(newCreatedAt?{createdAt:newCreatedAt}:{})}:(keepOtherIds?.has(e.id)?{...e,hoursLocked:true}:e));
         if(prevEntry){
           if(hoursLocked&&data.subItemId){
             pool=await unlockStaleLocksAt(data.subItemId,data.dateStr,data.id,pool,keepOtherIds);
@@ -2036,6 +2126,8 @@ function MainApp({currentUser,onLogout}) {
         // as deliberate a manual edit as a locked job entry - the sibling
         // slot's own item should unlock and settle around it too.
         if(!editOverMax)pool=await unlockSiblingSlot(pool,data.staffId,data.dateStr,data.slot===0?1:0,data.id);
+        if(confirmItem)pool=await applyConfirmTentative(confirmItem,pool,confirmDays);
+        pool=await settleTentativeBeside(_u,pool);
         pushUndoSnapshot(_u,pool);
         }
       }
@@ -2296,7 +2388,7 @@ function MainApp({currentUser,onLogout}) {
       // pop-up for the whole group (see askNoRoom). Go Back = nothing moves.
       // Schedule Anyway = the whole group moves; those placements keep
       // their full hours, locked. All or nothing - never split.
-      const groupPlacements=activeIds.map(id=>({id,staffId:idToStaff[id],dateStr:idToDate[id],slot:idToSlot[id],hours:Number(entries.find(x=>x.id===id)?.hours)||0}));
+      const groupPlacements=activeIds.map(id=>({id,staffId:idToStaff[id],dateStr:idToDate[id],slot:idToSlot[id],hours:Number(entries.find(x=>x.id===id)?.hours)||0,isTentative:!!entries.find(x=>x.id===id)?.isTentative}));
       const groupNoRoom=noRoomDays(groupPlacements,entries,movingIds);
       if(groupNoRoom.length>0&&!(await askNoRoom(groupNoRoom)))return;
       const noRoomSet=new Set(groupNoRoom.map(d=>noRoomKey(d.staffId,d.dateStr)));
@@ -2316,10 +2408,10 @@ function MainApp({currentUser,onLogout}) {
         const en=entries.find(x=>x.id===id);
         const newStaffId=idToStaff[id],newDate=idToDate[id],newSlot=idToSlot[id];
         const oldSibling=entries.find(o=>o.id!==id&&o.staffId===en.staffId&&o.dateStr===en.dateStr&&o.slot!==en.slot);
-        const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,en);
+        const wasCappedByOldSibling=oldSibling&&otherCountsAgainst(en,oldSibling);
         const oldStaffCap=Number(staff.find(s=>s.id===en.staffId)?.productiveHours)||8;
         const wasOldStaffFullDay=Math.abs(Number(en.hours)-oldStaffCap)<0.05;
-        const newSibling=entries.find(o=>o.id!==id&&o.staffId===newStaffId&&o.dateStr===newDate&&o.slot!==newSlot);
+        const newSibling=entries.find(o=>o.id!==id&&o.staffId===newStaffId&&o.dateStr===newDate&&o.slot!==newSlot&&(en.isTentative||!o.isTentative));
         // Same guard as handleDrop: don't force a full personal day onto an
         // entry landing back on a day another staff member is also working
         // the same joinery item - that's a shared/split budget day, and the
@@ -2402,6 +2494,7 @@ function MainApp({currentUser,onLogout}) {
           pool=mergeItemPools(settledPool,branches);
         }
         if(skippedIds.size>0)setError(`${skippedIds.size} placement${skippedIds.size===1?"":"s"} couldn't land - both slots were already taken. Extending the schedule to cover it.`);
+        pool=await settleTentativeBeside(_u,pool);
         pushUndoSnapshot(_u,pool);
       }catch(err){
         setError("Failed to move entries - reverted.");
@@ -2459,7 +2552,7 @@ function MainApp({currentUser,onLogout}) {
       // pop-up for the whole group (see askNoRoom). Go Back = no copies.
       // Schedule Anyway = every copy is made; those keep their full hours,
       // locked. All or nothing - never split.
-      const copyPlacements=toInsert.map(({en,newDate,newSlot,newStaffId})=>({staffId:newStaffId,dateStr:newDate,slot:newSlot,hours:Number(en.hours)||0}));
+      const copyPlacements=toInsert.map(({en,newDate,newSlot,newStaffId})=>({staffId:newStaffId,dateStr:newDate,slot:newSlot,hours:Number(en.hours)||0,isTentative:!!en.isTentative}));
       const copyNoRoom=noRoomDays(copyPlacements,entries);
       if(copyNoRoom.length>0&&!(await askNoRoom(copyNoRoom)))return;
       const copyNoRoomSet=new Set(copyNoRoom.map(d=>noRoomKey(d.staffId,d.dateStr)));
@@ -2495,14 +2588,15 @@ function MainApp({currentUser,onLogout}) {
       const rows=toInsert.map(({en,newDate,newSlot,newStaffId},idx)=>({
         staff_id:newStaffId,job_id:en.jobId||null,sub_item_id:en.subItemId||null,
         date_str:newDate,slot:newSlot,hours:en.hours,misc_note:en.miscNote||null,
-        hours_locked:forcedFlags[idx],is_catch_up:isCatchUpFlags[idx]
+        hours_locked:forcedFlags[idx],is_catch_up:isCatchUpFlags[idx],
+        ...(en.isTentative?{is_tentative:true}:{})
       }));
       // Show the pasted copies immediately with temporary ids, swapped for the
       // real ones once the server confirms - removed again if the save fails.
       const tempEntries=toInsert.map(({en,newDate,newSlot,newStaffId},i)=>({
         id:`temp_copy_${Date.now()}_${i}`,staffId:newStaffId,jobId:en.jobId||null,subItemId:en.subItemId||null,
         dateStr:newDate,slot:newSlot,hours:en.hours,miscNote:en.miscNote||null,createdAt:new Date(Date.now()+i).toISOString(),
-        hoursLocked:forcedFlags[i],isCatchUp:isCatchUpFlags[i]
+        hoursLocked:forcedFlags[i],isCatchUp:isCatchUpFlags[i],isTentative:!!en.isTentative
       }));
       setEntries(prev=>[...prev,...tempEntries]);
       if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
@@ -2514,7 +2608,7 @@ function MainApp({currentUser,onLogout}) {
       const tempIds=tempEntries.map(t=>t.id);
       try{
         const inserted=await db("POST","entries",rows);
-        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked,isCatchUp:!!i.is_catch_up}));
+        const newEntries=inserted.map(i=>({id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked,isCatchUp:!!i.is_catch_up,isTentative:!!i.is_tentative}));
         setEntries(prev=>[...prev.filter(e=>!tempIds.includes(e.id)),...newEntries]);
         // Each copy carries its own source's hours over verbatim - for any
         // that landed on a day its item is already scheduled on, recalculate
@@ -2543,6 +2637,7 @@ function MainApp({currentUser,onLogout}) {
           }));
           pool=mergeItemPools(settledPool,branches);
         }
+        pool=await settleTentativeBeside(_u,pool);
         pushUndoSnapshot(_u,pool);
         // A single copy that landed as Catch-up Hours needs a look - open
         // its own entry straight into the ESE modal so the number can be
@@ -2581,8 +2676,14 @@ function MainApp({currentUser,onLogout}) {
     const out=new Map();
     placements.forEach((p,i)=>{
       const cap=Number(staff.find(s=>s.id===p.staffId)?.productiveHours)||8;
-      const used=pool.filter(e=>e.staffId===p.staffId&&e.dateStr===p.dateStr&&!ignoreIds?.has(e.id)).reduce((a,e)=>a+(Number(e.hours)||0),0)
-        +placements.filter((q,j)=>j!==i&&q.staffId===p.staffId&&q.dateStr===p.dateStr&&q.slot!==p.slot).reduce((a,q)=>a+(Number(q.hours)||0),0);
+      // Tentative rules (see otherSlotUse): confirmed work doesn't count a
+      // tentative entry's hours; tentative work counts everything, and a
+      // second tentative entry that day means no room.
+      const counts=x=>p.isTentative||!x.isTentative;
+      const sameDay=[...pool.filter(e=>e.staffId===p.staffId&&e.dateStr===p.dateStr&&!ignoreIds?.has(e.id)),
+        ...placements.filter((q,j)=>j!==i&&q.staffId===p.staffId&&q.dateStr===p.dateStr&&q.slot!==p.slot)];
+      const used=p.isTentative&&sameDay.some(x=>x.isTentative&&x.slot!==p.slot)?cap
+        :sameDay.filter(counts).reduce((a,x)=>a+(Number(x.hours)||0),0);
       if(cap-used<=0.05){
         const k=`${p.staffId}|${p.dateStr}`;
         if(!out.has(k))out.set(k,{staffId:p.staffId,dateStr:p.dateStr,used:Math.round(Math.min(used,cap)*2)/2,cap});
@@ -2591,6 +2692,66 @@ function MainApp({currentUser,onLogout}) {
     return [...out.values()];
   }
   function noRoomKey(staffId,dateStr){return `${staffId}|${dateStr}`;}
+
+  // ── Confirming a tentative item (TESTING_NOTES 2F #9a) ──
+  // Every tentative entry of the item becomes a normal booking. Days where
+  // that puts someone over their daily max: warn first; Confirm Anyway
+  // locks both entries that day so they keep their hours and show the red
+  // "⚠ Conflict" (same as Schedule Anyway). Cancel changes nothing.
+  function confirmOverMaxDays(subItemId,pool){
+    const confirming=pool.filter(e=>e.subItemId===subItemId&&e.isTentative);
+    const ids=new Set(confirming.map(e=>e.id));
+    const out=new Map();
+    confirming.forEach(e=>{
+      const cap=Number(staff.find(s=>s.id===e.staffId)?.productiveHours)||8;
+      const day=pool.filter(o=>o.staffId===e.staffId&&o.dateStr===e.dateStr&&(!o.isTentative||ids.has(o.id)));
+      if(new Set(day.map(o=>o.slot)).size<2)return;
+      if(day.reduce((a,o)=>a+(Number(o.hours)||0),0)>cap+0.05)out.set(noRoomKey(e.staffId,e.dateStr),{staffId:e.staffId,dateStr:e.dateStr,cap});
+    });
+    return [...out.values()].sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+  }
+  function askConfirmTentative(subItemId,days){
+    if(days.length===0)return Promise.resolve(true);
+    const name=subItems.find(si=>si.id===subItemId)?.name||"this item";
+    const label=ds=>parseISO(ds).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"}).replace(",","");
+    const byStaff=new Map();
+    days.forEach(d=>{(byStaff.get(d.staffId)||byStaff.set(d.staffId,[]).get(d.staffId)).push(d);});
+    const andList=a=>a.length<=1?a.join(""):`${a.slice(0,-1).join(", ")} and ${a[a.length-1]}`;
+    const parts=[...byStaff.entries()].map(([sid,list])=>`${staff.find(s=>s.id===sid)?.name||"Someone"} over the ${list[0].cap}hrs daily max on ${andList(list.map(d=>label(d.dateStr)))}`);
+    return new Promise(resolve=>setConflictAlert({
+      title:"⚠ Confirm Booking",
+      message:`Confirming ${name} puts ${parts.join("; and ")}. Those days will show a conflict. Consider moving hours to the next day. Confirm anyway?`,
+      confirmLabel:"Confirm Anyway",cancelLabel:"Cancel",
+      onConfirm:()=>{setConflictAlert(null);resolve(true);},
+      onCancel:()=>{setConflictAlert(null);resolve(false);},
+    }));
+  }
+  async function applyConfirmTentative(subItemId,pool,days){
+    const ids=pool.filter(e=>e.subItemId===subItemId&&e.isTentative).map(e=>e.id);
+    if(ids.length===0)return pool;
+    const keys=new Set(days.map(d=>noRoomKey(d.staffId,d.dateStr)));
+    const lockIds=pool.filter(e=>keys.has(noRoomKey(e.staffId,e.dateStr))&&!e.hoursLocked).map(e=>e.id);
+    await db("PATCH","entries",{is_tentative:false},`?id=in.(${ids.join(",")})`);
+    if(lockIds.length>0)await db("PATCH","entries",{hours_locked:true},`?id=in.(${lockIds.join(",")})`);
+    const idSet=new Set(ids),lockSet=new Set(lockIds);
+    const fix=e=>idSet.has(e.id)||lockSet.has(e.id)?{...e,...(idSet.has(e.id)?{isTentative:false}:{}),...(lockSet.has(e.id)?{hoursLocked:true}:{})}:e;
+    setEntries(prev=>prev.map(fix));
+    return pool.map(fix);
+  }
+  // The Job Summary "Confirm Booking" button.
+  async function confirmTentativeItem(subItemId){
+    const _u=snapshotEntries(entries);
+    const days=confirmOverMaxDays(subItemId,_u);
+    if(!(await askConfirmTentative(subItemId,days)))return;
+    try{
+      let pool=await applyConfirmTentative(subItemId,_u,days);
+      pool=await settleTentativeBeside(_u,pool);
+      pushUndoSnapshot(_u,pool);
+    }catch(err){
+      setError("Failed to confirm booking - reverted.");
+      setEntries(()=>_u);
+    }
+  }
   // Shows the existing Scheduling Conflict pop-up and resolves true for
   // Schedule Anyway, false for Go Back.
   function askNoRoom(days){
@@ -2629,7 +2790,7 @@ function MainApp({currentUser,onLogout}) {
       }
       // No hours left for that person that day: ask first (see askNoRoom).
       dragEntry.current=null;
-      const copyNoRoom=noRoomDays([{staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:entry.hours}],entries);
+      const copyNoRoom=noRoomDays([{staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:entry.hours,isTentative:!!entry.isTentative}],entries);
       const copyForced=copyNoRoom.length>0;
       if(copyForced&&!(await askNoRoom(copyNoRoom)))return;
       // Same as performGroupCopy: a copy never inherits the source's lock,
@@ -2647,12 +2808,12 @@ function MainApp({currentUser,onLogout}) {
         }
       }
       const tempId=`temp_copy_${Date.now()}`;
-      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString(),hoursLocked:copyForced,isCatchUp:entryIsCatchUp};
+      const tempEntry={id:tempId,staffId:toStaffId,jobId:entry.jobId||null,subItemId:entry.subItemId||null,dateStr:toDateStr,slot:toSlot,hours:entry.hours,miscNote:entry.miscNote||null,createdAt:new Date().toISOString(),hoursLocked:copyForced,isCatchUp:entryIsCatchUp,isTentative:!!entry.isTentative};
       setEntries(prev=>[...prev,tempEntry]);
       try{
-        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:copyForced,is_catch_up:entryIsCatchUp}]);
+        const inserted=await db("POST","entries",[{staff_id:toStaffId,job_id:entry.jobId||null,sub_item_id:entry.subItemId||null,date_str:toDateStr,slot:toSlot,hours:entry.hours,misc_note:entry.miscNote||null,hours_locked:copyForced,is_catch_up:entryIsCatchUp,...(entry.isTentative?{is_tentative:true}:{})}]);
         const i=inserted[0];
-        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked,isCatchUp:!!i.is_catch_up};
+        const newEntry={id:i.id,staffId:i.staff_id,jobId:i.job_id,subItemId:i.sub_item_id,dateStr:i.date_str,slot:i.slot,hours:Number(i.hours),miscNote:i.misc_note||null,createdAt:i.created_at,hoursLocked:!!i.hours_locked,isCatchUp:!!i.is_catch_up,isTentative:!!i.is_tentative};
         setEntries(prev=>[...prev.filter(en=>en.id!==tempId),newEntry]);
         // The copy just carries the source's hours over verbatim - if that
         // lands it on a day its item is already scheduled on, recalculate
@@ -2665,6 +2826,7 @@ function MainApp({currentUser,onLogout}) {
           pool=await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
           pool=await extendItemIfShort(entry.subItemId,pool);
         }
+        pool=await settleTentativeBeside(_u,pool);
         pushUndoSnapshot(_u,pool);
         if(entryIsCatchUp)openEditEntry(newEntry);
       }catch(err){
@@ -2675,7 +2837,7 @@ function MainApp({currentUser,onLogout}) {
     }
     // No hours left for that person that day: ask first (see askNoRoom).
     dragEntry.current=null;
-    const moveNoRoom=noRoomDays([{staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:entry.hours}],entries,new Set([entry.id]));
+    const moveNoRoom=noRoomDays([{staffId:toStaffId,dateStr:toDateStr,slot:toSlot,hours:entry.hours,isTentative:!!entry.isTentative}],entries,new Set([entry.id]));
     const moveForced=moveNoRoom.length>0;
     if(moveForced&&!(await askNoRoom(moveNoRoom)))return;
     const _u=snapshotEntries(entries);
@@ -2686,7 +2848,7 @@ function MainApp({currentUser,onLogout}) {
     // reduction caused by that old conflict survives long after the
     // conflict itself is gone (e.g. dragged away to an empty day).
     const oldSibling=entries.find(o=>o.id!==entry.id&&o.staffId===entry.staffId&&o.dateStr===entry.dateStr&&o.slot!==entry.slot);
-    const wasCappedByOldSibling=oldSibling&&wasScheduledFirst(oldSibling,entry);
+    const wasCappedByOldSibling=oldSibling&&otherCountsAgainst(entry,oldSibling);
     // Same idea for the other way an entry ends up short of a full day: it
     // was already using its PREVIOUS staff member's entire day (no sibling
     // involved at all), and moving it to someone with a higher cap should
@@ -2696,7 +2858,7 @@ function MainApp({currentUser,onLogout}) {
     // split across several staff) is never touched.
     const oldStaffCap=Number(staff.find(s=>s.id===entry.staffId)?.productiveHours)||8;
     const wasOldStaffFullDay=Math.abs(Number(entry.hours)-oldStaffCap)<0.05;
-    const newSibling=entries.find(o=>o.id!==entry.id&&o.staffId===toStaffId&&o.dateStr===toDateStr&&o.slot!==toSlot);
+    const newSibling=entries.find(o=>o.id!==entry.id&&o.staffId===toStaffId&&o.dateStr===toDateStr&&o.slot!==toSlot&&(entry.isTentative||!o.isTentative));
     // Neither restoration should hand this entry a full personal day when
     // it's landing back on a day another staff member is ALSO working the
     // same joinery item - that's a shared/split budget day, not a solo one,
@@ -2731,6 +2893,7 @@ function MainApp({currentUser,onLogout}) {
         pool=await recalculateItem(entry.subItemId,pool,allDatesForItem(entry.subItemId,pool));
         pool=await extendItemIfShort(entry.subItemId,pool);
       }
+      pool=await settleTentativeBeside(_u,pool);
       pushUndoSnapshot(_u,pool);
     }catch(err){
       setError("Failed to move entry - change reverted.");
@@ -3312,7 +3475,7 @@ function MainApp({currentUser,onLogout}) {
                         // whichever slot was actually filled in later is the one that can be
                         // "Overcommitted".
                         function computeIsOvercommitted(e){
-                          return !!e&&!!otherSlotEntry&&!wasScheduledFirst(e,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
+                          return !!e&&!!otherSlotEntry&&otherCountsAgainst(e,otherSlotEntry)&&(Number(otherSlotEntry.hours)||0)>=(Number(st.productiveHours)||8)-0.05;
                         }
                         // Works out a job entry's place in its sub-item's budget - factored out
                         // so both the entry's own block AND a companion empty slot (to flag
@@ -3407,8 +3570,11 @@ function MainApp({currentUser,onLogout}) {
                         // whichever staff member it is - the empty slot flags that leftover
                         // capacity instead of showing a plain "+".
                         const staffCap=Number(st.productiveHours)||8;
-                        const availableHours=!entry&&!!otherSlotEntry&&(Number(otherSlotEntry.hours)||0)<staffCap-0.05
-                          ?Math.max(0,Math.round((staffCap-(Number(otherSlotEntry.hours)||0))*2)/2)
+                        // A tentative entry beside it takes nothing from confirmed work,
+                        // so the whole day shows as available.
+                        const otherUsed=otherSlotEntry&&!otherSlotEntry.isTentative?(Number(otherSlotEntry.hours)||0):0;
+                        const availableHours=!entry&&!!otherSlotEntry&&otherUsed<staffCap-0.05
+                          ?Math.max(0,Math.round((staffCap-otherUsed)*2)/2)
                           :0;
                         // Renders whichever entry sits in this staff/day/slot - factored out so a
                         // conflict (two entries mapped to the same slot) can render BOTH of them
@@ -3426,7 +3592,7 @@ function MainApp({currentUser,onLogout}) {
                             return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
                           }
                           const meta=computeJobEntryMeta(e)||{};
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isGenuinePartial={meta.isGenuinePartial} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp}/>;
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isGenuinePartial={meta.isGenuinePartial} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp} isTentative={!!e.isTentative}/>;
                         }
                         return(
                           <td key={di}
@@ -3459,7 +3625,7 @@ function MainApp({currentUser,onLogout}) {
       {/* Summary Tab */}
       {tab==="summary"&&(
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
-          <SummarySection jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);const _u=snapshotEntries(entries);try{await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));pushUndoSnapshot(_u,_u.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
+          <SummarySection onConfirmTentative={canEdit?confirmTentativeItem:null} jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);const _u=snapshotEntries(entries);try{await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));pushUndoSnapshot(_u,_u.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
           {archivedJobs.length>0&&(
             <>
               <div style={{display:"flex",alignItems:"center",gap:12,marginTop:8}}>
@@ -3512,7 +3678,7 @@ function MainApp({currentUser,onLogout}) {
           </div>
         </Modal>
       )}
-      {conflictAlert&&<ConfirmModal title="⚠ Scheduling Conflict" message={conflictAlert.message} cancelLabel="Go Back" confirmLabel="Schedule Anyway" danger onConfirm={conflictAlert.onConfirm} onCancel={conflictAlert.onCancel}/>}
+      {conflictAlert&&<ConfirmModal title={conflictAlert.title||"⚠ Scheduling Conflict"} message={conflictAlert.message} cancelLabel={conflictAlert.cancelLabel||"Go Back"} confirmLabel={conflictAlert.confirmLabel||"Schedule Anyway"} danger onConfirm={conflictAlert.onConfirm} onCancel={conflictAlert.onCancel}/>}
       {idleJobPrompt&&<ConfirmModal title="Job idle a month" message={`Job ${idleJobPrompt.job.jobNo}, ${idleJobPrompt.job.name} most recent scheduled date is ${formatDate(parseISO(idleJobPrompt.job.maxDate))}. Do you want to close this Job?`} confirmLabel="Close Job" cancelLabel="Not Yet"
         onConfirm={()=>{toggleJobCompleted(idleJobPrompt.job.id,true);dismissedIdleJobsRef.current.add(idleJobPrompt.job.id);setIdleJobPrompt(null);}}
         onCancel={()=>{dismissedIdleJobsRef.current.add(idleJobPrompt.job.id);setIdleJobPrompt(null);}}/>}
@@ -3533,7 +3699,7 @@ function MainApp({currentUser,onLogout}) {
 
 // ── Summary Section ───────────────────────────────────────────
 
-function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,setTab,archived,canEdit,onUnschedule}) {
+function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,setTab,archived,canEdit,onUnschedule,onConfirmTentative}) {
   const [confirmDialog,setConfirmDialog]=useState(null);
   return (
     <>
@@ -3580,13 +3746,16 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                   const deductedHours=siEntries.reduce((a,e)=>a+effectiveEntryHours(e,entries,staff),0);
                   const remaining=Math.round(((si.totalHours||0)-deductedHours)*2)/2;
                   const assignedStaff=[...new Set(siEntries.map(e=>e.staffId))].map(id=>staff.find(s=>s.id===id)?.name).filter(Boolean).join(", ");
+                  // Any tentative part of the item (Catch-up included) marks the
+                  // row; every figure stays as it is (TESTING_NOTES 2F #9a).
+                  const isTentative=entries.some(e=>e.subItemId===si.id&&e.isTentative);
                   let dateDisplay;
                   if(!siDates.length)dateDisplay=<em style={{color:"#94A3B8"}}>Not yet scheduled</em>;
                   else if(siDates.length===1)dateDisplay=formatDate(parseISO(siDates[0]));
                   else{const d1=parseISO(siDates[0]),d2=parseISO(siDates[siDates.length-1]);dateDisplay=`${formatDate(d1)} → ${formatDate(d2)} (${Math.round((d2-d1)/86400000)}d)`;}
                   return(
-                    <tr key={si.id} style={{background:rowi%2===0?"#fff":"#FAFAFA",borderBottom:"1px solid #F1F5F9"}}>
-                      <td style={{padding:"7px 12px",fontWeight:500,color:"#1E293B"}}>{si.name}</td>
+                    <tr key={si.id} style={{background:isTentative?"#FEF3C7":rowi%2===0?"#fff":"#FAFAFA",borderBottom:"1px solid #F1F5F9"}}>
+                      <td style={{padding:"7px 12px",fontWeight:500,color:"#1E293B"}}>{si.name}{isTentative&&<span style={{marginLeft:8,fontSize:11,fontWeight:700,color:"#92400E",border:"1px dashed #B45309",borderRadius:5,padding:"1px 6px"}}>Tentative</span>}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{si.totalHours?`${si.totalHours}h`:<em style={{color:"#94A3B8"}}>—</em>}</td>
                       <td style={{padding:"7px 12px",color:"#475569"}}>{deductedHours>0?`${Math.round(deductedHours*2)/2}h`:"—"}</td>
                       <td style={{padding:"7px 12px"}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${remaining}h left`:remaining===0?"✓ Done":`${Math.abs(remaining)}h over`}</span>:"—"}</td>
@@ -3594,6 +3763,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                       <td style={{padding:"7px 12px",color:"#475569"}}>{assignedStaff||<em style={{color:"#94A3B8"}}>—</em>}</td>
                       <td style={{padding:"7px 12px",display:"flex",gap:4}}>
                         {canEdit&&!archived&&setEntryModal&&<button style={{fontSize:11,color:"#3B82F6",background:"none",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{setEntryModal({mode:"new",staffId:"",dateStr:todayStr,slot:0,jobId:job.id,subItemId:si.id,hours:8,autoFill:remaining>0,totalHours:remaining>0?remaining:8,entryType:"job",miscNote:""});setTab("schedule");}}>+ Schedule</button>}
+                        {canEdit&&!archived&&isTentative&&onConfirmTentative&&<button style={{fontSize:11,color:"#92400E",background:"none",border:"1px solid #F59E0B",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontWeight:600}} onClick={()=>onConfirmTentative(si.id)}>Confirm Booking</button>}
                         {canEdit&&!archived&&siEntries.length>0&&onUnschedule&&<button style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>setConfirmDialog({message:`Remove all ${siEntries.length} scheduled entries for "${si.name}"?`,danger:true,confirmLabel:"Remove",onConfirm:()=>{setConfirmDialog(null);onUnschedule(siEntries.map(e=>e.id));}})}>Unschedule</button>}
                       </td>
                     </tr>
@@ -3629,6 +3799,8 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     return{...data,subItemId:defaultSub,totalHours:data.totalHours||jobSubs[0]?.totalHours||0,entryType:data.entryType||"job",miscNote:data.miscNote||"",staffIds:data.staffId?[data.staffId]:[]};
   });
   const [autoFill,setAutoFill]=useState(data.autoFill!==false);
+  // This entry is (or will be saved as) tentative - TESTING_NOTES 2F #9a.
+  const entryTentative=form.entryType!=="misc"&&!!form.isTentative;
   const [staggerConfirm,setStaggerConfirm]=useState(null); // {message,combined,staffId}
   const [gapPrompt,setGapPrompt]=useState(null); // {message,combined,staffId,clean:{dateStr,combined}|null}
   // Gaps in a new auto-filled schedule (TESTING_NOTES.md 2E #17, user's
@@ -3642,7 +3814,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       const name=staff.find(s=>s.id===sid)?.name||"This person";
       const days=[...new Set(combined.filter(c=>c.staffId===sid).map(c=>c.dateStr))].sort();
       if(days.length===0){
-        const nextFree=nextAvailableDate([sid],entries,form.dateStr,form.slot,staff).dateStr;
+        const nextFree=nextAvailableDate([sid],entries,form.dateStr,form.slot,staff,entryTentative).dateStr;
         lines.push(`${name} can't start until ${gapDayLabel(nextFree)} - the job is finished before then, so ${name} won't be scheduled.`);
         return;
       }
@@ -3730,9 +3902,13 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   // accidentally create a fresh overcommitment before anyone's chosen how to
   // split the day.
   const editingLockedEntry=!!mineIfEditing;
+  // Tentative (TESTING_NOTES 2F #9a): confirmed work isn't limited by a
+  // tentative entry in the other slot; tentative work is limited by
+  // whatever's there.
+  const otherSlotCounts=!!otherSlotEntry&&(entryTentative||!otherSlotEntry.isTentative);
   const maxHours=(()=>{
-    if(!otherSlotEntry||editingLockedEntry)return productiveHours;
-    if(mineIfEditing&&wasScheduledFirst(mineIfEditing,otherSlotEntry))return productiveHours;
+    if(!otherSlotEntry||editingLockedEntry||!otherSlotCounts)return productiveHours;
+    if(mineIfEditing&&!otherCountsAgainst({...mineIfEditing,isTentative:entryTentative},otherSlotEntry))return productiveHours;
     const otherEff=Math.min(Number(otherSlotEntry.hours)||0,productiveHours);
     return Math.max(0,Math.round((productiveHours-otherEff)*2)/2);
   })();
@@ -3751,7 +3927,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
 
   const preview=useMemo(()=>{
     if(!autoFill||!form.dateStr||!totalHours||form.entryType==="misc")return[];
-    return buildAutoFill(form.dateStr,totalHours,productiveHours,sameDayStaffId,form.slot,entries,form.subItemId);
+    return buildAutoFill(form.dateStr,totalHours,productiveHours,sameDayStaffId,form.slot,entries,form.subItemId,entryTentative);
   },[autoFill,form.dateStr,totalHours,productiveHours,form.entryType,sameDayStaffId,form.slot,entries,form.subItemId]);
 
   function handleSave(){
@@ -3769,8 +3945,8 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     if(form.mode==="new"&&autoFill&&form.entryType!=="misc"&&form.totalHours>0&&staffToSchedule.length===1){
       const sid=staffToSchedule[0];
       const ph=Number(staff.find(s=>s.id===sid)?.productiveHours)||8;
-      if(!personalBlockFits(sid,ph,form.slot,entries,form.dateStr)){
-        const avail=nextAvailableDate([sid],entries,form.dateStr,form.slot,staff);
+      if(!personalBlockFits(sid,ph,form.slot,entries,form.dateStr,entryTentative)){
+        const avail=nextAvailableDate([sid],entries,form.dateStr,form.slot,staff,entryTentative);
         setStartConflictPrompt({sid,ph,availDate:avail.dateStr,availSlot:avail.slot,availLabel:formatDate(parseISO(avail.dateStr))});
         return;
       }
@@ -3783,10 +3959,10 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       // day left empty, no token partial day for a latecomer, everyone
       // available works together once there's real work left for more than
       // one of them).
-      const combined=buildGroupAutoFill(staffToSchedule,form.totalHours,form.dateStr,form.slot,entries,staff,form.subItemId);
+      const combined=buildGroupAutoFill(staffToSchedule,form.totalHours,form.dateStr,form.slot,entries,staff,form.subItemId,entryTentative);
       const groupGaps=scheduleGapProblems(combined,staffToSchedule);
       if(groupGaps.length>0){
-        askAboutGaps(groupGaps,combined,staffToSchedule[0],ds=>buildGroupAutoFill(staffToSchedule,form.totalHours,ds,form.slot,entries,staff,form.subItemId),staffToSchedule);
+        askAboutGaps(groupGaps,combined,staffToSchedule[0],ds=>buildGroupAutoFill(staffToSchedule,form.totalHours,ds,form.slot,entries,staff,form.subItemId,entryTentative),staffToSchedule);
         return;
       }
       // Still confirm if the actual resulting start dates end up more than
@@ -3815,7 +3991,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         const sf=staff.find(s=>s.id===sid);
         const ph=Number(sf?.productiveHours)||8;
         if(autoFill&&form.entryType!=="misc"&&form.totalHours>0){
-          const fills=buildAutoFill(form.dateStr,form.totalHours,ph,sid,form.slot,entries,form.subItemId);
+          const fills=buildAutoFill(form.dateStr,form.totalHours,ph,sid,form.slot,entries,form.subItemId,entryTentative);
           fills.forEach(p=>combined.push({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
         } else {
           // A manual (non-autofill) multi-staff entry shares one typed
@@ -3826,7 +4002,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           // or less room that day than whichever staff member the field
           // was actually validated against.
           const otherEntry=entries.find(e=>e.staffId===sid&&e.dateStr===form.dateStr&&e.slot!==form.slot);
-          const otherHrs=otherEntry?Math.min(Number(otherEntry.hours)||0,ph):0;
+          const otherHrs=otherEntry&&(entryTentative||!otherEntry.isTentative)?Math.min(Number(otherEntry.hours)||0,ph):0;
           const personalMax=Math.max(0,Math.round((ph-otherHrs)*2)/2);
           // No room at all that day: keep the typed number - saving asks
           // first (Scheduling Conflict pop-up) instead of saving 0h.
@@ -3840,7 +4016,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         if(gaps.length>0){
           const sid=staffToSchedule[0];
           const ph=Number(staff.find(s=>s.id===sid)?.productiveHours)||8;
-          askAboutGaps(gaps,combined,sid,ds=>buildAutoFill(ds,form.totalHours,ph,sid,form.slot,entries,form.subItemId).map(p=>({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot})),staffToSchedule);
+          askAboutGaps(gaps,combined,sid,ds=>buildAutoFill(ds,form.totalHours,ph,sid,form.slot,entries,form.subItemId,entryTentative).map(p=>({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot})),staffToSchedule);
           return;
         }
       }
@@ -3881,7 +4057,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   const otherSlotHours=Number(otherSlotEntry?.hours)||0;
   const hrs=n=>`${Math.round(n*2)/2}${Math.round(n*2)/2===1?"hr":"hrs"}`;
   const assignedLine=otherSlotEntry&&editingLockedEntry&&otherSlotHours>0.05&&form.dateStr&&(
-    <div style={{fontSize:12,color:"#1E293B",marginTop:8,whiteSpace:"nowrap"}}>{selectedStaff?.name} has {hrs(otherSlotHours)} assigned on {gapDayLabel(form.dateStr)} leaving {hrs(Math.max(0,productiveHours-otherSlotHours))} available for scheduling</div>
+    <div style={{fontSize:12,color:"#1E293B",marginTop:8,whiteSpace:"nowrap"}}>{selectedStaff?.name} has {hrs(otherSlotHours)}{otherSlotCounts?"":" tentative"} assigned on {gapDayLabel(form.dateStr)} leaving {hrs(Math.max(0,productiveHours-(otherSlotCounts?otherSlotHours:0)))} available for scheduling</div>
   );
   // Only when editing a Catch-up entry, and only that entry's own hours -
   // not every Catch-up entry on the item added together (user's live
@@ -3957,6 +4133,15 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                   <option value="">General / no item</option>
                 </Sel>
               )}
+              {/* Tentative (TESTING_NOTES 2F #9a): faded on the grid, and its
+                  hours never limit the person's other slot. */}
+              <button type="button" onClick={()=>set("isTentative",!form.isTentative)}
+                style={{width:"100%",padding:"8px",borderRadius:8,border:`1.5px dashed ${form.isTentative?"#B45309":"#94A3B8"}`,background:form.isTentative?"#FEF3C7":"#fff",color:form.isTentative?"#92400E":"#475569",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                {form.isTentative?"✓ Tentative":"Tentative"}
+              </button>
+              {form.mode==="edit"&&data.isTentative&&!form.isTentative&&(
+                <div style={{fontSize:12,color:"#1E293B",marginTop:6}}>Saving confirms every tentative entry for {selectedSub?.name||"this item"}.</div>
+              )}
             </>
           )}
         </div>
@@ -3988,7 +4173,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                     // each become available, day by day, so there's no need
                     // to pre-find a day (or a staggered set of days) that
                     // works for everyone at once.
-                    const{dateStr,slot}=earliestAnyAvailable(ids,entries,staff,todayStr,form.slot);
+                    const{dateStr,slot}=earliestAnyAvailable(ids,entries,staff,todayStr,form.slot,entryTentative);
                     setForm(f=>({...f,dateStr,slot}));
                   }else{
                     // A day only counts as "available" if every day the
@@ -3998,11 +4183,11 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                     // there.
                     const staffWithPh=ids.map(sid=>{const sf=staff.find(s=>s.id===sid);return{sid,ph:Number(sf?.productiveHours)||8};});
                     const shares=staffWithPh.map(s=>({...s,hours:form.totalHours}));
-                    const{dateStr,slot}=nextAvailableBlockDate(shares,entries,todayStr,form.slot);
+                    const{dateStr,slot}=nextAvailableBlockDate(shares,entries,todayStr,form.slot,entryTentative);
                     setForm(f=>({...f,dateStr,slot}));
                   }
                 } else {
-                  const{dateStr,slot}=nextAvailableDate(ids,entries,todayStr,form.slot,staff);
+                  const{dateStr,slot}=nextAvailableDate(ids,entries,todayStr,form.slot,staff,entryTentative);
                   setForm(f=>({...f,dateStr,slot}));
                 }
               }} style={{flex:1,padding:"9px 10px",border:"1px solid #93C5FD",background:"#EFF6FF",color:"#1D4ED8",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer"}}>
@@ -4032,7 +4217,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
                 // The real computed outcome, not an upfront-by-rate estimate -
                 // this is exactly what buildGroupAutoFill will actually save,
                 // so what's shown here can't disagree with what happens.
-                const groupFill=buildGroupAutoFill(form.staffIds,form.totalHours||0,form.dateStr,form.slot,entries,staff,form.subItemId);
+                const groupFill=buildGroupAutoFill(form.staffIds,form.totalHours||0,form.dateStr,form.slot,entries,staff,form.subItemId,entryTentative);
                 const byStaff={};
                 groupFill.forEach(r=>{(byStaff[r.staffId]=byStaff[r.staffId]||[]).push(r);});
                 return <div style={{fontSize:11,color:"#3B82F6",marginTop:6,lineHeight:1.5}}>
@@ -4097,7 +4282,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
     {startConflictPrompt&&<ConfirmModal title="⚠ No Room That Day" message={`${staff.find(s=>s.id===startConflictPrompt.sid)?.name} has no room left on ${formatDate(parseISO(form.dateStr))} - first available is ${startConflictPrompt.availLabel}. Schedule there instead?`} confirmLabel={`Schedule First Available (${startConflictPrompt.availLabel})`} cancelLabel="Go Back"
       onConfirm={()=>{
         const {sid,ph,availDate,availSlot}=startConflictPrompt;
-        const fills=buildAutoFill(availDate,form.totalHours,ph,sid,availSlot,entries,form.subItemId);
+        const fills=buildAutoFill(availDate,form.totalHours,ph,sid,availSlot,entries,form.subItemId,entryTentative);
         const combined=fills.map(p=>({dateStr:p.dateStr,hours:p.hours,staffId:sid,slot:p.slot}));
         onSave({...form,staffId:sid,dateStr:availDate,slot:availSlot,autoFill},combined);
         setStartConflictPrompt(null);
