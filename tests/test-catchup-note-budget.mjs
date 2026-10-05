@@ -25,8 +25,8 @@ try {
   await (await block(page, 'Ian', D(6), 1)).click();
   // (Wording since the form tidy-up: no budget figure at all, so it can't
   // show the wrong item's number.)
-  const note = await page.locator('text=/Catch-up logged for this item/').innerText();
-  r.check('note reads "1hr Catch-up logged for this item, not deducted from item total hrs."', note.trim() === '1hr Catch-up logged for this item, not deducted from item total hrs.', note);
+  const note = await page.locator('text=/Catch-up logged for this entry/').innerText();
+  r.check('note reads "1hr Catch-up logged for this entry, not deducted from item total hrs."', note.trim() === '1hr Catch-up logged for this entry, not deducted from item total hrs.', note);
   await button(page, 'Cancel').click();
   // 2. Job Summary "+ Schedule" on Laundry W (11h left): a 4h manual entry still fits - no Catch-up prompt
   await page.locator('text=Job Summary').first().click();
