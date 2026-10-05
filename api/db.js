@@ -3,6 +3,12 @@ import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
 
 const SCRYPT_KEYLEN = 64;
 const LOGIN_MAX_ATTEMPTS = 5;
+// Speed (TESTING_NOTES 2F #13, user agreed): each signed-in person's role is
+// remembered for up to a minute, so most clicks need one database trip
+// instead of two. A role change (or removed user) takes up to a minute to
+// apply on other server instances; this instance forgets at once.
+const ROLE_CACHE_MS = 60 * 1000;
+const roleCache = new Map(); // user id -> { role, at }
 const LOGIN_LOCKOUT_MINUTES = 15;
 const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours
 
@@ -210,9 +216,19 @@ export default async function handler(req, res) {
     if (table !== 'keepalive_ping' && !(table === 'app_settings' && req.method === 'GET')) {
       const session = verifySession(req.headers['x-session-token']);
       if (!session) return res.status(401).json({ error: 'Session expired - please log in again.' });
-      const [sessionUser] = await sql('select role from user_roles where id = $1', [session.id]);
-      if (!sessionUser) return res.status(401).json({ error: 'Session expired - please log in again.' });
-      const role = sessionUser.role;
+      let role;
+      const cached = roleCache.get(session.id);
+      if (cached && Date.now() - cached.at < ROLE_CACHE_MS) {
+        role = cached.role;
+      } else {
+        const [sessionUser] = await sql('select role from user_roles where id = $1', [session.id]);
+        if (!sessionUser) { roleCache.delete(session.id); return res.status(401).json({ error: 'Session expired - please log in again.' }); }
+        role = sessionUser.role;
+        roleCache.set(session.id, { role, at: Date.now() });
+      }
+      // Any change to users (role, removal, password) - forget what this
+      // instance remembered so it's re-checked on the next click.
+      if (table === 'user_roles' && req.method !== 'GET') roleCache.clear();
 
       // Only admins may read or write the user_roles table at all - it's
       // where every account's role (and password hash) lives.

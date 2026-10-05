@@ -22,7 +22,10 @@ function token(id, { secret = 'server-only-secret', exp = Date.now() + 3600e3 } 
   const body = Buffer.from(JSON.stringify({ id, exp })).toString('base64url');
   return `${body}.${createHmac('sha256', secret).update(body).digest('base64url')}`;
 }
-async function call(method, query, { body, key = 'test-key', session = token('u1'), role = 'admin', rows = [], fail = null } = {}) {
+// One pretend user per role: the server remembers a user's role for a
+// minute (TESTING_NOTES 2F #13), so switching one user's role between
+// checks would test the memory, not the rule.
+async function call(method, query, { body, key = 'test-key', role = 'admin', session = token('u-' + role), rows = [], fail = null } = {}) {
   Object.assign(neonState, { calls: [], role, rows, fail });
   const res = { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
   await handler({ method, query, body, headers: { 'x-api-key': key, ...(session ? { 'x-session-token': session } : {}) } }, res);
@@ -60,4 +63,17 @@ try {
   const boom = await call('GET', { table: 'entries' }, { fail: 'relation "internal_secret_table" does not exist' });
   r.check('database errors never leak internal details', boom.code >= 500 && !JSON.stringify(boom.body).includes('internal_secret_table'), boom.body);
 } catch (e) { r.error(e); }
+// Role memory (2F #13): a second click by the same person doesn't re-check
+// their role; any change to users makes the next click re-check it.
+{
+  const roleQueries = () => neonState.calls.filter(c => /^select role from user_roles/.test(c.query)).length;
+  const me = token('u-memory');
+  await call('GET', { table: 'entries' }, { session: me, role: 'manager' });
+  r.check('first click checks the role', roleQueries() === 1);
+  await call('GET', { table: 'entries' }, { session: me, role: 'manager' });
+  r.check('next click within a minute does not', roleQueries() === 0);
+  await call('PATCH', { table: 'user_roles', id: 'eq.u9' }, { body: { role: 'staff' }, role: 'admin' });
+  await call('GET', { table: 'entries' }, { session: me, role: 'manager' });
+  r.check('after a change to users, the role is checked again', roleQueries() === 1);
+}
 r.done();
