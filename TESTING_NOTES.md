@@ -1077,6 +1077,28 @@ hashed passwords never sent back, no leaked database errors).
       (date range, all staff, with a "Hide these days" option and a
       grid button to show/hide them) - details to agree when reached.
 
+11. **FIXED (settings PR). Settings button (user's request).**
+    - New "Settings" button in the header, admin only, next to Users.
+      Holds: Colour Theme and Company Branding (moved out of User
+      Management, which now only manages users), Work Hours, and the
+      Public Holidays region (Australia + state; user is NSW - selectable
+      so other businesses can pick their own). Annual Blockout will go
+      here too (2F #9c).
+    - Work Hours used to reset to 07:00-15:30 on every page load and only
+      showed in a header button (display only - never used by scheduling).
+      Now saved for everyone (`app_settings.work_start/work_end/
+      lunch_minutes`), start/finish in 15-minute steps, unpaid lunch 15m-2h
+      in 15-minute steps, shown as "07:00-15:30, 30m lunch = 8hrs paid".
+      The header clock button is gone (user). Staff "Daily hour cap" is NOT
+      tied to paid hours (user said no).
+    - Region saved as `app_settings.holiday_region` (e.g. "AU-NSW"), used
+      by Public Holidays next (2F #9b).
+    - Add Staff stays in the header (user).
+    - DB: user ran `ALTER TABLE app_settings ADD COLUMN work_start text
+      DEFAULT '07:00', ADD COLUMN work_end text DEFAULT '15:30', ADD COLUMN
+      lunch_minutes integer DEFAULT 30, ADD COLUMN holiday_region text;`
+    - Test: `test-settings.mjs` - fails on main, passes after.
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,
