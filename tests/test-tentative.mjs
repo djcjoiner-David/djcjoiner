@@ -36,7 +36,7 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
     r.check('tentative schedule saved: 2 days of 8h, all tentative', v.length === 2 && v.every(e => e.is_tentative === true && Number(e.hours) === 8), v);
     const b = await block(page, 'Mark', D(1), 0);
     const style = await b.getAttribute('style');
-    r.check('grid: "Tentative" label, faded, dashed border', (await b.innerText()).includes('Tentative') && /opacity: 0\.45/.test(style) && /dashed/.test(style), style);
+    r.check('grid: "Tentative" label, striped, dashed border, not faded', (await b.innerText()).includes('Tentative') && /repeating-linear-gradient/.test(style) && /dashed/.test(style) && !/opacity: 0\.45/.test(style), style);
 
     // Confirmed Laundry 8h into Mark's other slot on day 1: books in full.
     await newEntry(page, 'Mark', D(1), 1, { jobId: 'j2', itemId: 'iL' });

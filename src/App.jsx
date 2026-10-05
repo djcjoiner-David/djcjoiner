@@ -868,8 +868,9 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
   // A past-dated entry is locked, full stop - not editable by anyone
   // (including admins), so none of the interaction affordances apply to it.
   const editable=canEdit&&!isPastDate;
-  // Tentative (TESTING_NOTES 2F #9a): faded like a past entry, dashed
-  // border, and a "Tentative" label - still fully editable.
+  // Tentative (TESTING_NOTES 2F #9a): diagonal stripes in the job's colour
+  // (user chose this over "faded" - too easy to miss), dashed border, and a
+  // "Tentative" label; text stays full strength. Still fully editable.
   return (
     <div
       draggable={!isMobile&&editable&&!copyMode&&!moveMode}
@@ -877,7 +878,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
       onDragEnd={editable?onDragEnd:undefined}
       onClick={editable?onClick:undefined}
       onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate||isTentative?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":isTentative?`repeating-linear-gradient(135deg,${job.bgColor} 0 6px,#fff 6px 12px)`:job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {isMobile?(
         <>
