@@ -970,6 +970,10 @@ hashed passwords never sent back, no leaked database errors).
      logged for this item, not deducted from item total hrs." (no budget
      figure, so it can't show the wrong item's number again - see 2E #16).
    - No change to how hours are worked out or saved.
+   - Follow-up (hint style PR, user said yes): the other small orange
+     "⚡" hints in the entry form ("Max 3h left of Mark's 8h/day cap",
+     "David 7's daily cap is 7h") match too - black, no symbol, same
+     words. The Catch-up line wrapping onto two lines is fine (user).
    - Tests updated for the new wording: `test-catchup-new-entry`,
      `test-catchup-note-budget`, `test-overcommit-shortfall`,
      `test-schedule-gap-alerts`.
