@@ -103,6 +103,16 @@ changes — re-verify line numbers against the file before relying on them.
     happens, update every test that looked for the old text in the same
     change, and prefer finding inputs by type or structure (e.g. "the
     number box under this heading") over matching a whole sentence.
+14. **A new "priority" rule between two kinds of record belongs in one
+    small helper, used everywhere.** Tentative vs confirmed work touched
+    about 20 places that each worked out "how much of this person's day is
+    free". Writing the rule once (who counts against whom) and calling it
+    from every one of those places is what keeps the scheduler, the
+    warnings, the flags and the form limits from disagreeing.
+15. **Adding a database column: make the app work before the column
+    exists.** Send the new field only when it's actually set, so the app
+    keeps saving normally whether or not the schema change has been run
+    yet - deploy order then can't break live saving.
 
 ---
 
@@ -994,7 +1004,7 @@ hashed passwords never sent back, no leaked database errors).
       `test-catchup-note-budget`, `test-overcommit-shortfall` updated.
 
 9. **PLANNED (agreed with user, build in order after #8).**
-   a. **Tentative.** UPDATED (user): chosen each time you schedule, by a
+   a. **FIXED (tentative PR). Tentative.** UPDATED (user): chosen each time you schedule, by a
       "Tentative" switch on the entry form - NOT forced on the whole item
       (e.g. Laundry W booked, then 4hrs of Catch-up added as Tentative:
       only those 4hrs are tentative). Stored per entry (`is_tentative` on
@@ -1019,6 +1029,40 @@ hashed passwords never sent back, no leaked database errors).
       anyway?" (Confirm Anyway / Cancel); confirmed days over max show the
       red Conflict. Needs a database column on `sub_items` (user pastes
       one line into Neon before merge).
+      - What shipped:
+        - Data: `is_tentative` on `entries` (user ran the one-line SQL).
+          Only sent when true, so saving never breaks on a database
+          without the column. Undo/redo restore it (part of the entry
+          signature, cleared by PATCH when undoing).
+        - Rules live in two helpers: `otherCountsAgainst(e,other)`
+          (between tentative and confirmed, confirmed always has first
+          claim; same kind = normal "scheduled first") used by
+          `effectiveEntryHours`/`maxPossibleHours`/Overcommitted; and
+          `otherSlotUse(pool,sid,ds,slot,tentative)` used by every
+          scheduling search (auto-fill, group fill, First Available,
+          block fit). Confirmed work ignores a tentative entry beside it;
+          tentative work counts everything and can't share a day with
+          another tentative entry. `slotsKeepingTo` lets confirmed work
+          use the other slot when a tentative entry sits in its usual one.
+        - `settleTentativeBeside(before,pool)` runs after every save,
+          move, copy, group move/copy and confirm: a tentative entry next
+          to newly placed confirmed work is recalculated and its item
+          extended (the "gives way" rule). `extendItemIfShort` extends a
+          tentative run as tentative.
+        - No-room pop-up, red Conflict (`overMaxDays` only adds entries of
+          the same kind), Overcommitted flag, "Hours Available" hint, the
+          entry form's hour limits and its other-slot line ("...has 7hrs
+          tentative assigned...") all follow the same rule.
+        - UI: "Tentative" switch on the entry form (job entries); grid
+          block faded (0.45), dashed border, "Tentative" label; Job
+          Summary row amber with a "Tentative" tag and "Confirm Booking";
+          unticking in Edit confirms the whole item. Over-max warning
+          "⚠ Confirm Booking": "Confirming Vanity puts Mark over the 8hrs
+          daily max on Tue 06 Oct. Those days will show a conflict.
+          Consider moving hours to the next day. Confirm anyway?" (no
+          gendered pronoun). Confirm Anyway locks both entries that day.
+      - Test: `test-tentative.mjs` (5 scenarios, 23 checks) - fails on
+        main, passes after.
    b. **Public holidays (all staff).** A "Days Off" list kept separate
       from job entries. Holidays load automatically from a free online
       public-holiday list for the country/state picked once in Settings
