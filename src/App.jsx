@@ -356,7 +356,7 @@ function planMoveForward(pool,affected){
   });
   return out;
 }
-function mapDayOff(r){ return {id:r.id,dateStr:r.date_str,kind:r.kind,label:r.label||"",staffIds:r.staff_ids?String(r.staff_ids).split(",").filter(Boolean):null,auto:!!r.auto,removed:!!r.removed,createdAt:r.created_at}; }
+function mapDayOff(r){ return {id:r.id,dateStr:r.date_str,kind:r.kind,label:r.label||"",staffIds:r.staff_ids?String(r.staff_ids).split(",").filter(Boolean):null,auto:!!r.auto,removed:!!r.removed,hidden:!!r.hidden,createdAt:r.created_at}; }
 // Public holidays for one country/state (e.g. "AU-NSW") from the free
 // Nager.Date list, this year and next. Only real public holidays: "Bank"
 // days and anything named Bank Holiday are left out (banking only - user).
@@ -1197,7 +1197,7 @@ function paidHours(start,end,lunch){
   const [sh,sm]=start.split(":").map(Number),[eh,em]=end.split(":").map(Number);
   return Math.max(0,(eh*60+em-sh*60-sm-(Number(lunch)||0))/60);
 }
-function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo,companyName,onChangeCompanyName,companyTagline,onChangeCompanyTagline,workStart,workEnd,lunchMinutes,onChangeWorkHours,holidayRegion,onChangeHolidayRegion,daysOff=[],onRemoveDayOff,onAddHoliday}) {
+function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onResetLogo,companyName,onChangeCompanyName,companyTagline,onChangeCompanyTagline,workStart,workEnd,lunchMinutes,onChangeWorkHours,holidayRegion,onChangeHolidayRegion,daysOff=[],onRemoveDayOff,onAddHoliday,onAddClosure,onRemoveClosure,onSetDaysHidden}) {
   const [error,setError]=useState("");
   const [logoUploading,setLogoUploading]=useState(false);
   const [nameInput,setNameInput]=useState(companyName);
@@ -1215,6 +1215,13 @@ function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onRe
   }
   const paid=paidHours(workStart,workEnd,lunchMinutes);
   const [newHoliday,setNewHoliday]=useState("");
+  const [closureStart,setClosureStart]=useState("");
+  const [closureEnd,setClosureEnd]=useState("");
+  const closures=Object.values(daysOff.filter(d=>d.kind==="closure"&&!d.removed).reduce((acc,d)=>{(acc[d.label]=acc[d.label]||{label:d.label,days:[]}).days.push(d);return acc;},{}))
+    .map(c=>({...c,days:c.days.sort((a,b)=>a.dateStr.localeCompare(b.dateStr))}))
+    .filter(c=>c.days[c.days.length-1].dateStr>=todayStr)
+    .sort((a,b)=>a.days[0].dateStr.localeCompare(b.days[0].dateStr));
+  const shortDay=ds=>parseISO(ds).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"}).replace(",","");
   const upcomingHolidays=daysOff.filter(d=>d.kind==="public_holiday"&&!d.removed&&d.dateStr>=todayStr).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
   const holidayLabel=ds=>parseISO(ds).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short",year:"numeric"}).replace(",","");
   const region=(holidayRegion||"").split("-");
@@ -1268,6 +1275,39 @@ function SettingsModal({onClose,themeKey,onChangeTheme,logoSrc,onChangeLogo,onRe
             <div style={{padding:"10px 14px",background:paid>0?"#F0FDF4":"#FEF2F2",border:`1px solid ${paid>0?"#BBF7D0":"#FECACA"}`,borderRadius:8,fontSize:13,color:paid>0?"#15803D":"#DC2626",fontWeight:500}}>
               {paid>0?`${workStart}–${workEnd}, ${lunchLabel(lunchMinutes)} lunch = ${Math.round(paid*100)/100}hrs paid`:"Finish must be after start, with time left after lunch."}
             </div>
+          </div>
+          <div style={{borderBottom:"1px solid #E2E8F0",paddingBottom:16,marginBottom:20}}>
+            <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Annual Closure</div>
+            <div style={{fontSize:12,color:"#64748B",marginBottom:10}}>Blocks every day in the range for all staff. Tick "Hide" on any day to take it off the grid (it's still a day off).</div>
+            {onAddClosure&&(
+              <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:12,flexWrap:"wrap"}}>
+                <div><div style={FIELD_LABEL}>From</div><input type="date" value={closureStart} min={todayStr} onChange={e=>setClosureStart(e.target.value)} style={{width:170,padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/></div>
+                <div><div style={FIELD_LABEL}>To</div><input type="date" value={closureEnd} min={closureStart||todayStr} onChange={e=>setClosureEnd(e.target.value)} style={{width:170,padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/></div>
+                <Btn variant="primary" disabled={!closureStart||!closureEnd||closureEnd<closureStart} onClick={()=>{onAddClosure(closureStart,closureEnd);setClosureStart("");setClosureEnd("");}}>Add Closure</Btn>
+              </div>
+            )}
+            {closures.length===0
+              ?<div style={{fontSize:13,color:"#94A3B8"}}>No closures set.</div>
+              :closures.map(c=>(
+                <div key={c.label} style={{border:"1px solid #E2E8F0",borderRadius:8,padding:"8px 12px",marginBottom:8}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+                    <strong style={{fontSize:13,color:"#1E293B"}}>{shortDay(c.days[0].dateStr)} – {shortDay(c.days[c.days.length-1].dateStr)}</strong>
+                    <div style={{display:"flex",gap:6}}>
+                      {onSetDaysHidden&&<button type="button" onClick={()=>onSetDaysHidden(c.days.map(d=>d.id),true)} style={{fontSize:11,color:"#475569",background:"none",border:"1px solid #CBD5E1",borderRadius:6,padding:"3px 10px",cursor:"pointer"}}>Hide All</button>}
+                      {onSetDaysHidden&&<button type="button" onClick={()=>onSetDaysHidden(c.days.map(d=>d.id),false)} style={{fontSize:11,color:"#475569",background:"none",border:"1px solid #CBD5E1",borderRadius:6,padding:"3px 10px",cursor:"pointer"}}>Show All</button>}
+                      {onRemoveClosure&&<button type="button" onClick={()=>onRemoveClosure(c.label)} style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}}>Remove</button>}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                    {c.days.map(d=>(
+                      <label key={d.id} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,color:"#1E293B",border:"1px solid #E2E8F0",borderRadius:6,padding:"3px 7px",background:d.hidden?"#F1F5F9":"#fff",cursor:"pointer"}}>
+                        <input type="checkbox" checked={d.hidden} onChange={e=>onSetDaysHidden&&onSetDaysHidden([d.id],e.target.checked)} style={{width:13,height:13}}/>
+                        {shortDay(d.dateStr)} <span style={{color:"#94A3B8"}}>Hide</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
           </div>
           <div>
             <div style={{fontSize:14,fontWeight:600,color:"#1E293B",marginBottom:8}}>Public Holidays</div>
@@ -1427,6 +1467,74 @@ function MainApp({currentUser,onLogout}) {
     catch{setError("Could not save the public holiday region - it'll reset next time the page loads.");}
   }
 
+  // ── Annual Closure (Settings, TESTING_NOTES 2F #9c): one days_off row per
+  // grid day (Mon-Sat) in the range, all staff; rows of one closure share a
+  // label ("closure:start:end"). Each day can be hidden from the grid on its
+  // own (user: e.g. keep the first and last days showing).
+  async function addClosure(start,end){
+    if(!start||!end||end<start)return;
+    const have=new Set(daysOff.filter(d=>d.kind==="closure"&&!d.removed).map(d=>d.dateStr));
+    const dates=[];
+    for(let c=parseISO(start);isoDate(c)<=end;c=addDays(c,1))if(c.getDay()!==0&&!have.has(isoDate(c)))dates.push(isoDate(c));
+    if(dates.length===0)return;
+    try{
+      const rows=await db("POST","days_off",dates.map(ds=>({date_str:ds,kind:"closure",label:`closure:${start}:${end}`,auto:false})));
+      setDaysOff(prev=>[...prev,...rows.map(mapDayOff)]);
+    }catch{setError("Could not save the closure.");}
+  }
+  async function removeClosure(label){
+    const ids=daysOff.filter(d=>d.kind==="closure"&&d.label===label&&!d.removed).map(d=>d.id);
+    if(ids.length===0)return;
+    try{
+      await db("PATCH","days_off",{removed:true},`?id=in.(${ids.join(",")})`);
+      setDaysOff(prev=>prev.map(d=>ids.includes(d.id)?{...d,removed:true}:d));
+    }catch{setError("Could not remove the closure.");}
+  }
+  async function setDaysHidden(ids,hidden){
+    if(ids.length===0)return;
+    setDaysOff(prev=>prev.map(d=>ids.includes(d.id)?{...d,hidden}:d));
+    try{await db("PATCH","days_off",{hidden},`?id=in.(${ids.join(",")})`);}
+    catch{setError("Could not save that - it'll reset next time the page loads.");setDaysOff(prev=>prev.map(d=>ids.includes(d.id)?{...d,hidden:!hidden}:d));}
+  }
+  // ── RDOs (the entry form's RDO tab): one row per date, for the ticked staff.
+  async function saveRdo({staffIds,dateStr}){
+    if(!staffIds.length||!dateStr)return;
+    const already=new Set(daysOff.filter(d=>d.kind==="rdo"&&!d.removed&&d.dateStr===dateStr).flatMap(d=>d.staffIds||[]));
+    const ids=staffIds.filter(id=>!already.has(id));
+    if(ids.length===0){setEntryModal(null);return;}
+    try{
+      const [row]=await db("POST","days_off",[{date_str:dateStr,kind:"rdo",label:"RDO",staff_ids:ids.join(","),auto:false}]);
+      setDaysOff(prev=>[...prev,mapDayOff(row)]);
+      setEntryModal(null);
+    }catch{setError("Could not save the RDO.");}
+  }
+  // Clicking a grey RDO block: "Remove this RDO?" - just for that person.
+  function askRemoveRdo(staffId,dateStr){
+    const name=staff.find(s=>s.id===staffId)?.name||"this person";
+    const label=parseISO(dateStr).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"}).replace(",","");
+    setConflictAlert({
+      title:"Remove RDO",
+      message:`Remove this RDO for ${name} on ${label}?`,
+      confirmLabel:"Remove RDO",cancelLabel:"Cancel",
+      onConfirm:async()=>{
+        setConflictAlert(null);
+        const rows=daysOff.filter(d=>d.kind==="rdo"&&!d.removed&&d.dateStr===dateStr&&d.staffIds?.includes(staffId));
+        try{
+          for(const d of rows){
+            const left=d.staffIds.filter(id=>id!==staffId);
+            if(left.length>0)await db("PATCH","days_off",{staff_ids:left.join(",")},`?id=eq.${d.id}`);
+            else await db("PATCH","days_off",{removed:true},`?id=eq.${d.id}`);
+            setDaysOff(prev=>prev.map(x=>x.id===d.id?(left.length>0?{...x,staffIds:left}:{...x,removed:true}):x));
+          }
+        }catch{setError("Could not remove the RDO.");}
+      },
+      onCancel:()=>setConflictAlert(null),
+    });
+  }
+  function isRdoFor(dateStr,staffId){
+    return daysOff.some(d=>d.kind==="rdo"&&!d.removed&&d.dateStr===dateStr&&d.staffIds?.includes(staffId));
+  }
+
   const [viewWeeks,setViewWeeks]=useState(4);
   const [anchorDate,setAnchorDate]=useState(()=>mondayOf(TODAY));
 
@@ -1521,7 +1629,7 @@ function MainApp({currentUser,onLogout}) {
       setEntries(()=>_u);
     }
   }
-  const DAY_OFF_KINDS={public_holiday:"Public Holiday"};
+  const DAY_OFF_KINDS={public_holiday:"Public Holiday",closure:"Annual Closure",rdo:"RDO"};
   function dayOffLabel(ds,sid){
     const d=daysOff.find(x=>!x.removed&&x.dateStr===ds&&(!x.staffIds||x.staffIds.includes(sid)));
     return DAY_OFF_KINDS[d?.kind]||"Day Off";
@@ -1858,9 +1966,15 @@ function MainApp({currentUser,onLogout}) {
 
   const visibleDays=useMemo(()=>{
     const days=[];
-    for(let w=0;w<viewWeeks;w++)for(let d=0;d<6;d++)days.push(addDays(anchorDate,w*7+d)); // Mon-Sat
+    // Closure days ticked "Hide" in Settings drop out of the grid entirely
+    // (they're still days off for scheduling).
+    const hidden=new Set(daysOff.filter(d=>d.kind==="closure"&&!d.removed&&d.hidden).map(d=>d.dateStr));
+    for(let w=0;w<viewWeeks;w++)for(let d=0;d<6;d++){const day=addDays(anchorDate,w*7+d);if(!hidden.has(isoDate(day)))days.push(day);} // Mon-Sat
     return days;
-  },[anchorDate,viewWeeks]);
+  },[anchorDate,viewWeeks,daysOff]);
+  // With days hidden, a week no longer always starts at a multiple of 6 -
+  // a column starts a new week when its Monday differs from the one before.
+  const startsWeek=i=>i===0||isoDate(mondayOf(visibleDays[i]))!==isoDate(mondayOf(visibleDays[i-1]));
 
   const totalWeeks=viewWeeks;
   const weekStarts=Array.from({length:totalWeeks},(_,i)=>addDays(anchorDate,i*7));
@@ -3721,9 +3835,9 @@ function MainApp({currentUser,onLogout}) {
                   <th style={{border:"1px solid #E2E8F0",background:"#F8FAFC",padding:"4px 8px",fontSize:12,color:"#64748B",textAlign:"left",fontWeight:600,position:"sticky",top:0,left:0,zIndex:20,verticalAlign:"bottom",width:staffColWidth,minWidth:staffColWidth}}></th>
                   {visibleDays.map((d,i)=>{
                     const ds=isoDate(d);const isToday=ds===todayStr;
-                    const weekIdx=Math.floor(i/6);const isWeekBound=d.getDay()===1&&weekIdx>0;
+                    const isWeekBound=i>0&&startsWeek(i);
                     const isSat=d.getDay()===6;
-                    const isFirstDayOfWeek=i%6===0;
+                    const isFirstDayOfWeek=startsWeek(i);
                     // Desktop has plenty of room for a "Week of ..." banner
                     // (which already spells out the month) once per week, so
                     // repeating the month on every single day would just be
@@ -3747,7 +3861,7 @@ function MainApp({currentUser,onLogout}) {
                           </div>
                         ):totalWeeks>1&&isFirstDayOfWeek?(
                           <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
-                            Week of {formatDate(addDays(anchorDate,weekIdx*7))}
+                            Week of {formatDate(mondayOf(d))}
                           </div>
                         ):totalWeeks>1?(
                           <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:600,color:"#475569"}}>
@@ -3780,7 +3894,7 @@ function MainApp({currentUser,onLogout}) {
                       )}
                       {visibleDays.map((d,di)=>{
                         const ds=isoDate(d);const isToday=ds===todayStr;
-                        const weekIdx=Math.floor(di/5);const isWeekBound=d.getDay()===1&&weekIdx>0;
+                        const isWeekBound=di>0&&startsWeek(di);
                         const isSat=d.getDay()===6;
                         const k=`${st.id}|${ds}|${slot}`;
                         const entry=entryMap[k];
@@ -3929,7 +4043,7 @@ function MainApp({currentUser,onLogout}) {
                                   </div>
                                 : renderEntryBlock(entry,overMaxDays.has(`${st.id}|${ds}`))
                               : isDayOff(ds,st.id)&&!isDrop
-                                ? <DayOffSlot label={slot===0?dayOffLabel(ds,st.id):""} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} canEdit={canEdit} isPastDate={isPast(ds)}/>
+                                ? <DayOffSlot label={slot===0?dayOffLabel(ds,st.id):""} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isRdoFor(ds,st.id)?()=>askRemoveRdo(st.id,ds):()=>openNewEntry(st.id,ds,slot)} canEdit={canEdit} isPastDate={isPast(ds)}/>
                               : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} availableHours={availableHours}/>
                             }
                           </td>
@@ -3978,11 +4092,11 @@ function MainApp({currentUser,onLogout}) {
         </div>
       )}
 
-      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={jobs} subItems={subItems} entries={entries} onSave={saveEntry} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
+      {entryModal&&<EntryModal data={entryModal} staff={staff} jobs={jobs} subItems={subItems} entries={entries} onSave={saveEntry} onSaveRdo={canEdit?saveRdo:null} onRemove={removeEntry} onClose={()=>setEntryModal(null)} saving={saving}/>}
       {jobModal&&<JobModal data={jobModal} onSave={saveJob} onDelete={deleteJob} onToggleComplete={toggleJobCompleted} onClose={()=>setJobModal(null)} saving={saving}/>}
       {staffModal&&<StaffModal data={staffModal} onSave={saveStaff} onRemove={removeStaff} onClose={()=>setStaffModal(null)} onMove={moveStaffOrder} isFirst={orderedStaff[0]?.id===staffModal.id} isLast={orderedStaff[orderedStaff.length-1]?.id===staffModal.id} saving={saving}/>}
       {userMgmtOpen&&<UserManagementModal onClose={()=>setUserMgmtOpen(false)}/>}
-      {settingsOpen&&<SettingsModal onClose={()=>setSettingsOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline} workStart={workStart} workEnd={workEnd} lunchMinutes={lunchMinutes} onChangeWorkHours={changeWorkHours} holidayRegion={holidayRegion} onChangeHolidayRegion={changeHolidayRegion} daysOff={daysOff} onRemoveDayOff={removeDayOff} onAddHoliday={addPublicHoliday}/>}
+      {settingsOpen&&<SettingsModal onClose={()=>setSettingsOpen(false)} themeKey={themeKey} onChangeTheme={changeTheme} logoSrc={logoSrc} onChangeLogo={changeLogo} onResetLogo={resetLogo} companyName={companyName} onChangeCompanyName={changeCompanyName} companyTagline={companyTagline} onChangeCompanyTagline={changeCompanyTagline} workStart={workStart} workEnd={workEnd} lunchMinutes={lunchMinutes} onChangeWorkHours={changeWorkHours} holidayRegion={holidayRegion} onChangeHolidayRegion={changeHolidayRegion} daysOff={daysOff} onRemoveDayOff={removeDayOff} onAddHoliday={addPublicHoliday} onAddClosure={addClosure} onRemoveClosure={removeClosure} onSetDaysHidden={setDaysHidden}/>}
       {conflictAlert&&<ConfirmModal title={conflictAlert.title||"⚠ Scheduling Conflict"} message={conflictAlert.message} cancelLabel={conflictAlert.cancelLabel||"Go Back"} confirmLabel={conflictAlert.confirmLabel||"Schedule Anyway"} danger onConfirm={conflictAlert.onConfirm} onCancel={conflictAlert.onCancel}/>}
       {idleJobPrompt&&<ConfirmModal title="Job idle a month" message={`Job ${idleJobPrompt.job.jobNo}, ${idleJobPrompt.job.name} most recent scheduled date is ${formatDate(parseISO(idleJobPrompt.job.maxDate))}. Do you want to close this Job?`} confirmLabel="Close Job" cancelLabel="Not Yet"
         onConfirm={()=>{toggleJobCompleted(idleJobPrompt.job.id,true);dismissedIdleJobsRef.current.add(idleJobPrompt.job.id);setIdleJobPrompt(null);}}
@@ -4097,7 +4211,7 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
 
 // ── Entry Modal ───────────────────────────────────────────────
 
-function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,saving}) {
+function EntryModal({data,staff,jobs,subItems,entries,onSave,onSaveRdo,onRemove,onClose,saving}) {
   const [form,setForm]=useState(()=>{
     const jobSubs=subItems.filter(s=>s.jobId===data.jobId);
     const defaultSub=data.subItemId||(jobSubs[0]?.id||"");
@@ -4237,6 +4351,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
   },[autoFill,form.dateStr,totalHours,productiveHours,form.entryType,sameDayStaffId,form.slot,entries,form.subItemId]);
 
   function handleSave(){
+    if(form.entryType==="rdo"){onSaveRdo&&onSaveRdo({staffIds:form.staffIds,dateStr:form.dateStr});return;}
     const staffToSchedule=form.staffIds.length>0?form.staffIds:[form.staffId].filter(Boolean);
     if(staffToSchedule.length===0)return;
     if(form.entryType==="misc"){if(!form.miscNote.trim())return;}
@@ -4377,7 +4492,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
       {/* Entry type switcher */}
       {/* Same look as the Slot 1 / Slot 2 buttons, so the choice stands out */}
       <div style={{display:"flex",gap:8,marginBottom:16}}>
-        {[["job","📋 Job Entry"],["misc","Misc Entry"]].map(([type,label])=>(
+        {[["job","📋 Job Entry"],["misc","Misc Entry"],...(form.mode==="new"&&onSaveRdo?[["rdo","RDO"]]:[])].map(([type,label])=>(
           <button key={type} type="button" onClick={()=>set("entryType",type)}
             style={{flex:1,padding:"8px",borderRadius:8,border:`1.5px solid ${form.entryType===type?"#1D4ED8":"#93C5FD"}`,background:form.entryType===type?"#3B82F6":"#EFF6FF",color:form.entryType===type?"#fff":"#1D4ED8",fontSize:13,fontWeight:600,cursor:"pointer"}}>
             {label}
@@ -4385,6 +4500,32 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
         ))}
       </div>
 
+      {form.entryType==="rdo"?(
+        // RDO (TESTING_NOTES 2F #9c): tick the staff, pick the date.
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+          <div>
+            <div style={FIELD_LABEL}>Staff Member(s)</div>
+            <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:200,overflowY:"auto",border:"1px solid #CBD5E1",borderRadius:8,padding:"6px 10px"}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155",fontWeight:600,borderBottom:"1px solid #F1F5F9",paddingBottom:4}}>
+                <input type="checkbox" checked={staff.length>0&&form.staffIds.length===staff.length} onChange={e=>setForm(f=>({...f,staffIds:e.target.checked?staff.map(s=>s.id):[]}))} style={{width:14,height:14}}/>
+                All staff
+              </label>
+              {staff.map(s=>(
+                <label key={s.id} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#334155"}}>
+                  <input type="checkbox" checked={form.staffIds.includes(s.id)} onChange={e=>setForm(f=>({...f,staffIds:e.target.checked?[...f.staffIds,s.id]:f.staffIds.filter(id=>id!==s.id)}))} style={{width:14,height:14}}/>
+                  {s.name}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={FIELD_LABEL}>Date</div>
+            <input type="date" value={form.dateStr} min={todayStr} onChange={e=>setForm(f=>({...f,dateStr:e.target.value}))}
+              style={{width:170,padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+            <div style={{fontSize:12,color:"#1E293B",marginTop:8}}>Shown as a grey "RDO" for the ticked staff. Work already booked that day gets the Move Forward option.</div>
+          </div>
+        </div>
+      ):(
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
         {/* Left column: who, and what */}
         <div>
@@ -4563,13 +4704,14 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onRemove,onClose,sa
           )}
         </div>
       </div>
+      )}
 
       <div style={{display:"flex",gap:8,justifyContent:"space-between",marginTop:16}}>
         <div>{form.mode==="edit"&&<Btn variant="danger" onClick={()=>onRemove(form.id)} disabled={saving}>Remove</Btn>}</div>
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onClose} disabled={saving}>Cancel</Btn>
           <Btn variant="primary" onClick={handleSave} loading={saving}>
-            {saving?"Scheduling...":(autoFill&&form.entryType!=="misc"&&form.staffIds.length>1?`Schedule ${form.staffIds.length} staff`:autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save")}
+            {form.entryType==="rdo"?"Save RDO":saving?"Scheduling...":(autoFill&&form.entryType!=="misc"&&form.staffIds.length>1?`Schedule ${form.staffIds.length} staff`:autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save")}
           </Btn>
         </div>
       </div>
