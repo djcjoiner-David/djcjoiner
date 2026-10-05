@@ -3,7 +3,7 @@
 // Catch-up, keeps its own hours, doesn't eat into the item's budget (the
 // existing entry is untouched), shows "↺ Catch-up" on the grid, and the
 // modal shows the running Catch-up total for the item.
-import { launch, settle, cell, newEntry, input, button, at, staff, job, item, entry, businessDayStr, reporter, cellText } from './harness.mjs';
+import { launch, settle, cell, block, newEntry, input, button, at, staff, job, item, entry, businessDayStr, reporter, cellText } from './harness.mjs';
 
 const r = reporter('Catch-up Hours on a fully-allocated item');
 const D = n => businessDayStr(n);
@@ -25,9 +25,13 @@ try {
   r.check('saved as Catch-up with its own 4h', c && c.is_catch_up === true && Number(c.hours) === 4, c);
   r.check('existing 8h entry untouched (Catch-up not in budget math)', Number(at(db, 's1', D(2), 0)[0].hours) === 8, at(db, 's1', D(2), 0));
   r.check('grid shows the Catch-up tag', (await cellText(page, 'Ian', D(3), 0)).includes('Catch-up'), await cellText(page, 'Ian', D(3), 0));
-  // running total shown when scheduling the same item again
+  // The Catch-up line belongs to the Catch-up entry itself (user, 2F #10):
+  // not shown when scheduling the item again, shown when editing it.
   await newEntry(page, 'Ian', D(4), 0, { itemId: 'i1', autoFill: false });
-  r.check('modal shows "4hrs Catch-up logged for this item"', await page.locator('text=/^4hrs Catch-up logged for this item, not deducted from item total hrs\\.$/').count() > 0);
+  r.check('new entry form shows no Catch-up line', await page.locator('text=/Catch-up logged for this/').count() === 0);
+  await button(page, 'Cancel').click();
+  await (await block(page, 'Ian', D(3), 0)).click();
+  r.check('editing the Catch-up entry shows "4hrs Catch-up logged for this entry"', await page.locator('text=/^4hrs Catch-up logged for this entry, not deducted from item total hrs\\.$/').count() > 0);
 } catch (e) { r.error(e); }
 await browser.close();
 r.done();
