@@ -1105,9 +1105,31 @@ hashed passwords never sent back, no leaked database errors).
       - Test: `test-public-holidays.mjs` (3 scenarios, 18 checks, stand-in
         holiday list via the harness's new `routes` option) - fails on
         main, passes after.
-   c. **RDOs** (one date, all or selected staff) and **Annual Closure**
-      (date range, all staff, with a "Hide these days" option and a
-      grid button to show/hide them) - details to agree when reached.
+   c. **FIXED (closures & RDOs PR). RDOs and Annual Closure.**
+      - User's rules: Annual Closure in Settings - a date range for all
+        staff, grey "Annual Closure"; hiding is chosen DATE BY DATE (e.g.
+        keep the first and last days showing). RDOs from a third "RDO" tab
+        on the New Schedule Entry form (managers too), ticked staff, one
+        date at a time; grey "RDO" for those staff only; clicking one asks
+        "Remove this RDO?". Work already booked on either gets the same
+        Move Forward pop-up (RDO: those staff only).
+      - What shipped:
+        - `days_off.hidden` column (user ran the ALTER). Closure = one row
+          per Mon-Sat day, `kind:"closure"`, rows of one closure share
+          `label` "closure:start:end". RDO = one row per date,
+          `kind:"rdo"`, `staff_ids` comma list.
+        - Settings "Annual Closure": From/To + Add Closure; each closure
+          lists its days with a "Hide" tick each, Hide All / Show All,
+          Remove.
+        - Grid: hidden closure days drop out of `visibleDays`; week
+          banners/borders now follow each date's own Monday (`startsWeek`)
+          instead of counting columns in sixes.
+        - Scheduling already skips them (2F #9b registry; RDOs per staff).
+        - RDO tab: All staff / per-person ticks + date, "Save RDO".
+          Removing one person takes them off the row (row removed when
+          nobody's left).
+      - Test: `test-closures-rdos.mjs` (2 scenarios, 16 checks) - fails on
+        main, passes after.
 
 11. **FIXED (settings PR). Settings button (user's request).**
     - New "Settings" button in the header, admin only, next to Users.
