@@ -1063,7 +1063,7 @@ hashed passwords never sent back, no leaked database errors).
           gendered pronoun). Confirm Anyway locks both entries that day.
       - Test: `test-tentative.mjs` (5 scenarios, 23 checks) - fails on
         main, passes after.
-   b. **Public holidays (all staff).** A "Days Off" list kept separate
+   b. **FIXED (public holidays PR). Public holidays (all staff).** A "Days Off" list kept separate
       from job entries. Holidays load automatically from a free online
       public-holiday list for the country/state picked once in Settings
       (so other businesses can pick their own); editable. Shown as a grey
@@ -1073,6 +1073,38 @@ hashed passwords never sent back, no leaked database errors).
       on forward by the working days lost (user confirmed: Ian's Driscoll
       Mon-Thu + holiday Tue -> ends Fri, his next job moves along too;
       staff with nothing booked that day don't move).
+      - User's final rules: region chosen in Settings (user is NSW);
+        NSW "Bank Holiday" left out (banking only); grid shows just "Public
+        Holiday", no holiday name; manual work on one asks first; work
+        already booked on one gets a Move Forward pop-up; Settings lists
+        them with Remove / Add Day.
+      - What shipped:
+        - `days_off` table (id, date_str, kind, label, staff_ids, auto,
+          removed, created_at) - the user ran the CREATE TABLE. Built for
+          closures and RDOs too (`staff_ids` null = everyone).
+        - `fetchPublicHolidays(region)`: Nager.Date list (this year + next),
+          type "Public" only, global or for the region, nothing named Bank
+          Holiday. Editors sync it on load: new days added (auto), future
+          auto days that no longer apply (region changed) deleted, days the
+          user removed stay removed. Offline = no change.
+        - Module-level registry `isDayOff(d,staffId)` /
+          `isNonWorkingDay` kept in step by MainApp; auto-fill, group fill,
+          First Available, block fit, gap alerts (`autoFillDayGap`) and
+          `addWorkingDays` skip days off like weekends. A gap across a
+          holiday is not a "break".
+        - Grid: `DayOffSlot` grey block, "Public Holiday" in Slot 1, header
+          shaded. Still clickable.
+        - `askDayOff`: "⚠ Day Off" pop-up (Schedule Anyway / Go Back) for a
+          new entry, an edit moved onto one, drag move/copy, group move/copy.
+        - Move Forward: work booked BEFORE the day off was added (so not a
+          deliberate Schedule Anyway) triggers "⚠ Work booked on a day off"
+          (Move Forward / Not Now). `planMoveForward` moves each affected
+          person's entries from that day on by the working days lost
+          (skipping weekends and days off), never landing two days on one;
+          people with nothing that day don't move. One undo step.
+      - Test: `test-public-holidays.mjs` (3 scenarios, 18 checks, stand-in
+        holiday list via the harness's new `routes` option) - fails on
+        main, passes after.
    c. **RDOs** (one date, all or selected staff) and **Annual Closure**
       (date range, all staff, with a "Hide these days" option and a
       grid button to show/hide them) - details to agree when reached.

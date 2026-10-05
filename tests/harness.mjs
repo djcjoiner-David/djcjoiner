@@ -111,13 +111,16 @@ export function makeDb(seed) {
 }
 
 // ---- browser -------------------------------------------------------------
-export async function launch(seed, { width = 1800, height = 1100, role = 'admin', weeks = 4 } = {}) {
+// routes: extra [urlPattern, handler] pairs set up before the page loads
+// (e.g. a stand-in for the online public holiday list).
+export async function launch(seed, { width = 1800, height = 1100, role = 'admin', weeks = 4, routes = [] } = {}) {
   let browser;
   try { browser = await chromium.launch(); }
   catch { browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' }); }
   const page = await browser.newPage({ viewport: { width, height } });
   const db = makeDb(seed);
   await page.route('**/api/db*', db.handle);
+  for (const [pattern, handler] of routes) await page.route(pattern, handler);
   await page.addInitScript(r => sessionStorage.setItem('djc_user', JSON.stringify({ email: 't@t', role: r, name: 'Tester', id: 'u1', token: 'tok' })), role);
   const pageErrors = [];
   page.on('pageerror', e => { pageErrors.push(e.message); console.log('PAGEERROR', e.message); });
