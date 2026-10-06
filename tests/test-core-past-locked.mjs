@@ -17,7 +17,7 @@ try {
   r.check('past entry is not draggable', (await b.getAttribute('draggable')) === 'false');
   await b.click();
   await settle(db, 1000);
-  r.check('clicking it opens no edit form', await page.locator('div:has(> div:text-is("Hours")) > input').count() === 0);
+  r.check('clicking it opens no edit form', await page.locator('div:has(> div:text-is("Hours")) input').count() === 0);
 } catch (e) { r.error(e); }
 await browser.close();
 r.done();

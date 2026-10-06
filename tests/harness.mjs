@@ -226,7 +226,7 @@ export function summarize(entries) {
 }
 
 // ---- form helpers (modal fields are a label <div> followed by the control)
-export function input(page, label) { return page.locator(`div:has(> div:text-is("${label}")) > input`).last(); }
+export function input(page, label) { return page.locator(`div:has(> div:text-is("${label}")) input`).last(); }
 export function select(page, label) { return page.locator(`div:has(> div:text-is("${label}")) > select`).last(); }
 export function button(page, text) { return page.locator('button', { hasText: text instanceof RegExp ? text : new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }).last(); }
 // Opens a new-entry modal on an empty cell and fills job/item.

@@ -20,7 +20,7 @@ try {
   const c = at(db, 's2', D(4), 0)[0];
   r.check('single copy kept, tagged Catch-up, 8h', c && c.is_catch_up === true && Number(c.hours) === 8, c);
   r.check('original untouched', Number(at(db, 's1', D(2), 0)[0].hours) === 8);
-  r.check('entry modal auto-opened on the copy', await page.locator('div:has(> div:text-is("Hours")) > input').count() > 0);
+  r.check('entry modal auto-opened on the copy', await page.locator('div:has(> div:text-is("Hours")) input').count() > 0);
   await page.keyboard.press('Escape');
   await button(page, 'Cancel').click().catch(() => {});
   // group copy of both
