@@ -1,6 +1,6 @@
 // PR #31 (2A #6, 2B #4): a move or group move that lands an item on
 // lower-capacity staff, leaving it short of its budget, auto-extends the
-// schedule forward with the continuing staff, shows "Extended by N day(s)",
+// schedule forward with the continuing staff, shows where the hours went (grey note),
 // and the extension undoes in the same single click as the move.
 import { launch, settle, cell, block, drag, button, snap, eq, itemTotal, rows, staff, job, item, entry, businessDayStr, reporter } from './harness.mjs';
 
@@ -22,7 +22,9 @@ try {
   await drag(page, db, await block(page, 'Mark', D(3), 0), await cell(page, 'Jenny', D(3), 0));
   r.check('single move: item back at its full 16h', itemTotal(db, 'i1') === 16, rows(db, e => e.sub_item_id === 'i1'));
   r.check('single move: extension placed after the last day', rows(db, e => e.sub_item_id === 'i1' && e.date_str > D(3)).length >= 1);
-  r.check('single move: "Extended by" message shown', await page.locator('text=/Extended by 1 day/').count() > 0);
+  // (2F #15: says where the hours went, as a grey note - not a red error)
+  r.check('single move: note says where the hours went', await page.locator('text=/^Kitchen: 2hrs moved to Jenny, \\w{3} \\d{2} \\w{3}\\.$/').count() === 1);
+  r.check('single move: it is not shown as a red error', await page.locator('text=/^⚠ Kitchen/').count() === 0);
   await page.click('text=↩ Undo'); await settle(db);
   r.check('single move: one Undo removes move AND extension', eq(snap(db), s0), snap(db));
 

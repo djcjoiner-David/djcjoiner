@@ -1700,6 +1700,16 @@ function MainApp({currentUser,onLogout}) {
   const [userMgmtOpen,setUserMgmtOpen]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
   const [error,setError]=useState(null);
+  // Grey notes (2F #15): explanations and "the app did this for you" -
+  // shown where errors show, but calm grey/black; they stay 8 seconds then
+  // fade slowly. Red (setError) is kept for things that failed to save.
+  const [notes,setNotes]=useState([]);
+  function showNote(text){
+    const id=`${Date.now()}_${Math.random()}`;
+    setNotes(p=>[...p,{id,text,fading:false}]);
+    setTimeout(()=>setNotes(p=>p.map(n=>n.id===id?{...n,fading:true}:n)),8000);
+    setTimeout(()=>setNotes(p=>p.filter(n=>n.id!==id)),10500);
+  }
 
   const dragEntry=useRef(null);
   const dragStaff=useRef(null);
@@ -2322,8 +2332,15 @@ function MainApp({currentUser,onLogout}) {
     const inserted=await db("POST","entries",rows);
     const newEntries=inserted.map(mapInsertedEntry);
     setEntries(prev=>[...prev,...newEntries]);
-    const daySpan=new Set(extension.map(r=>r.dateStr)).size;
-    setError(`Extended by ${daySpan} day${daySpan===1?"":"s"} to cover the full ${si.totalHours}h budget.`);
+    // Say exactly where the hours went (user, 2F #15): one line per person.
+    const fmtDay=ds=>parseISO(ds).toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"}).replace(",","");
+    const byStaff=new Map();
+    extension.forEach(r=>{const b=byStaff.get(r.staffId)||{hours:0,dates:[]};b.hours+=Number(r.hours)||0;b.dates.push(r.dateStr);byStaff.set(r.staffId,b);});
+    byStaff.forEach((b,sid)=>{
+      const ds=b.dates.sort();
+      const span=ds[0]===ds[ds.length-1]?fmtDay(ds[0]):`${fmtDay(ds[0])} – ${fmtDay(ds[ds.length-1])}`;
+      showNote(`${si.name}${tentative?" (Tentative)":""}: ${Math.round(b.hours*100)/100}hrs moved to ${staff.find(s=>s.id===sid)?.name||"staff"}, ${span}.`);
+    });
     return [...pool,...newEntries];
   }
 
@@ -2634,7 +2651,7 @@ function MainApp({currentUser,onLogout}) {
         const blocked=toDelete.filter(s=>entries.some(e=>e.subItemId===s.id));
         if(blocked.length>0){
           setSaving(false);
-          setError(`Can't remove "${blocked.map(s=>s.name).join(", ")}" - it still has scheduled entries. Unschedule it from Job Summary first.`);
+          showNote(`Can't remove "${blocked.map(s=>s.name).join(", ")}" - it still has scheduled entries. Unschedule it from Job Summary first.`);
           return;
         }
         for(const s of toDelete)await db("DELETE","sub_items",null,`?id=eq.${s.id}`);
@@ -2690,7 +2707,7 @@ function MainApp({currentUser,onLogout}) {
     if(completed){
       const futureCount=entries.filter(e=>e.jobId===id&&e.dateStr>=todayStr).length;
       if(futureCount>0){
-        setError(`Can't close this job - it still has ${futureCount} entr${futureCount===1?"y":"ies"} scheduled from today onward.`);
+        showNote(`Can't close this job - it still has ${futureCount} entr${futureCount===1?"y":"ies"} scheduled from today onward.`);
         return;
       }
     }
@@ -2840,7 +2857,7 @@ function MainApp({currentUser,onLogout}) {
       });
       const activeIds=idsToMove.filter(id=>!skippedIds.has(id));
       if(activeIds.length===0){
-        setError("Couldn't move - every destination slot is already taken.");
+        showNote("Couldn't move - every destination slot is already taken.");
         return;
       }
       // Any destination day where that person has no hours left: ONE
@@ -2953,7 +2970,7 @@ function MainApp({currentUser,onLogout}) {
           }));
           pool=mergeItemPools(settledPool,branches);
         }
-        if(skippedIds.size>0)setError(`${skippedIds.size} placement${skippedIds.size===1?"":"s"} couldn't land - both slots were already taken. Extending the schedule to cover it.`);
+        if(skippedIds.size>0)showNote(`${skippedIds.size} placement${skippedIds.size===1?"":"s"} couldn't land - both slots were already taken. Extending the schedule to cover it.`);
         pool=await settleTentativeBeside(_u,pool);
         pushUndoSnapshot(_u,pool);
       }catch(err){
@@ -3005,7 +3022,7 @@ function MainApp({currentUser,onLogout}) {
       const skipped=planned.filter(p=>!!entryMap[`${p.newStaffId}|${p.newDate}|${p.newSlot}`]);
       const toInsert=planned.filter(p=>!entryMap[`${p.newStaffId}|${p.newDate}|${p.newSlot}`]);
       if(toInsert.length===0){
-        setError("Couldn't paste - every target slot is already occupied.");
+        showNote("Couldn't paste - every target slot is already occupied.");
         return;
       }
       // Any destination day where that person has no hours left: ONE
@@ -3060,7 +3077,7 @@ function MainApp({currentUser,onLogout}) {
         hoursLocked:forcedFlags[i],isCatchUp:isCatchUpFlags[i],isTentative:!!en.isTentative
       }));
       setEntries(prev=>[...prev,...tempEntries]);
-      if(skipped.length>0) setError(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
+      if(skipped.length>0) showNote(`Pasted ${toInsert.length} - skipped ${skipped.length} (slot already occupied).`);
       // A single destination click lands the paste and exits Copy mode, the
       // same as Move - it shouldn't take an extra Enter/click to settle.
       setSelectedEntries(new Set());
@@ -3112,7 +3129,7 @@ function MainApp({currentUser,onLogout}) {
         if(toInsert.length===1&&catchUpCount===1&&newEntries[0]){
           openEditEntry(newEntries[0]);
         }else if(catchUpCount>0){
-          setError(`Pasted ${toInsert.length} - ${catchUpCount} logged as Catch-up Hours (already fully budgeted). Review them on the grid.`);
+          showNote(`Pasted ${toInsert.length} - ${catchUpCount} logged as Catch-up Hours (already fully budgeted). Review them on the grid.`);
         }
       }catch(err){
         setError("Failed to copy entries.");
@@ -3264,7 +3281,7 @@ function MainApp({currentUser,onLogout}) {
     if(entry.staffId===toStaffId&&entry.dateStr===toDateStr&&entry.slot===toSlot){dragEntry.current=null;return;}
     if(isCopyDrag){
       if(entryMap[`${toStaffId}|${toDateStr}|${toSlot}`]){
-        setError("Couldn't copy - that slot is already occupied.");
+        showNote("Couldn't copy - that slot is already occupied.");
         dragEntry.current=null;
         return;
       }
@@ -3803,6 +3820,12 @@ function MainApp({currentUser,onLogout}) {
           <button onClick={()=>setError(null)} style={{background:"none",border:"none",color:"#DC2626",cursor:"pointer",fontSize:16}}>×</button>
         </div>
       )}
+      {notes.map(n=>(
+        <div key={n.id} style={{background:"#F1F5F9",borderBottom:"1px solid #E2E8F0",padding:"8px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,opacity:n.fading?0:1,transition:"opacity 2.5s ease"}}>
+          <span style={{color:"#0F172A",fontSize:14}}>{n.text}</span>
+          <button onClick={()=>setNotes(p=>p.filter(x=>x.id!==n.id))} style={{background:"none",border:"none",color:"#64748B",cursor:"pointer",fontSize:16}}>×</button>
+        </div>
+      ))}
 
       {/* Schedule Tab */}
       {tab==="schedule"&&(
@@ -4636,15 +4659,6 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onSaveRdo,onRemove,
                   <option value="">General / no item</option>
                 </Sel>
               )}
-              {/* Tentative (TESTING_NOTES 2F #9a): faded on the grid, and its
-                  hours never limit the person's other slot. */}
-              <button type="button" onClick={()=>set("isTentative",!form.isTentative)}
-                style={{width:"100%",padding:"8px",borderRadius:8,border:`1.5px dashed ${form.isTentative?"#B45309":"#94A3B8"}`,background:form.isTentative?"#FEF3C7":"#fff",color:form.isTentative?"#92400E":"#475569",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                {form.isTentative?"✓ Tentative":"Tentative"}
-              </button>
-              {form.mode==="edit"&&data.isTentative&&!form.isTentative&&(
-                <div style={{fontSize:12,color:"#1E293B",marginTop:6}}>Saving confirms every tentative entry for {selectedSub?.name||"this item"}.</div>
-              )}
             </>
           )}
         </div>
@@ -4659,6 +4673,19 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onSaveRdo,onRemove,
               </button>
             ))}
           </div>
+          {/* Tentative (TESTING_NOTES 2F #9a/#15): same size and blue as the
+              Slot buttons; striped like a tentative entry when it's on. */}
+          {form.entryType!=="misc"&&(
+            <div style={{marginBottom:8}}>
+              <button type="button" onClick={()=>set("isTentative",!form.isTentative)}
+                style={{width:"100%",padding:"8px",borderRadius:8,border:`1.5px ${form.isTentative?"dashed":"solid"} ${form.isTentative?"#1D4ED8":"#93C5FD"}`,background:form.isTentative?"repeating-linear-gradient(135deg,#DBEAFE 0 6px,#fff 6px 12px)":"#EFF6FF",color:"#1D4ED8",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                {form.isTentative?"Tentative – Click to schedule as Confirmed":"Schedule as Tentative"}
+              </button>
+              {form.mode==="edit"&&data.isTentative&&!form.isTentative&&(
+                <div style={{fontSize:12,color:"#1E293B",marginTop:6}}>Saving confirms every tentative entry for {selectedSub?.name||"this item"}.</div>
+              )}
+            </div>
+          )}
           <div style={{marginBottom:14}}>
             <div style={FIELD_LABEL}>Start Date</div>
             {/* A shorter date box, with First Available right beside it */}

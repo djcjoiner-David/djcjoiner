@@ -1240,6 +1240,30 @@ hashed passwords never sent back, no leaked database errors).
     - Test: `test-landscape-phone.mjs` (no rotate screen, header under
       40px, 4+ people on screen, portrait unchanged) - fails on main.
 
+15. **FIXED (notes + button PR). Calmer messages, and a better Tentative
+    button (user's live testing).**
+    - Messages: red is now only for things that FAILED to save (they stay
+      until closed). Explanations ("Couldn't copy - that slot is already
+      occupied", "Can't close this job...", "Can't remove ...") and
+      "the app did this for you" ("Pasted 4 - skipped 1", Catch-up on
+      paste, placements that couldn't land) are a grey note with black
+      text in the same place: stays 8 seconds, then fades slowly (×
+      closes it early). `showNote()` in MainApp.
+    - The old "Extended by 3 days to cover the full 22h budget." (shown
+      red) now says where the hours went, one line per person:
+      "Mudroom W (Tentative): 7.5hrs moved to Ian, Thu 29 Oct – Fri 30
+      Oct." Rule unchanged (user chose "current rule"): lost hours go to
+      whoever works the item on its last day.
+    - Undo still clears on refresh (user agreed - the schedule may have
+      changed in between).
+    - Tentative button: moved to the right under Slot 1/Slot 2, same size
+      and blue as the Slot buttons, no tick. Off: "Schedule as Tentative".
+      On: blue stripes + dashed border, "Tentative – Click to schedule as
+      Confirmed".
+    - Tests: `test-tentative` (note wording, grey not red, fades),
+      `test-auto-extend` (new wording), button labels in
+      `test-tentative`/`test-slot-hop`.
+
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
    with the user: the flat "total budget" placeholder on an ordinary,

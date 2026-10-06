@@ -21,7 +21,7 @@ async function schedule(entries, tentative) {
   try {
     await settle(db);
     await newEntry(page, 'David 7', W(0), 0, { itemId: 'iW' });
-    if (tentative) await button(page, 'Tentative').click();
+    if (tentative) await button(page, 'Schedule as Tentative').click();
     await page.locator('div:has(> div:text-is("Hours to Deduct from Budget")) input[type=number]').fill('10');
     await page.locator('button', { hasText: /^Schedule \d+ days?$/ }).click();
     await sleep(800);

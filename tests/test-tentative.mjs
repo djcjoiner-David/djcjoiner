@@ -28,7 +28,7 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
   try {
     await settle(db);
     await newEntry(page, 'Mark', D(1), 0, { itemId: 'iV' });
-    await button(page, 'Tentative').click();
+    await button(page, 'Schedule as Tentative').click();
     await hoursBox(page).fill('16');
     await page.locator('button', { hasText: /^Schedule \d+ days$/ }).click();
     await settle(db, 2500);
@@ -48,6 +48,12 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
     r.check('confirmed Laundry booked 8h on day 1, not tentative', l.length === 1 && l[0].date_str === D(1) && Number(l[0].hours) === 8 && !l[0].is_tentative, l);
     v = rows(db, e => e.sub_item_id === 'iV' && Number(e.hours) > 0.05);
     r.check('tentative Vanity gave way: still 16h, none on day 1, moved on to day 3', sum(v) === 16 && !v.some(e => e.date_str === D(1)) && v.some(e => e.date_str === D(3)) && v.every(e => e.is_tentative), v);
+    // 2F #15: a calm grey note says where the tentative hours went, then fades.
+    const note = page.locator('text=/^Vanity \\(Tentative\\): 8hrs moved to Mark, \\w{3} \\d{2} \\w{3}\\.$/');
+    r.check('grey note: "Vanity (Tentative): 8hrs moved to Mark, <day>."', await note.count() === 1);
+    r.check('note is grey, not the red error bar', await page.locator('text=/^⚠ Vanity/').count() === 0);
+    await sleep(11000);
+    r.check('note fades away by itself', await note.count() === 0);
 
     // Job Summary: tag + Confirm Booking (no one over max -> no warning).
     await page.locator('text=Job Summary').first().click();
@@ -78,7 +84,7 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
   try {
     await settle(db);
     await newEntry(page, 'Mark', D(1), 1, { itemId: 'iV' });
-    await button(page, 'Tentative').click();
+    await button(page, 'Schedule as Tentative').click();
     await hoursBox(page).fill('16');
     await page.locator('button', { hasText: /^Schedule \d+ days$/ }).click();
     await settle(db, 2500);
@@ -110,7 +116,7 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
     await settle(db);
     r.check('before confirming: no red Conflict (tentative never puts the day over)', (await (await cell(page, 'Mark', D(1), 0)).locator('text=⚠ Conflict').count()) === 0);
     await (await block(page, 'Mark', D(1), 1)).click();
-    await button(page, '✓ Tentative').click();
+    await button(page, 'Tentative – Click to schedule as Confirmed').click();
     r.check('Edit form says saving confirms the item', await page.locator('text=Saving confirms every tentative entry for Vanity.').count() === 1);
     await button(page, 'Save').click();
     const msg = page.locator('text=/^Confirming Vanity puts Mark over the 8hrs daily max on \\w{3} \\d{2} \\w{3}\\. Those days will show a conflict\\. Consider moving hours to the next day\\. Confirm anyway\\?$/');
