@@ -526,8 +526,21 @@ look rather than being folded into any of the four above.
      creating a new Conflict pair unsafe until that's fixed. Re-add
      "Schedule Anyway" once item 1 ships.
 
-8. **Mobile layout shows wrong hours/labels for Catch-up entries -
-   desktop is correct, phone is not.** Not yet investigated (logged
+8. **RESOLVED (mobile PR). Mobile layout shows wrong hours/labels for
+   Catch-up entries - desktop is correct, phone is not.**
+   - Investigation: there is exactly one drawing path for entries
+     (`renderEntryBlock` -> `JobBlock`/`MiscBlock`); `isMobile` only
+     changes sizes, never the label maths. The same entries (Catch-up
+     beside work, two entries in a day, interior days showing the item
+     total, partial last day, tentative, misc, overcommitted) drawn at
+     desktop, phone-portrait and phone-landscape size show identical
+     labels. The four live examples all match what the code from before
+     the Catch-up display fixes would have shown, and the app has no
+     offline cache, so the phone was most likely an old copy left open
+     and never refreshed. User asked to keep a guard:
+     `test-mobile-labels.mjs` fails if any label ever differs between
+     the three sizes.
+   - Original note: Not yet investigated (logged
    raw, per explicit instruction to stop mobile testing here and keep
    desktop the focus for now). `JobBlock`'s `hoursLabel` calculation is
    shared code (not inside the `isMobile` branch), so on paper mobile
@@ -1216,6 +1229,16 @@ hashed passwords never sent back, no leaked database errors).
       server instance; a role change can take up to a minute elsewhere -
       user accepted). `test-api-safety` uses one pretend user per role and
       checks the memory.
+
+14. **FIXED (mobile PR). Phone in landscape (user's request).** It used to
+    show a "Please rotate your device" screen. Now, landscape phone only
+    (desktop and portrait unchanged, user's choice): slim header (small
+    logo + name + Sign Out, no subtitle/tagline - user agreed), slim
+    toolbar, desktop-size entry blocks and shorter rows (`dense`), so
+    about 4 people fit instead of 2. Forms (e.g. New Schedule Entry)
+    fit and scroll to Save.
+    - Test: `test-landscape-phone.mjs` (no rotate screen, header under
+      40px, 4+ people on screen, portrait unchanged) - fails on main.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
