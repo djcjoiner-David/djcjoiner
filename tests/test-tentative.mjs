@@ -1,22 +1,23 @@
 // TESTING_NOTES 2F #9a: Tentative entries (user's rules).
-// - Chosen per schedule by the "Tentative" switch on the entry form.
+// - Chosen per schedule by the striped "Schedule as Tentative" switch on
+//   the entry form's Hours row (2F #15).
 // - Shown faded, dashed border, "Tentative" label.
 // - A tentative entry never limits the person's OTHER slot: confirmed work
 //   books beside it as if it weren't there, and the tentative entry gives
 //   way (shrinks; the rest moves to the end of its item).
 // - Tentative work schedules around confirmed work, and only one tentative
 //   slot per person per day.
-// - Job Summary: row coloured + "Tentative" tag; "Confirm Booking" (or
-//   unticking Tentative in the Edit form) confirms all of the item's
+// - Job Summary: row striped in the job colour + "Tentative" tag; "Confirm"
+//   (or "Schedule as Confirmed" + "Save & Confirm" in the Edit form) confirms all of the item's
 //   tentative entries, warning first if anyone would go over their max.
 import { launch, settle, cell, block, drag, button, input, select, newEntry, rows, staff, job, item, entry, businessDayStr, reporter, sleep } from './harness.mjs';
 
 const r = reporter('tentative entries');
 const D = n => businessDayStr(n);
-const hoursBox = page => page.locator('div:has(> div:text-is("Hours to Deduct from Budget")) input[type=number]');
+const hoursBox = page => page.locator('div:has(> div:text-is("Hours")) input[type=number]');
 const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
 
-// ---- 1. Schedule tentative; confirmed work books beside it; Confirm Booking
+// ---- 1. Schedule tentative; confirmed work books beside it; Confirm
 {
   const seed = {
     staff: [staff('s1', 'Mark', 8, 0)],
@@ -28,7 +29,17 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
   try {
     await settle(db);
     await newEntry(page, 'Mark', D(1), 0, { itemId: 'iV' });
-    await button(page, 'Tentative').click();
+    // 2F #15: the switch sits on the Hours row, same width as First Available,
+    // always striped; on = darker stripes, dashed edge, "Schedule as Confirmed".
+    const off = button(page, 'Schedule as Tentative');
+    const fa = await button(page, 'First Available').boundingBox(), ob = await off.boundingBox(), hb = await hoursBox(page).boundingBox();
+    r.check('switch on the Hours row, same width as First Available', Math.abs(ob.width - fa.width) < 1 && Math.abs(ob.x - fa.x) < 1 && Math.abs((ob.y + ob.height / 2) - (hb.y + hb.height / 2)) < 2, { fa, ob, hb });
+    const offStyle = await off.getAttribute('style');
+    r.check('off: striped, solid edge', /repeating-linear-gradient/.test(offStyle) && /solid/.test(offStyle), offStyle);
+    r.check('no label "Hours to Deduct from Budget"', await page.locator('text=Hours to Deduct from Budget').count() === 0);
+    await off.click();
+    const onStyle = await button(page, 'Schedule as Confirmed').getAttribute('style');
+    r.check('on: "Schedule as Confirmed", striped, dashed edge', /repeating-linear-gradient/.test(onStyle) && /dashed/.test(onStyle), onStyle);
     await hoursBox(page).fill('16');
     await page.locator('button', { hasText: /^Schedule \d+ days$/ }).click();
     await settle(db, 2500);
@@ -48,16 +59,25 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
     r.check('confirmed Laundry booked 8h on day 1, not tentative', l.length === 1 && l[0].date_str === D(1) && Number(l[0].hours) === 8 && !l[0].is_tentative, l);
     v = rows(db, e => e.sub_item_id === 'iV' && Number(e.hours) > 0.05);
     r.check('tentative Vanity gave way: still 16h, none on day 1, moved on to day 3', sum(v) === 16 && !v.some(e => e.date_str === D(1)) && v.some(e => e.date_str === D(3)) && v.every(e => e.is_tentative), v);
+    // 2F #15: a calm grey note says where the tentative hours went, then fades.
+    const note = page.locator('text=/^Vanity \\(Tentative\\): 8hrs moved to Mark, \\w{3} \\d{2} \\w{3}\\.$/');
+    r.check('grey note: "Vanity (Tentative): 8hrs moved to Mark, <day>."', await note.count() === 1);
+    r.check('note is grey, not the red error bar', await page.locator('text=/^⚠ Vanity/').count() === 0);
+    await sleep(11000);
+    r.check('note fades away by itself', await note.count() === 0);
 
-    // Job Summary: tag + Confirm Booking (no one over max -> no warning).
+    // Job Summary: striped row + tag + Confirm (no one over max -> no warning).
     await page.locator('text=Job Summary').first().click();
     const row = page.locator('tr', { hasText: 'Vanity' });
     r.check('Job Summary row tagged "Tentative"', (await row.innerText()).includes('Tentative'));
-    await row.locator('button', { hasText: 'Confirm Booking' }).click();
+    const rowStyle = await row.getAttribute('style'), cellStyle = await row.locator('td').first().getAttribute('style');
+    r.check('Job Summary row striped in the job colour, dashed edge, not orange', !/254, 243, 199|FEF3C7/i.test(rowStyle) && /repeating-linear-gradient/.test(rowStyle) && /dashed/.test(cellStyle), { rowStyle, cellStyle });
+    r.check('no "Confirm Booking" wording left', await page.locator('text=Confirm Booking').count() === 0);
+    await row.locator('button', { hasText: /^Confirm$/ }).click();
     await settle(db, 2500);
-    r.check('no warning when nobody goes over', await page.locator('text=⚠ Confirm Booking').count() === 0);
+    r.check('no warning when nobody goes over', await page.locator('text=/^⚠ Confirm/').count() === 0);
     v = rows(db, e => e.sub_item_id === 'iV');
-    r.check('Confirm Booking: every Vanity entry now confirmed', v.length > 0 && v.every(e => !e.is_tentative), v);
+    r.check('Confirm: every Vanity entry now confirmed', v.length > 0 && v.every(e => !e.is_tentative), v);
     r.check('Job Summary tag gone', !(await page.locator('tr', { hasText: 'Vanity' }).innerText()).includes('Tentative'));
   } catch (e) { r.error(e); }
   await browser.close();
@@ -78,7 +98,7 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
   try {
     await settle(db);
     await newEntry(page, 'Mark', D(1), 1, { itemId: 'iV' });
-    await button(page, 'Tentative').click();
+    await button(page, 'Schedule as Tentative').click();
     await hoursBox(page).fill('16');
     await page.locator('button', { hasText: /^Schedule \d+ days$/ }).click();
     await settle(db, 2500);
@@ -110,15 +130,18 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
     await settle(db);
     r.check('before confirming: no red Conflict (tentative never puts the day over)', (await (await cell(page, 'Mark', D(1), 0)).locator('text=⚠ Conflict').count()) === 0);
     await (await block(page, 'Mark', D(1), 1)).click();
-    await button(page, '✓ Tentative').click();
-    r.check('Edit form says saving confirms the item', await page.locator('text=Saving confirms every tentative entry for Vanity.').count() === 1);
-    await button(page, 'Save').click();
+    r.check('Edit form: plain "Save" before switching', await button(page, 'Save').count() === 1);
+    await button(page, 'Schedule as Confirmed').click();
+    r.check('no comment line under the switch (2F #15)', await page.locator('text=/Saving confirms/').count() === 0);
+    r.check('Save now says "Save & Confirm"', await button(page, 'Save & Confirm').count() === 1);
+    await button(page, 'Save & Confirm').click();
     const msg = page.locator('text=/^Confirming Vanity puts Mark over the 8hrs daily max on \\w{3} \\d{2} \\w{3}\\. Those days will show a conflict\\. Consider moving hours to the next day\\. Confirm anyway\\?$/');
     r.check('warning names the person, max and day', await msg.count() === 1);
+    r.check('warning title "⚠ Confirm"', await page.locator('text=/^⚠ Confirm$/').count() === 1);
     await button(page, 'Cancel').click();
     await settle(db, 1500);
     r.check('Cancel: nothing changed', rows(db, e => e.id === 'V1')[0].is_tentative === true);
-    await button(page, 'Save').click();
+    await button(page, 'Save & Confirm').click();
     await button(page, 'Confirm Anyway').click();
     await settle(db, 3000);
     const v1 = rows(db, e => e.id === 'V1')[0], l1 = rows(db, e => e.id === 'L1')[0];
@@ -127,7 +150,7 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
   } catch (e) { r.error(e); }
   await browser.close();
 }
-// ---- 4. Undo after Confirm Booking puts it back to tentative
+// ---- 4. Undo after Confirm puts it back to tentative
 {
   const seed = {
     staff: [staff('s1', 'Mark', 8, 0)],
@@ -139,7 +162,7 @@ const sum = list => list.reduce((a, e) => a + Number(e.hours), 0);
   try {
     await settle(db);
     await page.locator('text=Job Summary').first().click();
-    await page.locator('tr', { hasText: 'Vanity' }).locator('button', { hasText: 'Confirm Booking' }).click();
+    await page.locator('tr', { hasText: 'Vanity' }).locator('button', { hasText: /^Confirm$/ }).click();
     await settle(db, 2000);
     r.check('confirmed', rows(db, e => e.sub_item_id === 'iV').every(e => !e.is_tentative));
     await page.locator('button', { hasText: /📅\s*Schedule/ }).first().click();

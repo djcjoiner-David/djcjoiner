@@ -121,6 +121,12 @@ changes — re-verify line numbers against the file before relying on them.
     server. Show the result straight away and save in the background
     (undo it with a message if the save fails); that's what makes an app
     feel sharp, whatever the network speed.
+17. **A switch that changes how something is saved should look like the
+    thing it makes.** Here the Tentative switch is striped like tentative
+    entries, everywhere (form, grid, summary), so no explaining text is
+    needed. Let the button's wording say what a click does, and put any
+    "this affects more than you think" warning on the Save button itself
+    ("Save & Confirm") rather than in a line of small print.
 ---
 
 ## PART 2 — djcjoiner-Specific Implementation Notes
@@ -1239,6 +1245,45 @@ hashed passwords never sent back, no leaked database errors).
     fit and scroll to Save.
     - Test: `test-landscape-phone.mjs` (no rotate screen, header under
       40px, 4+ people on screen, portrait unchanged) - fails on main.
+
+15. **FIXED (notes + button PR). Calmer messages, and a better Tentative
+    button (user's live testing).**
+    - Messages: red is now only for things that FAILED to save (they stay
+      until closed). Explanations ("Couldn't copy - that slot is already
+      occupied", "Can't close this job...", "Can't remove ...") and
+      "the app did this for you" ("Pasted 4 - skipped 1", Catch-up on
+      paste, placements that couldn't land) are a grey note with black
+      text in the same place: stays 8 seconds, then fades slowly (×
+      closes it early). `showNote()` in MainApp.
+    - The old "Extended by 3 days to cover the full 22h budget." (shown
+      red) now says where the hours went, one line per person:
+      "Mudroom W (Tentative): 7.5hrs moved to Ian, Thu 29 Oct – Fri 30
+      Oct." Rule unchanged (user chose "current rule"): lost hours go to
+      whoever works the item on its last day.
+    - Undo still clears on refresh (user agreed - the schedule may have
+      changed in between).
+    - Tentative button (user's design, after mock-ups): on the Hours row,
+      the same size as First Available above it, no tick, no explaining
+      line under it. Always striped, so it stands out from every other
+      button and matches tentative entries on the grid. Off: light
+      stripes, solid edge, "Schedule as Tentative". On: darker stripes,
+      dashed edge, "Schedule as Confirmed" (the wording is what a click
+      does).
+    - "Hours to Deduct from Budget" is now just "Hours".
+    - Editing a tentative entry and clicking "Schedule as Confirmed": the
+      Save button becomes "Save & Confirm" (it confirms every tentative
+      entry of that item). The final click stays so a slip on the switch
+      costs nothing, and hours/date changes go in the same save.
+    - Job Summary: a tentative row is striped in the job's colour with a
+      dashed edge (was orange). "Confirm Booking" is now "Confirm", still
+      one click; the over-max pop-up stays (user's choice), titled
+      "⚠ Confirm".
+    - Tests: `test-tentative` (note wording, grey not red, fades; switch on
+      the Hours row and same width as First Available; off/on looks; no
+      explaining line; "Save & Confirm"; striped Job Summary row;
+      "Confirm"), `test-auto-extend` (new wording); "Hours" label and
+      button wording in `test-slot-hop`, `test-public-holidays`,
+      `test-closures-rdos`, `test-schedule-gap-alerts`.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed
