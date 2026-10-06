@@ -1308,7 +1308,8 @@ hashed passwords never sent back, no leaked database errors).
       Phones and iPads (no hover) unchanged.
     - Job Summary: an item's name (dotted underline) takes you to the
       Schedule at its first day, scrolls it into view and rings all of its
-      entries in blue for 2.5 seconds. The weeks only move if that day isn't
+      entries for 2.5 seconds. The ring is a heavier (4px) border in that
+      job's own colour (user: it was dark blue on every job at first). The weeks only move if that day isn't
       already on screen. Items with nothing scheduled aren't clickable.
     - Dropped after discussion: highlighting an item's entries on hover (too
       distracting while scanning the grid) and a full-height Today column.
