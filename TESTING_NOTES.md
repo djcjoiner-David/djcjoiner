@@ -28,6 +28,13 @@ changes — re-verify line numbers against the file before relying on them.
    say so and ask rather than presenting a confident-sounding guess.
 6. Treat any documented code line reference as provisional — re-check it
    against the live file before trusting it, since code shifts over time.
+7. Every change must be an improvement for the people using the app, not
+   change for its own sake. Before suggesting one, answer all four: what
+   goes wrong for a real person today; how often; does the change remove a
+   step, a mistake or confusion; and is that worth the cost of getting used
+   to something new. If any answer is weak, don't suggest it. Mock it up on
+   the real screen before building - a mock-up often shows the catch (here,
+   equal-width columns cut every name off at 4 weeks).
 
 ### 1B. Design principles learned from bugs found this pass
 1. **Undo/redo must re-verify, not just replay.** Restoring a stored
@@ -1284,6 +1291,29 @@ hashed passwords never sent back, no leaked database errors).
       "Confirm"), `test-auto-extend` (new wording); "Hours" label and
       button wording in `test-slot-hop`, `test-public-holidays`,
       `test-closures-rdos`, `test-schedule-gap-alerts`.
+
+16. **FIXED (grid tidy PR). Three small grid improvements (user's review,
+    after mock-ups; each had to fix a real problem, not change for its own
+    sake).**
+    - "Week of ..." heading: one line, running across its week (it was
+      wrapping onto 3 cramped lines). The text sits on top of the cells, so
+      it never widens the Monday column. A month change mid-week now shows
+      on that day's label ("Thu 1 Oct") instead of in the spacer above.
+      Column widths themselves left as they were (user chose this over
+      equal widths, which cut every name off at 4+ weeks).
+    - Quiet empty slots (mouse/trackpad only): an empty slot is blank until
+      pointed at, then the dashed "+" box shows. Saturdays stay blank
+      (nothing to click). "Hours Available" always shows. Every slot shows
+      while an entry is being dragged, or Copy/Move is waiting for a target.
+      Phones and iPads (no hover) unchanged.
+    - Job Summary: an item's name (dotted underline) takes you to the
+      Schedule at its first day, scrolls it into view and rings all of its
+      entries in blue for 2.5 seconds. The weeks only move if that day isn't
+      already on screen. Items with nothing scheduled aren't clickable.
+    - Dropped after discussion: highlighting an item's entries on hover (too
+      distracting while scanning the grid) and a full-height Today column.
+    - Test: `test-grid-tidy.mjs` (fails on main); `test-closures-rdos`
+      header check accepts a month suffix.
 
 ### 2D. Resolved questions
 1. ✅ **RESOLVED, NO CHANGE. Item-total-badge display (2A #10).** Discussed

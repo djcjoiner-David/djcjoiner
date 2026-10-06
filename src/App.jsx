@@ -869,7 +869,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isGenuinePartial,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp,isTentative,dense}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isGenuinePartial,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp,isTentative,dense,flash}) {
   // An entry the background correction has reduced to nothing (e.g. another
   // staff member now covers the whole day/budget) shouldn't be labelled
   // "over-run" or any other budget-math term - it has zero real hours left,
@@ -905,7 +905,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
       onDragEnd={editable?onDragEnd:undefined}
       onClick={editable?onClick:undefined}
       onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":isTentative?`repeating-linear-gradient(135deg,${job.bgColor} 0 6px,#fff 6px 12px)`:job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:dense?30:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":isTentative?`repeating-linear-gradient(135deg,${job.bgColor} 0 6px,#fff 6px 12px)`:job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:dense?30:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"}),boxShadow:flash?"0 0 0 3px #1D4ED8, 0 0 14px rgba(29,78,216,0.55)":"none",transition:"box-shadow 0.6s"}} data-entry-id={entry?.id}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {isMobile?(
         <>
@@ -956,11 +956,20 @@ function MiscBlock({note,hours,entry,job,onClick,onContextMenu,onDragStart,onDra
   );
 }
 
-function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours,dense}) {
+// A mouse (or trackpad) can point at a slot before clicking; a finger can't.
+const CAN_HOVER=typeof window!=="undefined"&&!!window.matchMedia&&window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours,dense,placing}) {
   // Copy and Move both just arm a plain click-to-target on an empty slot -
   // no special "Paste here" fill, so they look and behave identically.
   if (isPastDate||!canEdit) return <div style={{minHeight:dense?30:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
   const available=availableHours>0;
+  // Quiet empty slots (TESTING_NOTES 2F #16): with a mouse, an empty slot is
+  // blank until pointed at, so the booked work stands out. The "+" box still
+  // shows everywhere on touch screens, while a Copy/Move or drag is placing
+  // something (you need to see the targets), and "Hours Available" always
+  // shows (it's information, not just a target).
+  const quiet=CAN_HOVER&&!available&&!isDropTarget&&!placing;
+  const rest=quiet?"transparent":"#CBD5E1";
   // A job that wrapped up without using this staff member's whole day
   // leaves the day's other slot free - flag that leftover capacity instead
   // of showing a plain "+", with the same pale grey used elsewhere in the
@@ -970,9 +979,9 @@ function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours,dense
   // reverse-engineer each other's efficiency from leftover capacity.
   return (
     <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:dense?30:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.3,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
-      onMouseEnter={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
-      onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
+      style={{border:isDropTarget?"2px dashed #3B82F6":`1.5px dashed ${available?"#CBD5E1":rest}`,borderRadius:5,minHeight:dense?30:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:onClick?"pointer":"default",color:isDropTarget?"#3B82F6":available?"#334155":rest,fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.3,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
+      onMouseEnter={e=>{if(!isDropTarget&&!available&&(onClick||!quiet)){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
+      onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor=rest;e.currentTarget.style.color=rest;}}}>
       {isDropTarget?"↓":available?(<><div>Hours</div><div>Available</div></>):"+"}
     </div>
   );
@@ -1893,6 +1902,7 @@ function MainApp({currentUser,onLogout}) {
   const [selectionMode,setSelectionMode]=useState(false);
   const [moveMode,setMoveMode]=useState(false); // tap-to-move, for touch devices where drag-and-drop can't fire
   const [dropTarget,setDropTarget]=useState(null);
+  const [dragActive,setDragActive]=useState(false); // an entry is being dragged: show every empty slot
   const [contextMenu,setContextMenu]=useState(null); // {x,y,entry} - right-click quick actions
 
   useEffect(()=>{
@@ -2056,6 +2066,25 @@ function MainApp({currentUser,onLogout}) {
 
   function navigate(dir){setAnchorDate(d=>addDays(d,dir*viewWeeks*7));}
   function goToday(){setAnchorDate(mondayOf(TODAY));}
+  // Job Summary -> click an item's name: open the Schedule at that item,
+  // scroll its first day into view and briefly ring every one of its
+  // entries (TESTING_NOTES 2F #16). Only moves the weeks if the first day
+  // isn't already on screen.
+  const [flashItem,setFlashItem]=useState(null);
+  function showItemOnSchedule(subItemId){
+    const its=entries.filter(e=>e.subItemId===subItemId).sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+    if(its.length===0)return;
+    const first=parseISO(its[0].dateStr);
+    if(first<anchorDate||first>=addDays(anchorDate,viewWeeks*7))setAnchorDate(mondayOf(first));
+    setTab("schedule");
+    setFlashItem({id:subItemId,entryId:its[0].id,at:Date.now()});
+  }
+  useEffect(()=>{
+    if(!flashItem)return;
+    const scroll=setTimeout(()=>{document.querySelector(`[data-entry-id="${flashItem.entryId}"]`)?.scrollIntoView({block:"center",inline:"center",behavior:"smooth"});},80);
+    const clear=setTimeout(()=>setFlashItem(f=>f&&f.at===flashItem.at?null:f),2500);
+    return()=>{clearTimeout(scroll);clearTimeout(clear);};
+  },[flashItem]);
 
   function openNewEntry(staffId,dateStr,slot){
     if(!canEdit||isPast(dateStr))return;
@@ -3259,11 +3288,11 @@ function MainApp({currentUser,onLogout}) {
       onCancel:()=>{setConflictAlert(null);resolve(false);},
     }));
   }
-  function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";}
+  function handleDragStart(e,entry){dragEntry.current=entry;e.dataTransfer.effectAllowed="move";setTimeout(()=>setDragActive(true),0);}
   function handleDragOver(e,staffId,dateStr,slot){if(!canEdit||isPast(dateStr))return;e.preventDefault();e.dataTransfer.dropEffect=(e.ctrlKey||e.altKey||e.metaKey)?"copy":"move";setDropTarget({staffId,dateStr,slot});}
   function handleDragLeave(){setDropTarget(null);}
   async function handleDrop(e,toStaffId,toDateStr,toSlot){
-    e.preventDefault();setDropTarget(null);
+    e.preventDefault();setDropTarget(null);setDragActive(false);
     const entry=dragEntry.current;if(!entry||!canEdit)return;
     if(isPast(toDateStr))return;
     // Holding Ctrl/Option while dropping copies instead of moves - the
@@ -3399,7 +3428,7 @@ function MainApp({currentUser,onLogout}) {
       setEntries(prev=>prev.map(en=>en.id===entry.id?{...en,...prevState}:en));
     }
   }
-  function handleDragEnd(){setDropTarget(null);dragEntry.current=null;}
+  function handleDragEnd(){setDropTarget(null);setDragActive(false);dragEntry.current=null;}
 
   // One-time cleanup for entries whose stored Hours predate the daily-cap
   // fix - back when Auto-fill could write a raw value (like "8" for someone
@@ -3924,8 +3953,12 @@ function MainApp({currentUser,onLogout}) {
                     // a week's days roll into a new month (e.g. a week
                     // spanning 29 Sep-4 Oct), in that same spacer slot.
                     const isMonthChange=i>0&&d.getMonth()!==visibleDays[i-1].getMonth();
+                    // "Week of ..." sits on one line and runs across its week's
+                    // columns (TESTING_NOTES 2F #16) - this cell is drawn above
+                    // its neighbours so the text isn't hidden behind them.
+                    const weekBanner=!isMobile&&totalWeeks>1&&isFirstDayOfWeek;
                     return(
-                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":daysOffIndex.all.has(ds)?"#E2E8F0":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:9,minWidth:isMobile?100:undefined}}>
+                      <th key={i} style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",background:isToday?"#DBEAFE":daysOffIndex.all.has(ds)?"#E2E8F0":isSat?"#F1F5F9":"#F8FAFC",padding:"3px 3px",fontSize:11,color:isToday?"#1D4ED8":isSat?"#94A3B8":isPast(ds)?"#CBD5E1":"#64748B",textAlign:"center",fontWeight:isToday?700:500,position:"sticky",top:0,zIndex:weekBanner?10:9,minWidth:isMobile?100:undefined}}>
                         {/* Phone screens don't have room for a once-per-week
                             "Week of ..." banner AND a weekday/date line both -
                             that's the squeeze that was pushing the weekday
@@ -3939,15 +3972,15 @@ function MainApp({currentUser,onLogout}) {
                             {d.toLocaleDateString("en-AU",{month:"short"})}
                           </div>
                         ):totalWeeks>1&&isFirstDayOfWeek?(
-                          <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",padding:"2px 4px",borderBottom:"1px solid #E2E8F0"}}>
-                            Week of {formatDate(mondayOf(d))}
+                          <div style={{fontSize:10,fontWeight:600,color:"#475569",background:"#F1F5F9",margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",height:22,boxSizing:"border-box",position:"relative"}}>
+                            {/* Placed on top, not in the flow, so the text never widens the Monday column */}
+                            <span style={{position:"absolute",left:4,top:0,lineHeight:"21px",whiteSpace:"nowrap"}}>Week of {formatDate(mondayOf(d))}</span>
                           </div>
                         ):totalWeeks>1?(
                           <div style={{height:22,margin:"-3px -3px 2px -3px",borderBottom:"1px solid #E2E8F0",background:"#F1F5F9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:600,color:"#475569"}}>
-                            {isMonthChange?d.toLocaleDateString("en-AU",{month:"short"}):""}
                           </div>
                         ):null}
-                        <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}</div>
+                        <div style={{fontSize:11,fontWeight:600}}>{d.toLocaleDateString("en-AU",{weekday:"short"})} {d.getDate()}{!isMobile&&totalWeeks>1&&isMonthChange&&!isFirstDayOfWeek?` ${d.toLocaleDateString("en-AU",{month:"short"})}`:""}</div>
                       </th>
                     );
                   })}
@@ -3978,6 +4011,8 @@ function MainApp({currentUser,onLogout}) {
                         const k=`${st.id}|${ds}|${slot}`;
                         const entry=entryMap[k];
                         const isDrop=dropTarget&&dropTarget.staffId===st.id&&dropTarget.dateStr===ds&&dropTarget.slot===slot&&!entry;
+                        // Something is being placed (drag, Copy, Move): show every empty slot.
+                        const placing=dragActive||((copyMode||moveMode)&&!!moveAnchor);
                         const isConflict=conflictKeys.has(k);
                         const otherSlotEntry=entryMap[`${st.id}|${ds}|${slot===0?1:0}`];
                         // Whichever entry was scheduled SECOND that day is only "Overcommitted"
@@ -4102,10 +4137,10 @@ function MainApp({currentUser,onLogout}) {
                             return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} job={eJob} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile&&!isLand} dense={isLand} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
                           }
                           if(!eJob){
-                            return <EmptySlot dense={isLand} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
+                            return <EmptySlot dense={isLand} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit} placing={placing}/>;
                           }
                           const meta=computeJobEntryMeta(e)||{};
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isGenuinePartial={meta.isGenuinePartial} isLocked={meta.isLocked} isMobile={isMobile&&!isLand} dense={isLand} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp} isTentative={!!e.isTentative}/>;
+                          return <JobBlock flash={flashItem?.id===e.subItemId} job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isGenuinePartial={meta.isGenuinePartial} isLocked={meta.isLocked} isMobile={isMobile&&!isLand} dense={isLand} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp} isTentative={!!e.isTentative}/>;
                         }
                         return(
                           <td key={di}
@@ -4123,7 +4158,7 @@ function MainApp({currentUser,onLogout}) {
                                 : renderEntryBlock(entry,overMaxDays.has(`${st.id}|${ds}`))
                               : isDayOff(ds,st.id)&&!isDrop
                                 ? <DayOffSlot dense={isLand} label={slot===0?dayOffLabel(ds,st.id):""} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isRdoFor(ds,st.id)?()=>askRemoveRdo(st.id,ds):()=>openNewEntry(st.id,ds,slot)} canEdit={canEdit} isPastDate={isPast(ds)}/>
-                              : <EmptySlot dense={isLand} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} availableHours={availableHours}/>
+                              : <EmptySlot dense={isLand} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} availableHours={availableHours} placing={placing}/>
                             }
                           </td>
                         );
@@ -4140,7 +4175,7 @@ function MainApp({currentUser,onLogout}) {
       {/* Summary Tab */}
       {tab==="summary"&&(
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
-          <SummarySection onConfirmTentative={canEdit?confirmTentativeItem:null} jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);const _u=snapshotEntries(entries);try{await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));pushUndoSnapshot(_u,_u.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
+          <SummarySection onShowItem={showItemOnSchedule} onConfirmTentative={canEdit?confirmTentativeItem:null} jobs={activeJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={false} canEdit={canEdit} onUnschedule={async(ids)=>{setSaving(true);const _u=snapshotEntries(entries);try{await db("DELETE","entries",null,`?id=in.(${ids.join(",")})`);setEntries(prev=>prev.filter(e=>!ids.includes(e.id)));pushUndoSnapshot(_u,_u.filter(e=>!ids.includes(e.id)));}catch(e){setError("Failed to unschedule.");}setSaving(false);}}/>
           {archivedJobs.length>0&&(
             <>
               <div style={{display:"flex",alignItems:"center",gap:12,marginTop:8}}>
@@ -4148,7 +4183,7 @@ function MainApp({currentUser,onLogout}) {
                 <span style={{fontSize:12,color:"#94A3B8",fontWeight:500,whiteSpace:"nowrap"}}>Archived Jobs (all entries &gt; 1 month ago)</span>
                 <div style={{flex:1,height:1,background:"#E2E8F0"}}/>
               </div>
-              <SummarySection jobs={archivedJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={true} canEdit={canEdit} onUnschedule={null}/>
+              <SummarySection onShowItem={showItemOnSchedule} jobs={archivedJobs} entries={entries} subItems={subItems} staff={staff} setJobModal={canEdit?setJobModal:null} setEntryModal={canEdit?setEntryModal:null} setTab={setTab} archived={true} canEdit={canEdit} onUnschedule={null}/>
             </>
           )}
           {/* Completed jobs are deliberately left out of the sections above -
@@ -4197,7 +4232,7 @@ function MainApp({currentUser,onLogout}) {
 
 // ── Summary Section ───────────────────────────────────────────
 
-function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,setTab,archived,canEdit,onUnschedule,onConfirmTentative}) {
+function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,setTab,archived,canEdit,onUnschedule,onConfirmTentative,onShowItem}) {
   const [confirmDialog,setConfirmDialog]=useState(null);
   return (
     <>
@@ -4257,7 +4292,9 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                   const tc=(first,last)=>isTentative?{borderTop:tentEdge,borderBottom:tentEdge,...(first?{borderLeft:tentEdge}:{}),...(last?{borderRight:tentEdge}:{})}:{};
                   return(
                     <tr key={si.id} style={{background:isTentative?`repeating-linear-gradient(135deg,${job.bgColor} 0 6px,#fff 6px 12px)`:rowi%2===0?"#fff":"#FAFAFA",borderBottom:"1px solid #F1F5F9"}}>
-                      <td style={{padding:"7px 12px",fontWeight:500,color:"#1E293B",...tc(true,false)}}>{si.name}{isTentative&&<span style={{marginLeft:8,fontSize:11,fontWeight:700,color:job.textColor,background:"#fff",border:`1px dashed ${job.borderColor}`,borderRadius:5,padding:"1px 6px"}}>Tentative</span>}</td>
+                      <td style={{padding:"7px 12px",fontWeight:500,color:"#1E293B",...tc(true,false)}}>{onShowItem&&siEntries.length>0
+                        ?<span role="button" title="Show on the schedule" onClick={()=>onShowItem(si.id)} style={{cursor:"pointer",textDecoration:"underline dotted",textUnderlineOffset:3}}>{si.name}</span>
+                        :si.name}{isTentative&&<span style={{marginLeft:8,fontSize:11,fontWeight:700,color:job.textColor,background:"#fff",border:`1px dashed ${job.borderColor}`,borderRadius:5,padding:"1px 6px"}}>Tentative</span>}</td>
                       <td style={{padding:"7px 12px",color:"#475569",...tc(false,false)}}>{si.totalHours?`${si.totalHours}h`:<em style={{color:"#94A3B8"}}>—</em>}</td>
                       <td style={{padding:"7px 12px",color:"#475569",...tc(false,false)}}>{deductedHours>0?`${Math.round(deductedHours*2)/2}h`:"—"}</td>
                       <td style={{padding:"7px 12px",...tc(false,false)}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${remaining}h left`:remaining===0?"✓ Done":`${Math.abs(remaining)}h over`}</span>:"—"}</td>

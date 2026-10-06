@@ -12,7 +12,7 @@ const hoursBox = page => page.locator('div:has(> div:text-is("Hours")) input[typ
 const headerHas = (page, ds) => page.evaluate(ds => {
   const d = new Date(ds + 'T00:00:00');
   const label = `${d.toLocaleDateString('en-AU', { weekday: 'short' })} ${d.getDate()}`;
-  return [...document.querySelectorAll('thead th')].some(th => th.innerText.split('\n').some(l => l.trim() === label));
+  return [...document.querySelectorAll('thead th')].some(th => th.innerText.split('\n').some(l => l.trim() === label || l.trim().startsWith(label + ' ')));
 }, ds);
 
 // ---- 1. Annual Closure
