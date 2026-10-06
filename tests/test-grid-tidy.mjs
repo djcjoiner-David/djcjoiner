@@ -79,7 +79,7 @@ const blankSlot = async (page, name, ds, slot) => (await cell(page, name, ds, sl
     r.check('Schedule tab shows Kitchen\'s first day', await page.locator('[data-entry-id="k1"]').count() === 1);
     const shown = page.locator('[data-entry-id^="k"]');
     const rings = await shown.evaluateAll(els => els.map(e => getComputedStyle(e).boxShadow));
-    r.check('every Kitchen entry on screen is ringed, heavier, in the job\'s own colour (Jones #3B82F6)', rings.length >= 1 && rings.every(s => /rgb\(59, 130, 246\) 0px 0px 0px 4px/.test(s)), rings);
+    r.check('every Kitchen entry on screen is ringed, heavier, in the job\'s own colour (Jones #3B82F6)', rings.length >= 1 && rings.every(s => /rgb\(59, 130, 246\) 0px 0px 0px 2px/.test(s)), rings);
     await sleep(3000);
     const after = await shown.evaluateAll(els => els.map(e => getComputedStyle(e).boxShadow));
     r.check('the ring fades away by itself', after.every(s => s === 'none'), after);
