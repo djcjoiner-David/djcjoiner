@@ -3197,7 +3197,7 @@ function MainApp({currentUser,onLogout}) {
     const andList=a=>a.length<=1?a.join(""):`${a.slice(0,-1).join(", ")} and ${a[a.length-1]}`;
     const parts=[...byStaff.entries()].map(([sid,list])=>`${staff.find(s=>s.id===sid)?.name||"Someone"} over the ${list[0].cap}hrs daily max on ${andList(list.map(d=>label(d.dateStr)))}`);
     return new Promise(resolve=>setConflictAlert({
-      title:"⚠ Confirm Booking",
+      title:"⚠ Confirm",
       message:`Confirming ${name} puts ${parts.join("; and ")}. Those days will show a conflict. Consider moving hours to the next day. Confirm anyway?`,
       confirmLabel:"Confirm Anyway",cancelLabel:"Cancel",
       onConfirm:()=>{setConflictAlert(null);resolve(true);},
@@ -3216,7 +3216,7 @@ function MainApp({currentUser,onLogout}) {
     setEntries(prev=>prev.map(fix));
     return pool.map(fix);
   }
-  // The Job Summary "Confirm Booking" button.
+  // The Job Summary "Confirm" button.
   async function confirmTentativeItem(subItemId){
     const _u=snapshotEntries(entries);
     const days=confirmOverMaxDays(subItemId,_u);
@@ -4251,18 +4251,23 @@ function SummarySection({jobs,entries,subItems,staff,setJobModal,setEntryModal,s
                   if(!siDates.length)dateDisplay=<em style={{color:"#94A3B8"}}>Not yet scheduled</em>;
                   else if(siDates.length===1)dateDisplay=formatDate(parseISO(siDates[0]));
                   else{const d1=parseISO(siDates[0]),d2=parseISO(siDates[siDates.length-1]);dateDisplay=`${formatDate(d1)} → ${formatDate(d2)} (${Math.round((d2-d1)/86400000)}d)`;}
+                  // A tentative row looks like its entries on the grid: striped
+                  // in the job colour with a dashed edge (TESTING_NOTES 2F #15).
+                  const tentEdge=`1.5px dashed ${job.borderColor}`;
+                  const tc=(first,last)=>isTentative?{borderTop:tentEdge,borderBottom:tentEdge,...(first?{borderLeft:tentEdge}:{}),...(last?{borderRight:tentEdge}:{})}:{};
                   return(
-                    <tr key={si.id} style={{background:isTentative?"#FEF3C7":rowi%2===0?"#fff":"#FAFAFA",borderBottom:"1px solid #F1F5F9"}}>
-                      <td style={{padding:"7px 12px",fontWeight:500,color:"#1E293B"}}>{si.name}{isTentative&&<span style={{marginLeft:8,fontSize:11,fontWeight:700,color:"#92400E",border:"1px dashed #B45309",borderRadius:5,padding:"1px 6px"}}>Tentative</span>}</td>
-                      <td style={{padding:"7px 12px",color:"#475569"}}>{si.totalHours?`${si.totalHours}h`:<em style={{color:"#94A3B8"}}>—</em>}</td>
-                      <td style={{padding:"7px 12px",color:"#475569"}}>{deductedHours>0?`${Math.round(deductedHours*2)/2}h`:"—"}</td>
-                      <td style={{padding:"7px 12px"}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${remaining}h left`:remaining===0?"✓ Done":`${Math.abs(remaining)}h over`}</span>:"—"}</td>
-                      <td style={{padding:"7px 12px",color:"#475569"}}>{dateDisplay}</td>
-                      <td style={{padding:"7px 12px",color:"#475569"}}>{assignedStaff||<em style={{color:"#94A3B8"}}>—</em>}</td>
-                      <td style={{padding:"7px 12px",display:"flex",gap:4}}>
+                    <tr key={si.id} style={{background:isTentative?`repeating-linear-gradient(135deg,${job.bgColor} 0 6px,#fff 6px 12px)`:rowi%2===0?"#fff":"#FAFAFA",borderBottom:"1px solid #F1F5F9"}}>
+                      <td style={{padding:"7px 12px",fontWeight:500,color:"#1E293B",...tc(true,false)}}>{si.name}{isTentative&&<span style={{marginLeft:8,fontSize:11,fontWeight:700,color:job.textColor,background:"#fff",border:`1px dashed ${job.borderColor}`,borderRadius:5,padding:"1px 6px"}}>Tentative</span>}</td>
+                      <td style={{padding:"7px 12px",color:"#475569",...tc(false,false)}}>{si.totalHours?`${si.totalHours}h`:<em style={{color:"#94A3B8"}}>—</em>}</td>
+                      <td style={{padding:"7px 12px",color:"#475569",...tc(false,false)}}>{deductedHours>0?`${Math.round(deductedHours*2)/2}h`:"—"}</td>
+                      <td style={{padding:"7px 12px",...tc(false,false)}}>{si.totalHours>0?<span style={{color:remaining<0?"#EF4444":remaining===0?"#22C55E":"#F59E0B",fontWeight:600}}>{remaining>0?`${remaining}h left`:remaining===0?"✓ Done":`${Math.abs(remaining)}h over`}</span>:"—"}</td>
+                      <td style={{padding:"7px 12px",color:"#475569",...tc(false,false)}}>{dateDisplay}</td>
+                      <td style={{padding:"7px 12px",color:"#475569",...tc(false,false)}}>{assignedStaff||<em style={{color:"#94A3B8"}}>—</em>}</td>
+                      <td style={{padding:"7px 12px",...tc(false,true)}}><div style={{display:"flex",gap:4}}>
                         {canEdit&&!archived&&setEntryModal&&<button style={{fontSize:11,color:"#3B82F6",background:"none",border:"1px solid #BFDBFE",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>{setEntryModal({mode:"new",staffId:"",dateStr:todayStr,slot:0,jobId:job.id,subItemId:si.id,hours:8,autoFill:remaining>0,totalHours:remaining>0?remaining:8,entryType:"job",miscNote:""});setTab("schedule");}}>+ Schedule</button>}
-                        {canEdit&&!archived&&isTentative&&onConfirmTentative&&<button style={{fontSize:11,color:"#92400E",background:"none",border:"1px solid #F59E0B",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontWeight:600}} onClick={()=>onConfirmTentative(si.id)}>Confirm Booking</button>}
+                        {canEdit&&!archived&&isTentative&&onConfirmTentative&&<button style={{fontSize:11,color:"#1D4ED8",background:"#fff",border:"1px solid #3B82F6",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontWeight:700}} onClick={()=>onConfirmTentative(si.id)}>Confirm</button>}
                         {canEdit&&!archived&&siEntries.length>0&&onUnschedule&&<button style={{fontSize:11,color:"#EF4444",background:"none",border:"1px solid #FECACA",borderRadius:6,padding:"3px 10px",cursor:"pointer"}} onClick={()=>setConfirmDialog({message:`Remove all ${siEntries.length} scheduled entries for "${si.name}"?`,danger:true,confirmLabel:"Remove",onConfirm:()=>{setConfirmDialog(null);onUnschedule(siEntries.map(e=>e.id));}})}>Unschedule</button>}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -4562,6 +4567,18 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onSaveRdo,onRemove,
   // Only when editing a Catch-up entry, and only that entry's own hours -
   // not every Catch-up entry on the item added together (user's live
   // review: 4h on another day + this 0.5h showed as "4.5hrs").
+  // Tentative switch (TESTING_NOTES 2F #15): on the Hours row, the same
+  // size as First Available. Always striped like a tentative entry; darker
+  // with a dashed edge when it's on. Its wording is what a click does.
+  const tentativeButton=form.entryType==="misc"?null:(
+    <button type="button" onClick={()=>set("isTentative",!form.isTentative)}
+      style={{flex:1,padding:"9px 10px",borderRadius:8,border:`1px ${form.isTentative?"dashed #1D4ED8":"solid #93C5FD"}`,background:`repeating-linear-gradient(135deg,${form.isTentative?"#BFDBFE":"#EFF6FF"} 0 6px,#fff 6px 12px)`,color:"#1D4ED8",fontSize:13,fontWeight:form.isTentative?700:600,cursor:"pointer"}}>
+      {form.isTentative?"Schedule as Confirmed":"Schedule as Tentative"}
+    </button>
+  );
+  // Editing a tentative entry and switching it to confirmed: Save confirms
+  // every tentative entry of the item, so the button says so.
+  const confirmingTentative=form.mode==="edit"&&data.isTentative&&!form.isTentative;
   const catchUpLine=form.mode==="edit"&&form.isCatchUp&&form.entryType!=="misc"&&(
     <div style={{fontSize:12,color:"#1E293B",marginTop:8}}>{hrs(Number(form.hours)||0)} Catch-up logged for this entry, not deducted from item total hrs.</div>
   );
@@ -4673,19 +4690,6 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onSaveRdo,onRemove,
               </button>
             ))}
           </div>
-          {/* Tentative (TESTING_NOTES 2F #9a/#15): same size and blue as the
-              Slot buttons; striped like a tentative entry when it's on. */}
-          {form.entryType!=="misc"&&(
-            <div style={{marginBottom:8}}>
-              <button type="button" onClick={()=>set("isTentative",!form.isTentative)}
-                style={{width:"100%",padding:"8px",borderRadius:8,border:`1.5px ${form.isTentative?"dashed":"solid"} ${form.isTentative?"#1D4ED8":"#93C5FD"}`,background:form.isTentative?"repeating-linear-gradient(135deg,#DBEAFE 0 6px,#fff 6px 12px)":"#EFF6FF",color:"#1D4ED8",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                {form.isTentative?"Tentative – Click to schedule as Confirmed":"Schedule as Tentative"}
-              </button>
-              {form.mode==="edit"&&data.isTentative&&!form.isTentative&&(
-                <div style={{fontSize:12,color:"#1E293B",marginTop:6}}>Saving confirms every tentative entry for {selectedSub?.name||"this item"}.</div>
-              )}
-            </div>
-          )}
           <div style={{marginBottom:14}}>
             <div style={FIELD_LABEL}>Start Date</div>
             {/* A shorter date box, with First Available right beside it */}
@@ -4737,9 +4741,10 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onSaveRdo,onRemove,
             </div>
           ):autoFill&&form.mode==="new"?(
             <div>
-              <div style={FIELD_LABEL}>Hours to Deduct from Budget</div>
-              <div style={{width:130}}>
-                <input type="number" min={0.5} max={999} step={0.5} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:"100%",padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+              <div style={FIELD_LABEL}>Hours</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input type="number" min={0.5} max={999} step={0.5} value={form.totalHours||""} onChange={e=>set("totalHours",Number(e.target.value))} placeholder={totalHours?`${totalHours}`:"Hours"} style={{width:170,padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+                {tentativeButton}
               </div>
               {autoFillToggle}
               {form.staffIds.length<=1&&otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:12,color:"#1E293B",marginTop:8}}>Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
@@ -4776,8 +4781,12 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onSaveRdo,onRemove,
             </div>
           ):(
             <div>
-              <div style={{width:130}}>
-                <Inp label="Hours" type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))}/>
+              <div style={{marginBottom:10}}>
+                <div style={FIELD_LABEL}>Hours</div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <input type="number" min={0.5} max={hoursInputMax} step={0.5} value={form.hours} onChange={e=>set("hours",Math.min(Number(e.target.value),hoursInputMax))} style={{width:170,padding:"7px 10px",border:"1px solid #CBD5E1",borderRadius:8,fontSize:16,boxSizing:"border-box",outline:"none"}}/>
+                  {tentativeButton}
+                </div>
               </div>
               {autoFillToggle}
               {otherSlotEntry&&maxHours<productiveHours&&<div style={{fontSize:12,color:"#1E293B",marginTop:8}}>Max {maxHours}h left of {selectedStaff?.name}'s {productiveHours}h/day cap</div>}
@@ -4794,7 +4803,7 @@ function EntryModal({data,staff,jobs,subItems,entries,onSave,onSaveRdo,onRemove,
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onClose} disabled={saving}>Cancel</Btn>
           <Btn variant="primary" onClick={handleSave} loading={saving}>
-            {form.entryType==="rdo"?"Save RDO":saving?"Scheduling...":(autoFill&&form.entryType!=="misc"&&form.staffIds.length>1?`Schedule ${form.staffIds.length} staff`:autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save")}
+            {form.entryType==="rdo"?"Save RDO":saving?"Scheduling...":confirmingTentative?"Save & Confirm":(autoFill&&form.entryType!=="misc"&&form.staffIds.length>1?`Schedule ${form.staffIds.length} staff`:autoFill&&preview.length>0&&form.entryType!=="misc"?`Schedule ${preview.length} days`:"Save")}
           </Btn>
         </div>
       </div>

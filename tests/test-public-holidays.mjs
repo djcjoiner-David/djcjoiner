@@ -12,7 +12,7 @@ import { launch, settle, cell, block, drag, button, select, newEntry, rows, staf
 
 const r = reporter('public holidays');
 const D = n => businessDayStr(n);
-const hoursBox = page => page.locator('div:has(> div:text-is("Hours to Deduct from Budget")) input[type=number]');
+const hoursBox = page => page.locator('div:has(> div:text-is("Hours")) input[type=number]');
 const holidayList = [
   { date: D(2), localName: 'Test Day', name: 'Test Day', global: true, counties: null, types: ['Public'] },
   { date: D(4), localName: 'Bank Holiday', name: 'Bank Holiday', global: false, counties: ['AU-NSW'], types: ['Bank'] },

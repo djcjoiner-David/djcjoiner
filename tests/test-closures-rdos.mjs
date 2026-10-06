@@ -8,7 +8,7 @@ import { launch, settle, cell, block, button, newEntry, rows, staff, job, item, 
 
 const r = reporter('closures and RDOs');
 const D = n => businessDayStr(n);
-const hoursBox = page => page.locator('div:has(> div:text-is("Hours to Deduct from Budget")) input[type=number]');
+const hoursBox = page => page.locator('div:has(> div:text-is("Hours")) input[type=number]');
 const headerHas = (page, ds) => page.evaluate(ds => {
   const d = new Date(ds + 'T00:00:00');
   const label = `${d.toLocaleDateString('en-AU', { weekday: 'short' })} ${d.getDate()}`;

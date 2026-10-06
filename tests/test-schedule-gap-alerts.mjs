@@ -27,7 +27,7 @@ async function single(seed, run) { const ctx = await launch(seed); try { await r
 async function startKitchen(page, who = ['Mark'], itemId = 'i1', hours) {
   await newEntry(page, who[0], D(1), 0, { itemId, autoFill: true });
   for (const n of who.slice(1)) await page.locator('label', { hasText: new RegExp(`^\\s*${n}`) }).locator('input[type=checkbox]').check();
-  if (hours) await page.locator('div:has(> div:text-is("Hours to Deduct from Budget")) input[type=number]').fill(String(hours));
+  if (hours) await page.locator('div:has(> div:text-is("Hours")) input[type=number]').fill(String(hours));
   await button(page, /^(Schedule \d+ days?|Schedule \d+ staff)$/).click();
 }
 // Mark busy days 3-4 (his slot 1) -> 2-day break.

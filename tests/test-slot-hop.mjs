@@ -22,7 +22,7 @@ async function schedule(entries, tentative) {
     await settle(db);
     await newEntry(page, 'David 7', W(0), 0, { itemId: 'iW' });
     if (tentative) await button(page, 'Schedule as Tentative').click();
-    await page.locator('div:has(> div:text-is("Hours to Deduct from Budget")) input[type=number]').fill('10');
+    await page.locator('div:has(> div:text-is("Hours")) input[type=number]').fill('10');
     await page.locator('button', { hasText: /^Schedule \d+ days?$/ }).click();
     await sleep(800);
     const gap = await page.locator('text=⚠ Break in schedule').count();
