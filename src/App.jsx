@@ -869,7 +869,7 @@ function Spinner({text="Loading..."}) {
 
 // ── Job Block ─────────────────────────────────────────────────
 
-function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isGenuinePartial,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp,isTentative}) {
+function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,isCompletingEntry,budgetRemaining,totalBudget,selected,selectionMode,isOverRun,isUnderCap,underAmount,isGenuinePartial,isLocked,isMobile,isPastDate,isOvercommitted,itemShortfall,isCatchUp,isTentative,dense}) {
   // An entry the background correction has reduced to nothing (e.g. another
   // staff member now covers the whole day/budget) shouldn't be labelled
   // "over-run" or any other budget-math term - it has zero real hours left,
@@ -905,7 +905,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
       onDragEnd={editable?onDragEnd:undefined}
       onClick={editable?onClick:undefined}
       onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
-      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":isTentative?`repeating-linear-gradient(135deg,${job.bgColor} 0 6px,#fff 6px 12px)`:job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
+      style={{background:conflict?"#FEF2F2":selected?"#DBEAFE":isTentative?`repeating-linear-gradient(135deg,${job.bgColor} 0 6px,#fff 6px 12px)`:job.bgColor,border:conflict?"2px solid #EF4444":selected?"2px solid #3B82F6":`1.5px ${isTentative?"dashed":"solid"} ${job.borderColor}`,borderRadius:5,padding:isMobile?"4px 6px":"2px 5px",minHeight:dense?30:isMobile?48:34,cursor:editable?"pointer":"default",display:"flex",flexDirection:"column",justifyContent:"center",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1,...(isMobile?{}:{overflow:"hidden"})}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {isMobile?(
         <>
@@ -932,7 +932,7 @@ function JobBlock({job,subItem,hours,entry,onClick,onContextMenu,onDragStart,onD
   );
 }
 
-function MiscBlock({note,hours,entry,job,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted}) {
+function MiscBlock({note,hours,entry,job,onClick,onContextMenu,onDragStart,onDragEnd,conflict,canEdit,copyMode,moveMode,selected,selectionMode,isMobile,isPastDate,isOvercommitted,dense}) {
   const editable=canEdit&&!isPastDate;
   // A misc entry tied to a job takes on that job's own colours (like a real
   // job block) so it visually belongs to it - a plain, job-less misc note
@@ -947,7 +947,7 @@ function MiscBlock({note,hours,entry,job,onClick,onContextMenu,onDragStart,onDra
       onDragEnd={editable?onDragEnd:undefined}
       onClick={editable?onClick:undefined}
       onContextMenu={editable&&onContextMenu?onContextMenu:undefined}
-      style={{background:bg,border,borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:editable?"pointer":"default",minHeight:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
+      style={{background:bg,border,borderRadius:5,padding:isMobile?"3px 6px":"2px 5px",cursor:editable?"pointer":"default",minHeight:dense?30:isMobile?38:34,display:"flex",flexDirection:"column",justifyContent:"center",overflow:"hidden",userSelect:"none",position:"relative",opacity:isPastDate?0.45:1}}>
       {conflict&&<div style={{fontSize:9,fontWeight:700,color:"#EF4444",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:1}}>⚠ Conflict</div>}
       {job&&<div style={{fontSize:isMobile?11:9,fontWeight:700,color:textColor,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.3}}>{job.jobNo} {job.name}</div>}
       <div style={{fontSize:isMobile?12:10,fontWeight:400,color:textColor,whiteSpace:"pre-wrap",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden",lineHeight:1.3,maxWidth:"17ch",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{note} · {hours}h</div>
@@ -956,10 +956,10 @@ function MiscBlock({note,hours,entry,job,onClick,onContextMenu,onDragStart,onDra
   );
 }
 
-function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours}) {
+function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours,dense}) {
   // Copy and Move both just arm a plain click-to-target on an empty slot -
   // no special "Paste here" fill, so they look and behave identically.
-  if (isPastDate||!canEdit) return <div style={{minHeight:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
+  if (isPastDate||!canEdit) return <div style={{minHeight:dense?30:34,background:"#F8FAFC",borderRadius:5,border:"1px solid #F1F5F9"}}/>;
   const available=availableHours>0;
   // A job that wrapped up without using this staff member's whole day
   // leaves the day's other slot free - flag that leftover capacity instead
@@ -970,7 +970,7 @@ function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours}) {
   // reverse-engineer each other's efficiency from leftover capacity.
   return (
     <div onClick={onClick}
-      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.3,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
+      style={{border:isDropTarget?"2px dashed #3B82F6":"1.5px dashed #CBD5E1",borderRadius:5,minHeight:dense?30:34,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isDropTarget?"#3B82F6":available?"#334155":"#CBD5E1",fontSize:available?10:16,fontWeight:available?600:400,textAlign:"center",lineHeight:1.3,padding:available?"2px 4px":0,background:available?"#F1F5F9":"transparent",transition:"all 0.12s"}}
       onMouseEnter={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#94A3B8";e.currentTarget.style.color="#94A3B8";}}}
       onMouseLeave={e=>{if(!isDropTarget&&!available){e.currentTarget.style.borderColor="#CBD5E1";e.currentTarget.style.color="#CBD5E1";}}}>
       {isDropTarget?"↓":available?(<><div>Hours</div><div>Available</div></>):"+"}
@@ -982,11 +982,11 @@ function EmptySlot({onClick,isDropTarget,isPastDate,canEdit,availableHours}) {
 // plain grey block, labelled in Slot 1 only (user: just "Public Holiday",
 // not the holiday's name). Still clickable for editors - saving work on it
 // asks first (see askDayOff).
-function DayOffSlot({label,onClick,canEdit,isPastDate}){
+function DayOffSlot({label,onClick,canEdit,isPastDate,dense}){
   const clickable=canEdit&&!isPastDate&&!!onClick;
   return (
     <div onClick={clickable?onClick:undefined}
-      style={{minHeight:34,background:"#E2E8F0",borderRadius:5,border:"1px solid #CBD5E1",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#475569",cursor:clickable?"pointer":"default",userSelect:"none"}}>
+      style={{minHeight:dense?30:34,background:"#E2E8F0",borderRadius:5,border:"1px solid #CBD5E1",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#475569",cursor:clickable?"pointer":"default",userSelect:"none"}}>
       {label}
     </div>
   );
@@ -3695,13 +3695,10 @@ function MainApp({currentUser,onLogout}) {
   const roleColors={admin:"#FEF3C7",manager:"#DBEAFE",staff:"#F0FDF4"};
   const roleTextColors={admin:"#92400E",manager:"#1D4ED8",staff:"#15803D"};
 
-  if(isLandscapePhone) return (
-    <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#0F172A",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:24,textAlign:"center"}}>
-      <div style={{fontSize:40,transform:"rotate(90deg)"}}>📱</div>
-      <div style={{color:"#fff",fontSize:16,fontWeight:600}}>Please rotate your device</div>
-      <div style={{color:"#94A3B8",fontSize:13,maxWidth:280}}>This app is designed for portrait mode on a phone. Turn your phone upright to keep using it.</div>
-    </div>
-  );
+  // Phone on its side (TESTING_NOTES 2F #14, user's request): the app
+  // works in landscape too, with a slim header and toolbar so more people
+  // fit on screen. Desktop and portrait phone are unchanged.
+  const isLand=isLandscapePhone;
 
   if(loading) return (
     <div style={{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#F8FAFC",minHeight:"100vh"}}>
@@ -3718,12 +3715,12 @@ function MainApp({currentUser,onLogout}) {
 
       {/* Header */}
       <div ref={headerRef} style={{background:theme.header,padding:isMobile?"env(safe-area-inset-top, 0px) 24px 0":"0 24px",position:isMobile?"relative":"sticky",top:isMobile?undefined:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.15)",flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:10,paddingBottom:10,flexWrap:"wrap",rowGap:8}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:isLand?3:10,paddingBottom:isLand?3:10,flexWrap:"wrap",rowGap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:isMobile?8:14}}>
-            <img src={logoSrc} alt="Logo" style={{height:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
+            <img src={logoSrc} alt="Logo" style={{height:isLand?22:isMobile?36:48,maxWidth:isMobile?90:130,objectFit:"contain"}}/>
             <div>
-              <div style={{fontSize:isMobile?15:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
-              {isMobile
+              <div style={{fontSize:isLand?13:isMobile?15:20,fontWeight:700,color:theme.heading,lineHeight:1.2}}>{companyName}</div>
+              {isLand?null:isMobile
                 ?<div style={{fontSize:10,color:theme.sub,opacity:0.7,marginTop:2}}>Production Schedule</div>
                 :<div style={{fontSize:11,color:theme.heading,letterSpacing:"2px",textTransform:"uppercase",marginTop:2}}>{companyTagline}</div>}
             </div>
@@ -3787,7 +3784,7 @@ function MainApp({currentUser,onLogout}) {
               </div>
             )}
             {isMobile&&(
-              <button onClick={onLogout} style={{padding:"7px 10px",borderRadius:8,fontSize:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
+              <button onClick={onLogout} style={{padding:isLand?"3px 10px":"7px 10px",borderRadius:8,fontSize:isLand?11:12,cursor:"pointer",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:hexToRgba(theme.sub,0.6)}}>Sign Out</button>
             )}
           </div>
         </div>
@@ -3811,8 +3808,8 @@ function MainApp({currentUser,onLogout}) {
       {tab==="schedule"&&(
         <div style={{padding:"0 16px 16px",position:"relative",zIndex:1}}>
           <div ref={toolbarBlockRef}>
-          <div style={{position:isMobile?"relative":"sticky",top:isMobile?undefined:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isMobile?6:12,paddingBottom:isMobile?4:8,marginBottom:4,flexShrink:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:isMobile?6:12,marginBottom:isMobile?4:8,flexWrap:"wrap"}}>
+          <div style={{position:isMobile?"relative":"sticky",top:isMobile?undefined:headerHeight,zIndex:50,background:"#F8FAFC",paddingTop:isLand?3:isMobile?6:12,paddingBottom:isLand?2:isMobile?4:8,marginBottom:isLand?2:4,flexShrink:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:isMobile?6:12,marginBottom:isLand?0:isMobile?4:8,flexWrap:"wrap"}}>
             <div style={{display:"flex",background:"#E2E8F0",borderRadius:8,padding:3,gap:2}}>
               {[[1,"1 Week"],[2,"2 Weeks"],[3,"3 Weeks"],[4,"4 Weeks"],[5,"5 Weeks"],[6,"6 Weeks"]].map(([v,label])=>(
                 <button key={v} onClick={()=>setViewWeeks(v)}
@@ -4079,17 +4076,17 @@ function MainApp({currentUser,onLogout}) {
                           const blockOnClick=copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):selectionMode?()=>toggleSelectEntry(e.id):()=>openEditEntry(e);
                           const blockOnContextMenu=canEdit?ev=>openContextMenu(ev,e):undefined;
                           if(e.miscNote){
-                            return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} job={eJob} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
+                            return <MiscBlock note={e.miscNote} hours={e.hours} entry={e} job={eJob} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isMobile={isMobile&&!isLand} dense={isLand} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted}/>;
                           }
                           if(!eJob){
-                            return <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
+                            return <EmptySlot dense={isLand} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):()=>openNewEntry(st.id,ds,slot)} isPastDate={isPast(ds)} canEdit={canEdit}/>;
                           }
                           const meta=computeJobEntryMeta(e)||{};
-                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isGenuinePartial={meta.isGenuinePartial} isLocked={meta.isLocked} isMobile={isMobile} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp} isTentative={!!e.isTentative}/>;
+                          return <JobBlock job={eJob} subItem={eSubItem} hours={e.hours} productiveHours={st.productiveHours} entry={e} conflict={forceConflict} onClick={blockOnClick} onContextMenu={blockOnContextMenu} onDragStart={handleDragStart} onDragEnd={handleDragEnd} canEdit={canEdit} copyMode={copyMode} moveMode={moveMode} isCompletingEntry={meta.isCompletingEntry} budgetRemaining={meta.budgetRemaining} totalBudget={meta.totalBudget} selected={selectedEntries.has(e.id)} selectionMode={selectionMode} isOverRun={meta.isOverRun} isUnderCap={meta.isUnderCap} underAmount={meta.underAmount} isGenuinePartial={meta.isGenuinePartial} isLocked={meta.isLocked} isMobile={isMobile&&!isLand} dense={isLand} isPastDate={isPast(ds)} isOvercommitted={eIsOvercommitted} itemShortfall={meta.itemShortfall} isCatchUp={!!e.isCatchUp} isTentative={!!e.isTentative}/>;
                         }
                         return(
                           <td key={di}
-                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
+                            style={{border:"1px solid #E2E8F0",borderLeft:isWeekBound?"2px solid #94A3B8":"1px solid #E2E8F0",borderBottom:slot===1?"3px solid #94A3B8":"1px solid #E2E8F0",padding:isLand?1:2,verticalAlign:"top",background:isToday?"rgba(219,234,254,0.18)":isSat?"#F1F5F9":si%2===0?"#fff":"#FAFAFA",minWidth:isMobile?100:undefined}}
                             onDragOver={e=>handleDragOver(e,st.id,ds,slot)}
                             onDragLeave={handleDragLeave}
                             onDrop={e=>handleDrop(e,st.id,ds,slot)}>
@@ -4102,8 +4099,8 @@ function MainApp({currentUser,onLogout}) {
                                   </div>
                                 : renderEntryBlock(entry,overMaxDays.has(`${st.id}|${ds}`))
                               : isDayOff(ds,st.id)&&!isDrop
-                                ? <DayOffSlot label={slot===0?dayOffLabel(ds,st.id):""} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isRdoFor(ds,st.id)?()=>askRemoveRdo(st.id,ds):()=>openNewEntry(st.id,ds,slot)} canEdit={canEdit} isPastDate={isPast(ds)}/>
-                              : <EmptySlot onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} availableHours={availableHours}/>
+                                ? <DayOffSlot dense={isLand} label={slot===0?dayOffLabel(ds,st.id):""} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isRdoFor(ds,st.id)?()=>askRemoveRdo(st.id,ds):()=>openNewEntry(st.id,ds,slot)} canEdit={canEdit} isPastDate={isPast(ds)}/>
+                              : <EmptySlot dense={isLand} onClick={copyMode&&moveAnchor?()=>performGroupCopy(moveAnchor,st.id,ds,slot):moveMode&&moveAnchor?()=>performGroupMove(moveAnchor,st.id,ds,slot):isSat?undefined:()=>openNewEntry(st.id,ds,slot)} isDropTarget={isDrop} isPastDate={isPast(ds)} canEdit={canEdit} availableHours={availableHours}/>
                             }
                           </td>
                         );
